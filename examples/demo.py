@@ -10,7 +10,6 @@ from growthevo.models import (
 )
 from growthevo.rl.ope import LoggedBanditRecord, evaluate_policy
 from growthevo.runtime.engine import GrowthEvoRuntime
-from growthevo.verifier.counterfactual import CounterfactualVerifier
 
 
 def main() -> None:
@@ -53,8 +52,9 @@ def main() -> None:
     print(to_primitive(result))
     print("event_chain_valid:", runtime.event_store.verify())
 
-    # A small logged-bandit cohort demonstrates the promotion path. Runtime
-    # execution and policy promotion are deliberately separate concerns.
+    # A small logged-bandit cohort demonstrates the promotion path. Interaction
+    # execution and cohort policy promotion remain separate phases, while both
+    # are persisted into the same event stream.
     records = [
         LoggedBanditRecord(
             reward=1.0 if index % 3 == 0 else 0.0,
@@ -77,11 +77,13 @@ def main() -> None:
         fatigue=0.31,
         churn_risk=0.20,
     )
-    verification = CounterfactualVerifier().verify(evidence, constraints)
+    verification = runtime.verify_candidate(evidence, constraints)
 
     print("\n=== Counterfactual policy gate ===")
     print("ope:", to_primitive(ope))
     print("verification:", to_primitive(verification))
+    print("event_count_after_verification:", len(runtime.event_store))
+    print("event_chain_valid:", runtime.event_store.verify())
 
 
 if __name__ == "__main__":
