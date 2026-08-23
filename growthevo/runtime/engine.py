@@ -5,10 +5,13 @@ from growthevo.evolution.optimizer import HarnessEvolver
 from growthevo.models import (
     EventType,
     GrowthAction,
+    GrowthConstraints,
     GrowthGoal,
     GrowthOption,
+    PolicyEvidence,
     RuntimeResult,
     UserObservation,
+    VerificationResult,
 )
 from growthevo.rl.causal_reward import CausalRewardModel
 from growthevo.rl.hierarchical_policy import HierarchicalGrowthPolicy
@@ -17,10 +20,11 @@ from growthevo.runtime.event_store import EventStore
 from growthevo.runtime.legal_action import LegalActionGate
 from growthevo.runtime.planner import GrowthHypothesisPlanner
 from growthevo.simulator.user_world_model import UserWorldModel
+from growthevo.verifier.counterfactual import CounterfactualVerifier
 
 
 class GrowthEvoRuntime:
-    """Reference end-to-end harness for one autonomous growth decision."""
+    """Reference harness for interaction execution and cohort policy verification."""
 
     def __init__(
         self,
@@ -31,6 +35,7 @@ class GrowthEvoRuntime:
         legal_gate: LegalActionGate | None = None,
         world_model: UserWorldModel | None = None,
         reward_model: CausalRewardModel | None = None,
+        verifier: CounterfactualVerifier | None = None,
         failure_miner: FailureMiner | None = None,
         evolver: HarnessEvolver | None = None,
     ) -> None:
@@ -40,10 +45,18 @@ class GrowthEvoRuntime:
         self.legal_gate = legal_gate or LegalActionGate()
         self.world_model = world_model or UserWorldModel()
         self.reward_model = reward_model or CausalRewardModel()
+        self.verifier = verifier or CounterfactualVerifier()
         self.failure_miner = failure_miner or FailureMiner()
         self.evolver = evolver or HarnessEvolver()
 
     def run(self, goal: GrowthGoal, observation: UserObservation) -> RuntimeResult:
+        """Execute one user-level decision.
+
+        This method does not pretend that one interaction is enough to promote a
+        policy. Cohort-level evidence is evaluated separately by
+        :meth:`verify_candidate`, but both phases share the same event stream.
+        """
+
         self.event_store.append(EventType.GOAL_COMPILED, {"goal": goal})
 
         belief = build_causal_belief(observation)
@@ -84,8 +97,7 @@ class GrowthEvoRuntime:
         reward = self.reward_model.compute(belief, action, feedback)
         self.event_store.append(EventType.REWARD_ASSIGNED, {"reward": reward})
 
-        if not self.event_store.verify():
-            raise RuntimeError("event chain integrity verification failed")
+        self._assert_event_integrity()
 
         return RuntimeResult(
             belief=belief,
@@ -94,3 +106,29 @@ class GrowthEvoRuntime:
             reward=reward,
             event_count=len(self.event_store),
         )
+
+    def verify_candidate(
+        self,
+        evidence: PolicyEvidence,
+        constraints: GrowthConstraints,
+    ) -> VerificationResult:
+        """Verify cohort-level candidate-policy evidence and persist the result."""
+
+        result = self.verifier.verify(evidence, constraints)
+        self.event_store.append(
+            EventType.VERIFICATION_COMPLETED,
+            {"evidence": evidence, "result": result},
+        )
+
+        failure = self.failure_miner.from_verification(result)
+        if failure is not None:
+            self.event_store.append(EventType.FAILURE_CLASSIFIED, {"failure": failure})
+            patch = self.evolver.propose(failure)
+            self.event_store.append(EventType.PATCH_PROPOSED, {"patch": patch})
+
+        self._assert_event_integrity()
+        return result
+
+    def _assert_event_integrity(self) -> None:
+        if not self.event_store.verify():
+            raise RuntimeError("event chain integrity verification failed")
