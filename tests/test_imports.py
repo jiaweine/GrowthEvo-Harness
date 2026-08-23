@@ -19,3 +19,19 @@ def test_evolution_submodule_imports_without_runtime_cycle() -> None:
     from growthevo.evolution.optimizer import HarnessEvolver
 
     assert HarnessEvolver is not None
+
+
+def test_frontier_rl_exports_import_without_cycles() -> None:
+    from growthevo.rl import (
+        ConformalPolicyCalibrator,
+        GrowthProcessRewardModel,
+        RiskSensitiveMPC,
+        evaluate_policy,
+        policy_evidence_from_ope,
+    )
+
+    assert ConformalPolicyCalibrator is not None
+    assert GrowthProcessRewardModel is not None
+    assert RiskSensitiveMPC is not None
+    assert evaluate_policy is not None
+    assert policy_evidence_from_ope is not None
