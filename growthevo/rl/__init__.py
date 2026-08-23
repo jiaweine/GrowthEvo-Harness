@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "ActionValueEstimate",
     "CausalRewardModel",
     "CandidateRolloutScore",
     "ConformalCalibrationRecord",
@@ -15,10 +16,13 @@ __all__ = [
     "LoggedBanditRecord",
     "OPEEstimate",
     "PolicyConfig",
+    "PolicyImprovementResult",
     "ProcessState",
     "RewardWeights",
     "RiskSensitiveMPC",
+    "SafePolicyImprovementConfig",
     "StressScenario",
+    "SupportAnchoredPolicyImprover",
     "TrajectoryStepSignal",
     "evaluate_policy",
     "policy_evidence_from_ope",
@@ -69,5 +73,24 @@ def __getattr__(name: str) -> Any:
             "CandidateRolloutScore": CandidateRolloutScore,
             "RiskSensitiveMPC": RiskSensitiveMPC,
             "StressScenario": StressScenario,
+        }[name]
+    if name in {
+        "ActionValueEstimate",
+        "PolicyImprovementResult",
+        "SafePolicyImprovementConfig",
+        "SupportAnchoredPolicyImprover",
+    }:
+        from .safe_policy_improvement import (
+            ActionValueEstimate,
+            PolicyImprovementResult,
+            SafePolicyImprovementConfig,
+            SupportAnchoredPolicyImprover,
+        )
+
+        return {
+            "ActionValueEstimate": ActionValueEstimate,
+            "PolicyImprovementResult": PolicyImprovementResult,
+            "SafePolicyImprovementConfig": SafePolicyImprovementConfig,
+            "SupportAnchoredPolicyImprover": SupportAnchoredPolicyImprover,
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
