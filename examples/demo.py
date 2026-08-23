@@ -4,11 +4,12 @@ from growthevo.models import (
     Channel,
     GrowthConstraints,
     GrowthGoal,
-    PolicyEvidence,
     UserObservation,
     to_primitive,
 )
-from growthevo.rl.ope import LoggedBanditRecord, evaluate_policy
+from growthevo.rl.conformal import ConformalCalibrationRecord, ConformalPolicyCalibrator
+from growthevo.rl.ope import LoggedBanditRecord, evaluate_policy, policy_evidence_from_ope
+from growthevo.rl.process_reward import ProcessState, TrajectoryStepSignal
 from growthevo.runtime.engine import GrowthEvoRuntime
 
 
@@ -52,9 +53,32 @@ def main() -> None:
     print(to_primitive(result))
     print("event_chain_valid:", runtime.event_store.verify())
 
-    # A small logged-bandit cohort demonstrates the promotion path. Interaction
-    # execution and cohort policy promotion remain separate phases, while both
-    # are persisted into the same event stream.
+    # GrowthPRM demonstrates planner/tool step credit grounded in verifier-readable
+    # progress and the observation produced by the environment.
+    trajectory_reward = runtime.score_planner_trajectory(
+        [
+            TrajectoryStepSignal(
+                step_id="segment-evidence",
+                before=ProcessState(0.10, 0.20, 0.80),
+                after=ProcessState(0.25, 0.45, 0.80),
+                action_entropy=0.20,
+                tool_success=True,
+                direct_cost=0.01,
+            ),
+            TrajectoryStepSignal(
+                step_id="uplift-evidence",
+                before=ProcessState(0.25, 0.45, 0.80),
+                after=ProcessState(0.50, 0.70, 0.75),
+                action_entropy=0.15,
+                tool_success=True,
+                direct_cost=0.02,
+            ),
+        ],
+        terminal_outcome=0.20,
+    )
+
+    # Logged-bandit evaluation uses beta*-IPS diagnostics and compiles overlap
+    # information into the promotion evidence contract.
     records = [
         LoggedBanditRecord(
             reward=1.0 if index % 3 == 0 else 0.0,
@@ -66,21 +90,39 @@ def main() -> None:
         for index in range(80)
     ]
     ope = evaluate_policy(records)
-    evidence = PolicyEvidence(
-        candidate_value=ope.doubly_robust,
-        baseline_value=0.25,
-        standard_error=0.02,
-        sample_size=ope.sample_size,
-        effective_sample_size=ope.effective_sample_size,
+    evidence = policy_evidence_from_ope(
+        ope,
+        baseline_value=0.15,
         roi=2.2,
         spend=68.0,
         fatigue=0.31,
         churn_risk=0.20,
     )
-    verification = runtime.verify_candidate(evidence, constraints)
 
+    # Matured shadow cohorts calibrate one-sided value and risk margins. This
+    # example uses small deterministic residuals for a readable smoke test.
+    conformal = ConformalPolicyCalibrator(min_calibration_size=30).fit(
+        ConformalCalibrationRecord(
+            predicted_value_delta=0.20,
+            observed_value_delta=0.19,
+            predicted_roi=2.20,
+            observed_roi=2.15,
+            predicted_spend=68.0,
+            observed_spend=69.0,
+            predicted_fatigue=0.31,
+            observed_fatigue=0.32,
+            predicted_churn_risk=0.20,
+            observed_churn_risk=0.21,
+        )
+        for _ in range(30)
+    )
+    verification = runtime.verify_candidate(evidence, constraints, conformal=conformal)
+
+    print("\n=== Growth process reward ===")
+    print(to_primitive(trajectory_reward))
     print("\n=== Counterfactual policy gate ===")
     print("ope:", to_primitive(ope))
+    print("conformal:", to_primitive(conformal))
     print("verification:", to_primitive(verification))
     print("event_count_after_verification:", len(runtime.event_store))
     print("event_chain_valid:", runtime.event_store.verify())
