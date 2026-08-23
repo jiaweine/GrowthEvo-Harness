@@ -33,6 +33,8 @@ class EventType(str, Enum):
     ACTION_BLOCKED = "action_blocked"
     FEEDBACK_OBSERVED = "feedback_observed"
     REWARD_ASSIGNED = "reward_assigned"
+    PROCESS_REWARD_ASSIGNED = "process_reward_assigned"
+    ROLLOUT_EVALUATED = "rollout_evaluated"
     VERIFICATION_COMPLETED = "verification_completed"
     FAILURE_CLASSIFIED = "failure_classified"
     PATCH_PROPOSED = "patch_proposed"
@@ -229,6 +231,24 @@ class PolicyEvidence:
     spend: float
     fatigue: float
     churn_risk: float
+    support_coverage: float = 1.0
+    max_importance_weight: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.sample_size < 0:
+            raise ValueError("sample_size must be non-negative")
+        if self.effective_sample_size < 0:
+            raise ValueError("effective_sample_size must be non-negative")
+        if not 0 <= self.support_coverage <= 1:
+            raise ValueError("support_coverage must be in [0, 1]")
+        if self.max_importance_weight < 0:
+            raise ValueError("max_importance_weight must be non-negative")
+
+    @property
+    def effective_sample_ratio(self) -> float:
+        if self.sample_size == 0:
+            return 0.0
+        return min(1.0, self.effective_sample_size / self.sample_size)
 
 
 @dataclass(frozen=True, slots=True)
