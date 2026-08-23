@@ -109,6 +109,36 @@ def test_ope_reports_practical_support_gap() -> None:
     assert estimate.max_importance_weight == pytest.approx(5000.0)
 
 
+def test_conformal_margins_are_residual_margins_not_absolute_bounds() -> None:
+    calibration = ConformalPolicyCalibrator(alpha=0.05, min_calibration_size=30).fit(
+        ConformalCalibrationRecord(
+            predicted_value_delta=0.20,
+            observed_value_delta=0.15,
+            predicted_roi=2.0,
+            observed_roi=1.8,
+            predicted_spend=50.0,
+            observed_spend=55.0,
+            predicted_fatigue=0.30,
+            observed_fatigue=0.35,
+            predicted_churn_risk=0.20,
+            observed_churn_risk=0.24,
+        )
+        for _ in range(30)
+    )
+
+    assert calibration.value_lower_margin == pytest.approx(0.05)
+    assert calibration.roi_lower_margin == pytest.approx(0.20)
+    assert calibration.spend_upper_margin == pytest.approx(5.0)
+    assert calibration.fatigue_upper_margin == pytest.approx(0.05)
+    assert calibration.churn_risk_upper_margin == pytest.approx(0.04)
+
+    assert calibration.value_lcb(0.20) == pytest.approx(0.15)
+    assert calibration.roi_lcb(2.0) == pytest.approx(1.8)
+    assert calibration.spend_ucb(50.0) == pytest.approx(55.0)
+    assert calibration.fatigue_ucb(0.30) == pytest.approx(0.35)
+    assert calibration.churn_risk_ucb(0.20) == pytest.approx(0.24)
+
+
 def test_conformal_gate_can_block_statistically_positive_candidate() -> None:
     calibration = ConformalPolicyCalibrator(alpha=0.05, min_calibration_size=30).fit(
         ConformalCalibrationRecord(
