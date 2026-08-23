@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Iterable
+
 from growthevo.evolution.failure_miner import FailureMiner
 from growthevo.evolution.optimizer import HarnessEvolver
 from growthevo.models import (
@@ -14,7 +16,13 @@ from growthevo.models import (
     VerificationResult,
 )
 from growthevo.rl.causal_reward import CausalRewardModel
+from growthevo.rl.conformal import ConformalMargins
 from growthevo.rl.hierarchical_policy import HierarchicalGrowthPolicy
+from growthevo.rl.process_reward import (
+    GrowthProcessRewardModel,
+    TrajectoryReward,
+    TrajectoryStepSignal,
+)
 from growthevo.runtime.belief_state import build_causal_belief
 from growthevo.runtime.event_store import EventStore
 from growthevo.runtime.legal_action import LegalActionGate
@@ -35,6 +43,7 @@ class GrowthEvoRuntime:
         legal_gate: LegalActionGate | None = None,
         world_model: UserWorldModel | None = None,
         reward_model: CausalRewardModel | None = None,
+        process_reward_model: GrowthProcessRewardModel | None = None,
         verifier: CounterfactualVerifier | None = None,
         failure_miner: FailureMiner | None = None,
         evolver: HarnessEvolver | None = None,
@@ -45,6 +54,7 @@ class GrowthEvoRuntime:
         self.legal_gate = legal_gate or LegalActionGate()
         self.world_model = world_model or UserWorldModel()
         self.reward_model = reward_model or CausalRewardModel()
+        self.process_reward_model = process_reward_model or GrowthProcessRewardModel()
         self.verifier = verifier or CounterfactualVerifier()
         self.failure_miner = failure_miner or FailureMiner()
         self.evolver = evolver or HarnessEvolver()
@@ -107,17 +117,42 @@ class GrowthEvoRuntime:
             event_count=len(self.event_store),
         )
 
+    def score_planner_trajectory(
+        self,
+        signals: Iterable[TrajectoryStepSignal],
+        *,
+        terminal_outcome: float = 0.0,
+    ) -> TrajectoryReward:
+        """Assign step-level planner credit and persist it beside execution facts."""
+
+        reward = self.process_reward_model.score_trajectory(
+            signals,
+            terminal_outcome=terminal_outcome,
+        )
+        self.event_store.append(
+            EventType.PROCESS_REWARD_ASSIGNED,
+            {"trajectory_reward": reward},
+        )
+        self._assert_event_integrity()
+        return reward
+
     def verify_candidate(
         self,
         evidence: PolicyEvidence,
         constraints: GrowthConstraints,
+        *,
+        conformal: ConformalMargins | None = None,
     ) -> VerificationResult:
         """Verify cohort-level candidate-policy evidence and persist the result."""
 
-        result = self.verifier.verify(evidence, constraints)
+        result = self.verifier.verify(evidence, constraints, conformal=conformal)
         self.event_store.append(
             EventType.VERIFICATION_COMPLETED,
-            {"evidence": evidence, "result": result},
+            {
+                "evidence": evidence,
+                "conformal": conformal,
+                "result": result,
+            },
         )
 
         failure = self.failure_miner.from_verification(result)
