@@ -14,7 +14,6 @@ def _clip(value: float, low: float = 0.0, high: float = 1.0) -> float:
 class WorldModelConfig:
     fatigue_uplift_penalty: float = 0.25
     touch_fatigue_step: float = 0.08
-    offer_cost_rate: float = 0.10
     churn_fatigue_scale: float = 0.05
     retention_uplift_scale: float = 0.20
 
@@ -25,6 +24,10 @@ class UserWorldModel:
     The model outputs both treatment and baseline probabilities. This makes the
     simulator useful for runtime integration without pretending that a sampled
     conversion itself is causal evidence.
+
+    ``GrowthAction.budget`` is treated as the action's complete expected direct
+    cost. Offer economics must be compiled into that budget by the policy layer;
+    the world model therefore never charges offer value a second time.
     """
 
     def __init__(self, seed: int = 7, config: WorldModelConfig | None = None) -> None:
@@ -57,7 +60,7 @@ class UserWorldModel:
 
         incremental_conversion = treatment_prob - baseline
         gross_incremental_ltv = incremental_conversion * belief.ltv
-        direct_cost = action.budget + cfg.offer_cost_rate * action.offer_value
+        direct_cost = action.budget
         incremental_ltv = gross_incremental_ltv
         fatigue_delta = cfg.touch_fatigue_step * action.frequency_cost
         churn_risk_delta = max(0.0, belief.fatigue + fatigue_delta - 0.70) * cfg.churn_fatigue_scale
