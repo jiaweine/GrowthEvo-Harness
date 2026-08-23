@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import pytest
 
+from growthevo.bench import GrowthAgentBench
 from growthevo.bench.synthetic import evaluate_cate, make_synthetic_growth_bandit
 from growthevo.causal.dr_learner import CrossFittedDRLearner
-from growthevo.models import Channel
+from growthevo.causal.serving import CausalUpliftServingBridge
+from growthevo.models import Channel, UserObservation
 from growthevo.rl.safe_policy_improvement import (
     ActionValueEstimate,
     SafePolicyImprovementConfig,
@@ -43,6 +45,48 @@ def test_cate_uncertainty_increases_outside_training_support() -> None:
     assert extrapolated.extrapolation_distance > 0
     assert extrapolated.uncertainty > in_support.uncertainty
     assert extrapolated.support_score < in_support.support_score
+
+
+def test_causal_serving_bridge_enriches_runtime_observation() -> None:
+    bench = GrowthAgentBench.synthetic(900, seed=23, outcome_noise=0.01)
+    push, _ = bench.fit_cate(treatment=Channel.PUSH)
+    email, _ = bench.fit_cate(treatment=Channel.EMAIL)
+    bridge = CausalUpliftServingBridge({Channel.PUSH: push, Channel.EMAIL: email})
+    observation = UserObservation(
+        user_id="serve-u1",
+        natural_conversion=0.2,
+        channel_uplift={Channel.PUSH: 0.0},
+        uplift_uncertainty=1.0,
+        ltv=100.0,
+        consented_channels=frozenset({Channel.PUSH, Channel.EMAIL}),
+    )
+
+    enriched, prediction = bridge.enrich_observation(observation, (0.0, 0.0))
+
+    assert enriched.channel_uplift[Channel.PUSH] == pytest.approx(0.08, abs=0.03)
+    assert enriched.channel_uplift[Channel.EMAIL] == pytest.approx(0.045, abs=0.03)
+    assert enriched.uplift_uncertainty == pytest.approx(prediction.aggregate_uncertainty)
+    assert prediction.minimum_support > 0.90
+
+
+def test_growth_agent_bench_reports_low_regret_for_learned_cate_policy() -> None:
+    bench = GrowthAgentBench.synthetic(1200, seed=31, outcome_noise=0.015)
+    push, push_metric = bench.fit_cate(treatment=Channel.PUSH)
+    email, email_metric = bench.fit_cate(treatment=Channel.EMAIL)
+
+    def policy(features: tuple[float, ...]) -> Channel:
+        values = {
+            Channel.NO_TREATMENT: 0.0,
+            Channel.PUSH: push.predict(features).effect,
+            Channel.EMAIL: email.predict(features).effect,
+        }
+        return max(values, key=lambda action: (values[action], action.value))
+
+    result = bench.evaluate_policy(policy)
+
+    assert push_metric.rmse < 0.03
+    assert email_metric.rmse < 0.03
+    assert result.regret < 0.015
 
 
 def _policy_estimates() -> list[ActionValueEstimate]:
