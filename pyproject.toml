@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "growthevo-harness"
+version = "0.1.0"
+description = "Causal reinforcement learning runtime for autonomous user growth agents"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "GrowthEvo contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["growthevo*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+branch = true
+source = ["growthevo"]
