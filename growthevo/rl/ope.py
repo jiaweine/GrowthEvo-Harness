@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import fsum, sqrt
-from typing import Iterable
+from typing import Iterable, Literal
+
+from growthevo.models import PolicyEvidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,4 +156,47 @@ def evaluate_policy(
         max_importance_weight=max(weights),
         weight_coefficient_of_variation=weight_cv,
         sample_size=n,
+    )
+
+
+def policy_evidence_from_ope(
+    estimate: OPEEstimate,
+    *,
+    baseline_value: float,
+    roi: float,
+    spend: float,
+    fatigue: float,
+    churn_risk: float,
+    estimator: Literal["beta_ips", "doubly_robust", "ips"] = "beta_ips",
+) -> PolicyEvidence:
+    """Compile OPE output into the verifier's evidence contract.
+
+    ``beta_ips`` is the default for value estimation in v0.2, but DR and plain
+    IPS remain explicit choices for ablations and robustness checks.
+    """
+
+    if estimator == "beta_ips":
+        value = estimate.beta_ips
+        standard_error = estimate.beta_ips_standard_error
+    elif estimator == "doubly_robust":
+        value = estimate.doubly_robust
+        standard_error = estimate.dr_standard_error
+    elif estimator == "ips":
+        value = estimate.ips
+        standard_error = estimate.ips_standard_error
+    else:  # pragma: no cover - Literal protects typed callers.
+        raise ValueError(f"unsupported estimator: {estimator}")
+
+    return PolicyEvidence(
+        candidate_value=value,
+        baseline_value=baseline_value,
+        standard_error=standard_error,
+        sample_size=estimate.sample_size,
+        effective_sample_size=estimate.effective_sample_size,
+        roi=roi,
+        spend=spend,
+        fatigue=fatigue,
+        churn_risk=churn_risk,
+        support_coverage=estimate.support_coverage,
+        max_importance_weight=estimate.max_importance_weight,
     )
