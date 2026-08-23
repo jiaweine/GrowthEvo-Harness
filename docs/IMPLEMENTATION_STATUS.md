@@ -1,6 +1,6 @@
 # GrowthEvo-Harness · Implementation Status
 
-This repository is presented as one coherent initial implementation. It does not use staged project labels such as v1/v2 to describe the architecture.
+This repository is presented as one coherent initial implementation. Project architecture is not described through staged v1/v2 labels.
 
 ## Implemented
 
@@ -13,7 +13,17 @@ This repository is presented as one coherent initial implementation. It does not
 - Append-only hash-chained Event Store.
 - Failure classification and bounded Harness patch proposals.
 
-### Causal evaluation and policy safety
+### Causal learning and serving
+
+- Logged multi-action treatment records with full logging-policy propensity vectors.
+- Cross-fitted one-vs-control Doubly-Robust learner using out-of-fold AIPW pseudo-outcomes.
+- Treatment-vs-control propensity renormalization for multi-action logs.
+- Dependency-free ridge nuisance/effect models as an auditable reference backend.
+- Residual + extrapolation uncertainty diagnostics and explicit overlap coverage.
+- CATE serving bridge from fitted treatment-effect models into Runtime `UserObservation` uplift beliefs.
+- Low-support uncertainty inflation instead of silently converting unsupported estimates into confident zero uplift.
+
+### Offline policy evaluation and policy safety
 
 - IPS, Doubly-Robust and estimated β*-IPS off-policy evaluation.
 - Estimator-specific standard errors.
@@ -22,13 +32,28 @@ This repository is presented as one coherent initial implementation. It does not
 - Split-conformal one-sided residual margins for value, ROI, spend, fatigue and churn risk.
 - Counterfactual Verifier with `PASS / FAIL / INSUFFICIENT_EVIDENCE` semantics.
 - Conservative intersection of statistical and calibrated value bounds.
+- Support-anchored conservative policy improvement for discrete growth actions.
+- Pessimistic value lower bounds, behavior-policy anchoring, total-variation update caps and expected-cost caps.
+- `NO_TREATMENT` safe fallback when the logged behavior policy itself violates a configured hard cost limit.
 
-### Agentic credit assignment
+### Agentic credit assignment and training export
 
 - GrowthPRM potential-based progress over Goal / Evidence / Constraint state.
 - Observation-grounded credit using preceding action confidence.
 - Explicit penalties for failed tools, duplicate evidence, direct cost and irreversible side effects.
 - Process reward persistence in the same event stream as outcome reward and policy verification.
+- Backend-neutral planner transition contract containing observation, action, legal-action flag and tool-success state.
+- Generalized Advantage Estimation for planner trajectories.
+- Dynamics-aware `credit_boundary` that stops advantage leakage across rollback/reset/segment/delayed-outcome boundaries.
+- Stable JSONL / record export for external PPO/GRPO/Agent-RL training services.
+
+### GrowthAgentBench research fixtures
+
+- Reproducible contextual logged-bandit generator with known heterogeneous treatment effects.
+- Context-dependent behavior propensities and explicit oracle potential outcomes.
+- Held-out CATE RMSE / MAE / bias / support / uncertainty metrics.
+- Oracle policy-value and regret evaluation.
+- Synthetic benchmark is explicitly separated from deployment evidence.
 
 ### Long-horizon model-based safety
 
@@ -42,10 +67,11 @@ This repository is presented as one coherent initial implementation. It does not
 
 The repository does not claim any of the following until reproducible code and evaluation are present:
 
-- trained production IQL/CQL/CPO/GRPO policies;
+- production neural IQL/CQL/CPO/GRPO policies;
 - reproduced DARA/LBM training algorithms;
 - learned neural user-world models;
 - calibrated CATE on a real GrowthEvo dataset;
+- Open Bandit Dataset / Criteo benchmark numbers;
 - real online A/B uplift;
 - production ad-auction latency;
 - full Agent Lightning / verl trainer integration;
@@ -54,12 +80,12 @@ The repository does not claim any of the following until reproducible code and e
 
 ## Next engineering work
 
-- Open Bandit Dataset / Criteo uplift adapters.
-- CATE / uplift backend with calibrated uncertainty.
-- Offline constrained-RL trainer adapters.
-- Agent-RL planner training from real Harness trajectories and GrowthPRM rewards.
+- Open Bandit Dataset / Criteo uplift adapters with schema and propensity validation.
+- Pluggable nonlinear CATE backends through CausalML / EconML / neural uplift models.
+- Sequential offline-RL adapters for IQL/CQL with support-constrained action serving.
+- External planner post-training through verl / Agent-Lightning-style execution-training separation.
 - World-model calibration and rollout-error diagnostics.
-- Sequential replay → OPE → calibrated gate → shadow → canary → rollback evaluation.
-- GrowthAgentBench with reproducible experiment reports.
+- Anytime-valid / sequential replay → OPE → calibrated gate → shadow → canary → rollback evaluation.
+- Reproducible experiment reports generated from GrowthAgentBench and public datasets.
 
 The rule for adding project claims is simple: **code first, reproducible evidence second, README result last.**
