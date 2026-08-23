@@ -7,11 +7,14 @@ from .dr_learner import (
     LoggedTreatmentRecord,
     RidgeRegressor,
 )
+from .serving import CausalUpliftServingBridge, UpliftServingPrediction
 
 __all__ = [
     "CATEEstimate",
+    "CausalUpliftServingBridge",
     "CrossFittedDRLearner",
     "FittedTreatmentEffect",
     "LoggedTreatmentRecord",
     "RidgeRegressor",
+    "UpliftServingPrediction",
 ]
