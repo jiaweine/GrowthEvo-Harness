@@ -30,28 +30,35 @@ class ConformalCalibrationRecord:
 
 @dataclass(frozen=True, slots=True)
 class ConformalMargins:
+    """One-sided non-negative error margins, not absolute metric bounds.
+
+    Naming these fields as margins prevents a subtle but important ambiguity:
+    the fitted values are quantiles of prediction residuals. They become lower
+    or upper bounds only after being applied to a new prediction.
+    """
+
     alpha: float
     calibration_size: int
-    value_lower: float
-    roi_lower: float
-    spend_upper: float
-    fatigue_upper: float
-    churn_risk_upper: float
+    value_lower_margin: float
+    roi_lower_margin: float
+    spend_upper_margin: float
+    fatigue_upper_margin: float
+    churn_risk_upper_margin: float
 
     def value_lcb(self, predicted_delta: float) -> float:
-        return predicted_delta - self.value_lower
+        return predicted_delta - self.value_lower_margin
 
     def roi_lcb(self, predicted_roi: float) -> float:
-        return predicted_roi - self.roi_lower
+        return predicted_roi - self.roi_lower_margin
 
     def spend_ucb(self, predicted_spend: float) -> float:
-        return predicted_spend + self.spend_upper
+        return predicted_spend + self.spend_upper_margin
 
     def fatigue_ucb(self, predicted_fatigue: float) -> float:
-        return predicted_fatigue + self.fatigue_upper
+        return predicted_fatigue + self.fatigue_upper_margin
 
     def churn_risk_ucb(self, predicted_churn_risk: float) -> float:
-        return predicted_churn_risk + self.churn_risk_upper
+        return predicted_churn_risk + self.churn_risk_upper_margin
 
 
 def _conservative_quantile(residuals: list[float], alpha: float) -> float:
@@ -70,7 +77,7 @@ def _conservative_quantile(residuals: list[float], alpha: float) -> float:
 
 
 class ConformalPolicyCalibrator:
-    """Calibrate value and constraint predictions from matured shadow cohorts."""
+    """Calibrate value and constraint prediction errors from matured cohorts."""
 
     def __init__(self, alpha: float = 0.05, min_calibration_size: int = 30) -> None:
         if not 0 < alpha < 1:
@@ -104,9 +111,9 @@ class ConformalPolicyCalibrator:
         return ConformalMargins(
             alpha=self.alpha,
             calibration_size=len(rows),
-            value_lower=_conservative_quantile(value_residuals, self.alpha),
-            roi_lower=_conservative_quantile(roi_residuals, self.alpha),
-            spend_upper=_conservative_quantile(spend_residuals, self.alpha),
-            fatigue_upper=_conservative_quantile(fatigue_residuals, self.alpha),
-            churn_risk_upper=_conservative_quantile(churn_residuals, self.alpha),
+            value_lower_margin=_conservative_quantile(value_residuals, self.alpha),
+            roi_lower_margin=_conservative_quantile(roi_residuals, self.alpha),
+            spend_upper_margin=_conservative_quantile(spend_residuals, self.alpha),
+            fatigue_upper_margin=_conservative_quantile(fatigue_residuals, self.alpha),
+            churn_risk_upper_margin=_conservative_quantile(churn_residuals, self.alpha),
         )
