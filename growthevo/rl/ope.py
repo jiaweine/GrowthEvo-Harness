@@ -171,8 +171,8 @@ def policy_evidence_from_ope(
 ) -> PolicyEvidence:
     """Compile OPE output into the verifier's evidence contract.
 
-    ``beta_ips`` is the default for value estimation in v0.2, but DR and plain
-    IPS remain explicit choices for ablations and robustness checks.
+    ``beta_ips`` is the default value estimator; DR and plain IPS remain
+    explicit choices for ablations and robustness checks.
     """
 
     if estimator == "beta_ips":

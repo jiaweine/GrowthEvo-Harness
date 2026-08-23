@@ -2,20 +2,26 @@
 
 ## 1. Responsibility boundaries
 
-GrowthEvo separates semantic planning, numeric policy optimization, execution safety, process credit, causal evaluation and policy promotion.
+GrowthEvo separates causal estimation, semantic planning, numeric policy improvement, execution safety, process credit, policy evaluation and promotion.
 
 ```text
-Growth Goal
+Logged / randomized growth data
+  -> Cross-Fitted DR-Learner
+  -> CATE Serving Bridge
   -> Causal Belief
+
+Growth Goal + Causal Belief
   -> Hypothesis Planner
   -> Hierarchical Numeric Policy
+  -> Support-Anchored Policy Improvement
   -> Legal Action Gate
   -> Tool / Channel Execution
   -> Environment Observation
       -> GrowthPRM step credit
+      -> Planner trajectory export
       -> Delayed business outcome
   -> Causal Reward
-  -> IPS / DR / β*-IPS + overlap diagnostics
+  -> IPS / DR / beta*-IPS + overlap diagnostics
   -> Split-Conformal Calibration
   -> Counterfactual Verifier
   -> Replay / Stress / Shadow / Promotion
@@ -24,15 +30,44 @@ Growth Goal
 
 The separation is deliberate:
 
-- The planner proposes the growth intent and information plan.
-- The numeric policy chooses channel, offer, timing and budget parameters.
-- The legal gate is non-learnable and executes before side effects.
-- GrowthPRM scores intermediate progress without redefining the final business metric.
-- OPE evaluates a candidate from logged behavior-policy evidence.
-- The verifier judges evidence and hard constraints, not planner prose.
-- The evolver can propose bounded changes but cannot promote itself or rewrite the verifier.
+- causal estimators infer incrementality from logged evidence;
+- the planner proposes growth intent and information acquisition;
+- the numeric policy chooses channel, offer, timing and budget parameters;
+- conservative improvement cannot jump freely outside behavior-policy support;
+- the legal gate is non-learnable and executes before side effects;
+- GrowthPRM scores intermediate progress without redefining the business metric;
+- the Verifier judges logged/experimental evidence and constraints, not planner prose;
+- the Evolver can propose bounded changes but cannot promote itself or rewrite the Verifier.
 
-## 2. Causal belief state
+## 2. Causal learning path
+
+`LoggedTreatmentRecord` stores the full logging-policy propensity vector. For treatment `a` versus `NO_TREATMENT`, propensities are renormalized within the pair before AIPW pseudo-outcome construction.
+
+`CrossFittedDRLearner` then:
+
+1. deterministically assigns treatment/control rows to stratified folds;
+2. trains treatment and control outcome models on K-1 folds;
+3. generates held-out doubly-robust pseudo-outcomes;
+4. trains the second-stage effect model only on out-of-fold pseudo-outcomes;
+5. records overlap coverage and residual scale;
+6. tracks extrapolation distance at serving time.
+
+The reference learner uses a dependency-free ridge model so CI can test the full causal pipeline. Heavy CATE libraries remain adapters rather than Runtime dependencies.
+
+## 3. CATE serving path
+
+`CausalUpliftServingBridge` maps fitted per-channel treatment-effect models into the `UserObservation` contract:
+
+```text
+channel_uplift
+uplift_uncertainty
+```
+
+It also exposes channel-level support and uncertainty for diagnostics. Unsupported extrapolation increases uncertainty instead of silently turning into a confident zero.
+
+`natural_conversion` remains separate from treatment uplift at every layer.
+
+## 4. Causal belief state
 
 `CausalBelief` separates natural outcome probability from treatment-effect estimates:
 
@@ -41,21 +76,9 @@ natural_conversion = P(Y=1 | no treatment, x)
 channel_uplift[a]   = E[Y(a) - Y(no treatment) | x]
 ```
 
-These quantities are never interchangeable. A high natural conversion rate is not evidence that a treatment is incrementally useful.
+The belief also carries uplift uncertainty, LTV, fatigue, churn risk, touch counts, spend, lifecycle state and consented channels.
 
-The belief also carries:
-
-- uplift uncertainty;
-- lifetime value;
-- fatigue and churn risk;
-- 24-hour and 7-day touch counts;
-- spend-to-date;
-- lifecycle state;
-- consented channels.
-
-A production reducer can replace `build_causal_belief()` with a learned state encoder while preserving the same contract.
-
-## 3. Hierarchical decision contract
+## 5. Hierarchical decision contract
 
 The high-level option policy chooses one of:
 
@@ -70,46 +93,37 @@ HOLDOUT
 STOP
 ```
 
-The low-level policy chooses:
-
-```text
-channel
-creative
-send time
-offer value
-expected direct budget
-frequency cost
-expected uplift
-uncertainty
-```
+The low-level policy chooses channel, creative, send time, offer value, expected direct budget, frequency cost, expected uplift and uncertainty.
 
 `NO_TREATMENT` is a first-class channel with exactly zero treatment uplift, zero budget and zero touch cost.
 
-## 4. Legal action gate
+## 6. Support-anchored policy improvement
 
-The gate runs before treatment execution and enforces:
+`SupportAnchoredPolicyImprover` takes discrete action value/cost estimates plus the behavior-policy distribution.
 
-- channel consent;
-- total budget;
-- offer cap;
-- fatigue limit;
-- churn-risk limit;
-- 24-hour frequency cap;
-- 7-day frequency cap.
+It excludes unsupported treatment actions, computes pessimistic value lower bounds and interpolates toward the best supported action under a total-variation cap:
 
-A blocked treatment is never replaced by another treatment in the same decision step. The runtime falls back to `HOLDOUT / NO_TREATMENT`. This prevents a learned policy from searching around a hard constraint after rejection.
+\[
+\pi_{new}=(1-\eta)\mu+\eta\delta_{a^*}.
+\]
 
-## 5. Cost accounting
+An expected-cost cap can shrink `η` further. If the behavior policy itself breaches a configured hard cost limit, the module can fall back to `NO_TREATMENT`.
 
-`GrowthAction.budget` is the complete expected direct cost of an action.
+This is an offline improvement guard, not the final promotion gate.
 
-If an offer has expected economic cost, the policy compiler includes it in `budget`. The world model does not charge the offer a second time. `offer_value` remains separate because face value and expected economic cost are not generally identical.
+## 7. Legal action gate
 
-This contract avoids double counting in reward, ROI and budget checks.
+The gate runs before treatment execution and enforces consent, total budget, offer cap, fatigue, churn risk and 24h/7d frequency caps.
 
-## 6. Event sourcing
+A blocked treatment is never replaced by another treatment in the same decision step. Runtime falls back to `HOLDOUT / NO_TREATMENT`.
 
-Every important decision is appended to a hash-chained event stream.
+## 8. Cost accounting
+
+`GrowthAction.budget` is the complete expected direct cost of an action. If an offer has expected economic cost, the policy compiler includes it in `budget`; the world model does not charge it again.
+
+## 9. Event sourcing
+
+Important decisions are appended to a hash-chained event stream:
 
 ```text
 GOAL_COMPILED
@@ -126,68 +140,45 @@ FAILURE_CLASSIFIED
 PATCH_PROPOSED
 ```
 
-Each event hash covers sequence number, event type, UTC timestamp, normalized payload and the previous event hash. A durable backend can replace the in-memory store, but append-only ordering and event semantics should remain stable.
+A durable backend can replace the in-memory store, but append-only ordering and event semantics should remain stable.
 
-## 7. GrowthPRM process-credit path
+## 10. GrowthPRM and planner training path
 
-Long-horizon outcomes are sparse, so the planner needs intermediate credit without letting shaping replace the North-Star metric.
+`GrowthProcessRewardModel` scores planner/tool steps using potential change, evidence gain, action confidence, tool success/failure, direct cost, duplicate evidence and irreversible side effects.
 
-`GrowthProcessRewardModel` scores each planner/tool step using:
-
-- potential change in Goal Progress / Evidence Quality / Constraint Slack;
-- evidence gain from the resulting observation;
-- confidence of the preceding action;
-- tool success/failure;
-- direct cost;
-- duplicate-evidence penalty;
-- irreversible-side-effect penalty.
-
-Trajectory output explicitly separates:
+`TrajectoryTrainerAdapter` converts event-derived transitions into backend-neutral Agent-RL training records with:
 
 ```text
-process_total
-terminal_outcome
-total = process_total + terminal_outcome
+observation
+action
+reward
+value estimate
+next value estimate
+legal-action flag
+tool-success flag
+done
+credit boundary
 ```
 
-This distinction is important for Agent-RL training and for debugging reward hacking.
+It computes GAE and supports `credit_boundary` resets across rollback, environment reset, user/segment switch and delayed-outcome attribution boundaries. This prevents local credit from leaking through known dynamics discontinuities.
 
-## 8. OPE and support diagnostics
+The export is intentionally trainer-neutral; external PPO/GRPO systems can consume it without taking ownership of Runtime facts or safety semantics.
 
-Single user interactions are not sufficient causal evidence for policy promotion. Runtime execution and cohort verification are separate phases.
+## 11. OPE and support diagnostics
 
-Logged policy evaluation uses:
+Single user interactions are not sufficient causal evidence for policy promotion.
 
-- IPS;
-- Doubly-Robust estimation;
-- estimated β*-IPS additive control variate;
-- estimator-specific standard error;
-- effective sample size and ESS ratio;
-- practical support coverage;
-- maximum importance weight;
-- importance-weight coefficient of variation.
+Logged policy evaluation uses IPS, Doubly-Robust, estimated beta*-IPS, estimator standard errors, ESS/ESS ratio, support coverage, maximum importance weight and weight coefficient of variation.
 
-A candidate with weak logging-policy overlap is classified as `INSUFFICIENT_EVIDENCE`, not as a failed policy.
+Weak overlap yields `INSUFFICIENT_EVIDENCE`, not a fake win or fake failure.
 
-## 9. Split-conformal calibration
+## 12. Split-conformal calibration
 
-`ConformalPolicyCalibrator` fits one-sided **residual margins** from matured policy cohorts.
+`ConformalPolicyCalibrator` fits one-sided residual margins from matured cohorts. Margin fields are named explicitly (`value_lower_margin`, `spend_upper_margin`, etc.); actual bounds are created only when a margin is applied to a new prediction.
 
-The dataclass fields are explicitly named:
+Calibration can only make promotion more conservative.
 
-```text
-value_lower_margin
-roi_lower_margin
-spend_upper_margin
-fatigue_upper_margin
-churn_risk_upper_margin
-```
-
-They are not absolute bounds. Bounds are constructed only when a margin is applied to a new prediction through methods such as `value_lcb()` or `spend_ucb()`.
-
-The verifier combines statistical and calibrated evidence conservatively. Calibration cannot make a candidate easier to promote.
-
-## 10. Counterfactual verification lifecycle
+## 13. Counterfactual verification lifecycle
 
 ```text
 interaction events
@@ -199,77 +190,48 @@ interaction events
     -> CounterfactualVerifier
 ```
 
-Verifier outcomes are:
+Verifier outcomes are `PASS`, `FAIL` and `INSUFFICIENT_EVIDENCE`.
 
-- `PASS` — enough evidence and all value/risk bounds pass;
-- `FAIL` — enough evidence, but value or a hard constraint fails;
-- `INSUFFICIENT_EVIDENCE` — sample size, ESS, support or weight tails are not trustworthy enough.
+## 14. GrowthAgentBench
 
-Lack of evidence is not evidence of harm.
+The built-in benchmark harness uses an auditable synthetic contextual-bandit oracle with heterogeneous treatment effects and context-dependent logging propensities.
 
-## 11. Risk-sensitive model-based safety
+It reports held-out CATE RMSE/MAE/bias, serving support/uncertainty, oracle policy value and regret. Synthetic benchmark results are regression evidence only, never product claims.
 
-The simulator is used for stress testing and candidate ranking, not for final causal promotion.
+Public dataset adapters should preserve propensities, action legality, delayed outcomes and holdout semantics.
 
-Long-horizon rollout updates:
+## 15. Risk-sensitive model-based safety
 
-- fatigue;
-- churn risk;
-- spend;
-- touch counts;
-- intent / baseline conversion;
-- effective treatment uplift.
+The simulator is used for stress testing and candidate ranking, not final causal promotion. Long-horizon rollout updates fatigue, churn risk, spend, touch counts, intent and effective uplift.
 
-Stress scenarios can lower uplift, inflate cost and amplify fatigue. `RiskSensitiveMPC` evaluates candidates over multiple stochastic seeds and ranks them by:
+Stress scenarios can lower uplift, inflate cost and amplify fatigue. Candidate ranking uses:
 
 \[
-Score(plan)=CVaR_{\alpha}(Return)-\lambda P(ConstraintViolation)
+Score(plan)=CVaR_{\alpha}(Return)-\lambda P(ConstraintViolation).
 \]
 
-Synthetic return never replaces logged/experimental evidence in the promotion gate.
-
-## 12. Two-timescale learning
+## 16. Two-timescale learning
 
 ### Fast loop
 
-The growth policy adapts treatment decisions from causal state and logged outcomes. Candidate learned backends include contextual bandits, uplift policy learning, constrained IQL/CQL and low-latency policy distillation.
+The growth policy adapts treatment decisions from causal state and logged outcomes. The repository now contains a reference CATE learner and support-anchored contextual policy-improvement kernel; neural sequential IQL/CQL remains an external training backend.
 
 ### Slow loop
 
-Harness evolution updates selected cognitive coordinates from verified failures.
+Harness evolution updates whitelisted planner, feature, memory, tool, delegation, exploration and reward-shaping coordinates from verified failure traces.
 
-Allowed coordinates:
+Frozen coordinates remain North-Star metric, consent semantics, budget ledger, event store, Verifier, deployment gate and no-treatment semantics.
 
-- planner hypothesis template;
-- feature routing;
-- memory retrieval policy;
-- tool routing;
-- delegation strategy;
-- exploration coefficient;
-- short-horizon reward shaping.
+## 17. Production extension points
 
-Frozen coordinates:
-
-- North-Star metric;
-- consent semantics;
-- budget ledger;
-- event store;
-- verifier;
-- deployment gate;
-- no-treatment semantics.
-
-A patch is only a proposal. It must pass replay/stress and later shadow evaluation before promotion.
-
-## 13. Production extension points
-
-The core stays dependency-light. Production systems can replace:
+Production systems can replace:
 
 - EventStore with Postgres/Kafka/event-log storage;
 - GrowthHypothesisPlanner with an LLM or trained planner;
-- HierarchicalGrowthPolicy with an offline/constrained RL policy;
-- CATE features with CausalML/EconML or custom estimators;
+- reference ridge CATE models with CausalML/EconML/neural uplift;
+- support-anchored contextual improvement with sequential offline-RL training;
 - UserWorldModel with a calibrated learned digital twin;
 - ToolRegistry with MCP / CRM / Ads adapters;
-- trainer layer with verl / Agent Lightning-style execution-training separation.
+- trainer export consumer with verl / Agent Lightning-style execution-training separation.
 
 The frozen decision, consent, constraint, event and verification contracts should remain owned by GrowthEvo across those replacements.
