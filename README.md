@@ -48,84 +48,20 @@ flowchart LR
     VERIFY -->|pass| COMMIT[Persist Policy Evidence]
     VERIFY -->|fail / unsupported| FAIL[Failure Trace]
     FAIL --> EVOLVE[Harness Evolution]
-    EVOLVE --> REPLAY[World-Model Replay / Shadow]
+    EVOLVE --> REPLAY[World-Model Replay / Stress]
     REPLAY --> PLAN
 ```
 
-### Two-timescale learning
-
-GrowthEvo 把学习分成两个时间尺度：
+GrowthEvo 使用两个学习时间尺度：
 
 1. **Fast loop — Growth Policy Learning**：针对当前用户与增长目标学习 `target / channel / offer / timing / budget / no-treatment`。
-2. **Slow loop — Harness Evolution**：从错误归因、预算浪费、疲劳、工具失败和分布漂移中修改 Planner、Memory、Reward Shaping、Feature Routing 与 Exploration 参数；安全内核和 North-Star Metric 保持冻结。
+2. **Slow loop — Harness Evolution**：从错误归因、预算浪费、疲劳、工具失败和分布漂移中修正 Planner、Memory、Reward Shaping、Feature Routing 与 Exploration 参数；安全内核和 North-Star Metric 保持冻结。
 
 ---
 
-## v0.2 · Frontier RL Upgrade
+## Core Learning Stack
 
-v0.2 把第一版的“因果 reward + DR OPE + LCB”升级成四个可以独立测试、独立替换的学习组件。
-
-### 1. β*-IPS + overlap diagnostics
-
-除了 IPS 与 Doubly-Robust，Runtime 现在实现 **estimated β\*-IPS additive control variate**：
-
-\[
-\hat V_{\beta}=
-\frac1n\sum_i\left[w_i r_i-\hat\beta(w_i-1)\right],
-\qquad
-\hat\beta=\frac{\widehat{Cov}(w r,w-1)}{\widehat{Var}(w-1)}
-\]
-
-同时将以下信息纳入正式 Policy Evidence：
-
-- IPS / DR / β\*-IPS
-- estimator standard error
-- Effective Sample Size / ESS ratio
-- practical support coverage
-- max importance weight
-- importance-weight coefficient of variation
-
-**收益高但 logging policy 没覆盖的候选策略不会被晋级。**
-
-### 2. Split-Conformal Promotion Gate
-
-历史 shadow/canary cohort 成熟后，用预测值与真实值之间的 residual 校准 one-sided margin：
-
-\[
-LCB_{conf}(\Delta V)=\widehat{\Delta V}-q_{1-\alpha}(\hat\Delta V-\Delta V)
-\]
-
-ROI 使用 lower bound，Spend / Fatigue / Churn 使用 upper bound。Verifier 取统计 LCB 与 conformal LCB 中更保守的一侧；校准永远不会让 gate 变得更激进。
-
-> Split-conformal 的有限样本 coverage 依赖 calibration cohort 与未来 cohort 的 exchangeability；检测到 distribution shift 时仍应 abstain / recalibrate，而不是把 conformal 当万能保险。
-
-### 3. GrowthPRM · Observation-Grounded Process Reward
-
-最终转化或 D30 LTV 太稀疏，不能给长链 Planner 足够 credit。`GrowthProcessRewardModel` 对每一步使用：
-
-\[
-r_t^{proc}
-=
-\gamma\Phi(s_{t+1})-\Phi(s_t)
-+\lambda_{obs}(1-H(a_t))\Delta Evidence_t
--Cost_t-Penalty_t
-\]
-
-其中 `Φ` 由 Goal Progress、Evidence Quality 与 Constraint Slack 构成；环境 observation 真正减少不确定性时才获得额外 credit。失败工具、重复证据、不可逆副作用和成本都有显式负向 credit。
-
-### 4. Risk-Sensitive Model-Based Planning
-
-`RiskSensitiveMPC` 在长周期 World Model 上对候选增长计划做多 seed rollout，并用 downside CVaR 与 violation rate 排序：
-
-\[
-Score(plan)=CVaR_{\alpha}(Return)-\lambda\,P(ConstraintViolation)
-\]
-
-Stress scenario 可以同时压低 uplift、抬高 cost、放大 fatigue。这个模块用于 **replay / stress test / candidate ranking**，不把 toy simulator 的输出冒充线上因果证据。
-
----
-
-## Core Algorithm · CausalLift-HRL
+### 1. CausalLift-HRL · Hierarchical Growth Policy
 
 GrowthEvo 使用层次策略：
 
@@ -154,37 +90,221 @@ r_t=w_1\hat\tau^{LTV}_t+w_2\hat\tau^{Retention}_t+w_3\hat\tau^{Conversion}_t
 -\lambda_1 Cost_t-\lambda_2 Fatigue_t-\lambda_3 Risk_t-\lambda_4 Uncertainty_t
 \]
 
-当前仓库提供一个**可运行、模型无关的 reference policy**，用于验证 Runtime 契约；它不是伪装成“已经训练好的 IQL/CQL/GRPO”。后续可以将 policy backend 替换为 IQL/CQL、CPO/Lagrangian、Thompson Sampling、GRPO/Agent-RL planner 或外部训练服务，而不改变事件与验证语义。
+当前仓库提供一个可运行、模型无关的 reference policy，用于验证 Runtime 契约。它不是伪装成已经训练好的 IQL/CQL/GRPO；后续训练 backend 可以替换 policy implementation，但不改变事件、权限和验证语义。
+
+### 2. β*-IPS / DR OPE + Overlap Diagnostics
+
+除了 IPS 与 Doubly-Robust，Runtime 实现 estimated β*-IPS additive control variate：
+
+\[
+\hat V_{\beta}=
+\frac1n\sum_i\left[w_i r_i-\hat\beta(w_i-1)\right],
+\qquad
+\hat\beta=\frac{\widehat{Cov}(w r,w-1)}{\widehat{Var}(w-1)}
+\]
+
+Policy Evidence 同时包含：
+
+- IPS / DR / β*-IPS；
+- estimator-specific standard error；
+- Effective Sample Size / ESS ratio；
+- logging-policy support coverage；
+- max importance weight；
+- importance-weight coefficient of variation。
+
+**收益高但 logging policy 没覆盖的候选策略不会被晋级。** 缺乏 support 时，Verifier 返回 `INSUFFICIENT_EVIDENCE`，而不是制造一个不可信的离线提升结论。
+
+### 3. Split-Conformal Promotion Gate
+
+历史 shadow / canary cohort 成熟后，使用预测与真实结果之间的一侧 residual quantile 形成 calibration margin：
+
+\[
+LCB_{conf}(\Delta V)=\widehat{\Delta V}-q_{1-\alpha}(\widehat{\Delta V}-\Delta V)
+\]
+
+实现中明确区分：
+
+- `value_lower_margin / roi_lower_margin`：残差 margin；
+- `spend_upper_margin / fatigue_upper_margin / churn_risk_upper_margin`：残差 margin；
+- `value_lcb / roi_lcb / spend_ucb / ...`：margin 应用于新预测后得到的实际 bound。
+
+Verifier 对 value 取统计 LCB 与 conformal LCB 中更保守的一侧；ROI 使用 lower bound，Spend / Fatigue / Churn 使用 upper bound。校准不会让 gate 比原始统计门槛更激进。
+
+> Split-conformal 的有限样本 coverage 依赖 calibration cohort 与未来 cohort 的 exchangeability。检测到 distribution shift 时应 recalibrate 或 abstain，而不是把 conformal 当作 shift-proof 保证。
+
+### 4. GrowthPRM · Observation-Grounded Process Reward
+
+最终转化或 D30 LTV 太稀疏，无法给长链 Planner 足够 credit。`GrowthProcessRewardModel` 对每一步计算：
+
+\[
+r_t^{proc}
+=
+\gamma\Phi(s_{t+1})-\Phi(s_t)
++\lambda_{obs}(1-H(a_t))\Delta Evidence_t
+-Cost_t-Penalty_t
+\]
+
+其中 `Φ` 由 Goal Progress、Evidence Quality 与 Constraint Slack 构成。环境 observation 真正减少不确定性时才获得额外 credit；失败工具、重复证据、直接成本和不可逆副作用都有显式负向 credit。
+
+Process reward 与 terminal business outcome 分开记录，因此训练层可以区分“中间决策质量”和“最终业务结果”。
+
+### 5. Risk-Sensitive Model-Based Planning
+
+`RiskSensitiveMPC` 在长周期 World Model 上对候选增长计划做多 seed rollout，并用 downside CVaR 与 constraint violation rate 排序：
+
+\[
+Score(plan)=CVaR_{\alpha}(Return)-\lambda P(ConstraintViolation)
+\]
+
+Stress scenario 可以同时：
+
+- 压低 treatment uplift；
+- 抬高 channel / offer cost；
+- 放大 fatigue；
+- 累积预算、触达次数与 churn risk。
+
+这个模块只用于 replay / stress test / candidate ranking。**Simulator 不是 ground truth，也不能单独作为 policy promotion 证据。**
 
 ---
 
-## Safety Invariants
+## Causal Belief State
+
+用户真正的购买意图、价格敏感度和疲劳程度不可完全观测，因此 Runtime 维护 Causal Belief State，而不是只存聊天上下文。
+
+典型状态包括：
+
+| State | Meaning |
+|---|---|
+| Natural conversion | 无干预时的基础转化倾向 |
+| Channel uplift | 各渠道 treatment effect 估计 |
+| Uplift uncertainty | 因果效果不确定性 |
+| LTV | 长期价值估计 |
+| Fatigue | 历史触达带来的疲劳状态 |
+| Churn risk | 退订 / 流失风险 |
+| Touch counts | 24h / 7d 触达次数 |
+| Spend | 当前预算消耗 |
+| Lifecycle | acquire / active / dormant 等生命周期阶段 |
+| Consent | 用户允许的渠道集合 |
+
+关键不变量是：
+
+> **自然转化概率和 treatment uplift 永远不是同一个字段。**
+
+一个自然转化概率 0.95、uplift 只有 0.001 的用户，不应因为“看起来很容易转化”而被发券。
+
+---
+
+## Legal Action Space Before Learning
+
+Policy 只能从合法动作集合中学习：
+
+\[
+\mathcal A_{legal}(s)=
+\mathcal A_{registered}
+\cap\mathcal A_{consent}
+\cap\mathcal A_{budget}
+\cap\mathcal A_{frequency}
+\cap\mathcal A_{risk}
+\]
+
+硬约束包括：
+
+- Consent / suppression；
+- max budget；
+- max offer value；
+- 24h / 7d frequency cap；
+- max fatigue；
+- max churn risk。
+
+被硬约束拒绝的 treatment 不会在同一步偷偷换一个“次优营销动作”继续执行。Runtime 安全降级到 `HOLDOUT / NO_TREATMENT`。
+
+---
+
+## Counterfactual Verification
+
+策略晋级不是比较 raw mean，而是同时检查 value、support 与 business constraints：
+
+\[
+LCB(V(\pi_{candidate})-V(\pi_{baseline})) > \delta
+\]
+
+并满足：
+
+\[
+UCB(C_j(\pi_{candidate})) \le c_j
+\]
+
+Reference implementation 支持：
+
+- IPS / Doubly-Robust / β*-IPS value estimate；
+- estimator-specific standard errors；
+- ESS / ESS ratio；
+- logging support coverage / importance-weight tail gate；
+- asymptotic LCB ∩ split-conformal LCB；
+- calibrated ROI lower bound；
+- calibrated budget / fatigue / churn upper bounds；
+- `PASS / FAIL / INSUFFICIENT_EVIDENCE`。
+
+因此以下三种状态严格分离：
+
+1. **策略差**：证据充分，但 candidate 未优于 baseline 或违反业务约束；
+2. **证据不足**：样本、ESS 或 overlap 不足；
+3. **策略通过**：价值下界与所有风险边界均通过。
+
+---
+
+## Event-Sourced Growth Decisions
+
+所有关键状态变化写入 append-only hash chain：
+
+```text
+GOAL_COMPILED
+BELIEF_UPDATED
+HYPOTHESIS_PLANNED
+ACTION_PROPOSED
+ACTION_ALLOWED / ACTION_BLOCKED
+FEEDBACK_OBSERVED
+REWARD_ASSIGNED
+PROCESS_REWARD_ASSIGNED
+ROLLOUT_EVALUATED
+VERIFICATION_COMPLETED
+FAILURE_CLASSIFIED
+PATCH_PROPOSED
+```
+
+事件 hash 绑定前序 hash 与 payload，用于检测历史漂移，并为 replay、OPE、Agent-RL credit 与 Harness Evolution 提供统一事实源。
+
+单用户执行和 cohort-level policy verification 是两个不同阶段，但两者写入同一个 Event Store。
+
+---
+
+## Harness Evolution
 
 ### Frozen kernel
 
 以下组件不能被 Evolver 修改：
 
-- North-Star Metric 与实验主指标定义
-- Consent / suppression / frequency-cap 等用户边界
-- Budget Ledger 与硬预算
-- Event Store 与审计事实
-- Counterfactual Verifier
-- Deployment / Promotion Gate
-- `NO_TREATMENT` / holdout 语义
+- North-Star Metric 与主指标定义；
+- Consent / suppression / frequency-cap；
+- Budget Ledger；
+- Event Store；
+- Counterfactual Verifier；
+- Deployment / Promotion Gate；
+- `NO_TREATMENT / HOLDOUT` 语义。
 
 ### Evolvable coordinates
 
 候选 patch 只允许作用于：
 
-- Planner hypothesis template
-- Feature routing
-- Memory retrieval policy
-- Tool routing
-- Delegation / sub-agent strategy
-- Exploration coefficient
-- Short-horizon reward shaping
+- Planner hypothesis template；
+- Feature routing；
+- Memory retrieval policy；
+- Tool routing；
+- Delegation / sub-agent strategy；
+- Exploration coefficient；
+- Short-horizon reward shaping。
 
-这避免了通过修改指标或安全门禁制造“虚假的策略提升”。
+这保证 Evolver 不能通过“修改裁判”制造虚假的策略提升。
 
 ---
 
@@ -196,15 +316,15 @@ GrowthEvo-Harness/
 │   ├── models.py                  # shared contracts + policy evidence
 │   ├── runtime/
 │   │   ├── belief_state.py        # causal belief reducer
-│   │   ├── event_store.py         # append-only hash chained event log
+│   │   ├── event_store.py         # append-only hash-chained event log
 │   │   ├── legal_action.py        # budget / consent / fatigue gate
 │   │   ├── planner.py             # growth hypothesis planner
-│   │   └── engine.py              # interaction + PRM + policy-verification events
+│   │   └── engine.py              # interaction + PRM + verification events
 │   ├── rl/
 │   │   ├── causal_reward.py       # incremental outcome reward
 │   │   ├── hierarchical_policy.py # option + numeric action policy
 │   │   ├── ope.py                 # IPS / DR / β*-IPS + overlap diagnostics
-│   │   ├── conformal.py           # split-conformal policy calibration
+│   │   ├── conformal.py           # split-conformal residual margins
 │   │   ├── process_reward.py      # GrowthPRM observation-grounded credit
 │   │   └── model_based.py         # CVaR risk-sensitive MPC / stress rollout
 │   ├── verifier/
@@ -221,7 +341,8 @@ GrowthEvo-Harness/
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── ALGORITHM.md
-│   └── FRONTIER_2026.md
+│   ├── FRONTIER_2026.md
+│   └── IMPLEMENTATION_STATUS.md
 └── .github/workflows/ci.yml
 ```
 
@@ -257,125 +378,53 @@ Goal compile
 
 ---
 
-## Decision Contract
+## 2026 Research Alignment
 
-一个 Growth action 不是任意字典，而是明确的决策合同：
+`docs/FRONTIER_2026.md` 明确区分 **research signal / code mapping / claims boundary**。当前实现重点对齐：
 
-```python
-GrowthAction(
-    option=GrowthOption.REACTIVATE,
-    channel=Channel.PUSH,
-    offer_value=6.0,
-    budget=0.08,
-    frequency_cost=1.0,
-    expected_uplift=0.06,
-    uncertainty=0.02,
-)
-```
-
-`NO_TREATMENT` 是一级动作；对高自然转化、低 uplift、低 support 或高 fatigue 用户，Policy / Gate 可以主动 abstain。
-
----
-
-## Counterfactual Verification
-
-策略晋级不是比较 raw mean，而是验证保守置信边界：
-
-\[
-LCB(V(\pi_{candidate})-V(\pi_{baseline})) > \delta
-\]
-
-同时满足：
-
-\[
-UCB(C_j(\pi_{candidate})) \le c_j
-\]
-
-v0.2 Reference implementation 支持：
-
-- IPS / Doubly-Robust / β\*-IPS value estimate
-- estimator standard errors
-- ESS / ESS ratio
-- logging support coverage / importance-weight tail gate
-- asymptotic LCB ∩ split-conformal LCB
-- calibrated ROI lower bound
-- calibrated budget / fatigue / churn upper bounds
-- `PASS / FAIL / INSUFFICIENT_EVIDENCE`
-
-因此“策略差”“证据不足”“日志策略不支持候选动作”是不同状态。
-
----
-
-## Event-Sourced Growth Decisions
-
-所有关键状态变化写入 append-only hash chain：
-
-```text
-GOAL_COMPILED
-BELIEF_UPDATED
-HYPOTHESIS_PLANNED
-ACTION_PROPOSED
-ACTION_ALLOWED / ACTION_BLOCKED
-FEEDBACK_OBSERVED
-REWARD_ASSIGNED
-PROCESS_REWARD_ASSIGNED
-ROLLOUT_EVALUATED
-VERIFICATION_COMPLETED
-FAILURE_CLASSIFIED
-PATCH_PROPOSED
-```
-
-事件 hash 同时绑定前序 hash 与 payload，允许检测历史漂移，并为 replay、OPE、Agent-RL credit 与 Harness Evolution 提供统一事实源。
-
----
-
-## 2026 Frontier Alignment
-
-本项目不是把论文名字贴到 README；`docs/FRONTIER_2026.md` 明确区分 **research signal / code mapping / 未实现部分**。当前 v0.2 重点对齐：
-
-- **SIGIR 2026 — Additive Control Variates Dominate Self-Normalisation in OPE**：β\*-IPS / additive baseline correction。
-- **WWW 2026 — Auto-bidding under RoS Constraints with Uncertainty Quantification**：conformal uncertainty + hard business constraint。
-- **WWW 2026 — LBM** / **DARA**：高层 LLM reasoning 与低层精确 numeric decision 分离。
-- **ACL 2026 — SOAR**：从 environment observation 学习，而不是只依赖终局 reward。
-- **ACL Findings 2026 — ToolPRMBench / AgentV-RL**：tool-using PRM 与 agentic verifier。
-- **SIGIR 2026 — SmartSearch / Tool-Star**：process reward、tool collaboration 与 agentic RL。
-- **SIGIR 2026 — Verifiable User Simulation tutorial**：Simulator 必须可审计、可验证，不把模拟结果当真值。
+- **SIGIR 2026 — Additive Control Variates Dominate Self-Normalisation in OPE**：β*-IPS / additive control variate；
+- **WWW 2026 — Auto-bidding under RoS Constraints with Uncertainty Quantification**：conformal uncertainty + business constraints；
+- **WWW 2026 — DARA / LBM**：高层语义 reasoning 与低层精确 numeric decision 分离；
+- **ACL 2026 — SOAR**：environment observation 作为 Agent-RL credit signal；
+- **ACL Findings 2026 — ToolPRMBench / AgentV-RL**：tool-process reward 与 verifier learning；
+- **SIGIR 2026 — SmartSearch / Tool-Star**：process reward、local refinement 与 multi-tool RL；
+- **SIGIR 2026 — Verifiable User Simulation**：Simulator 必须可审计，不能把 synthetic return 当真实因果证据。
 
 ---
 
 ## Evaluation Plan
 
-仓库当前**不声明虚构的线上提升数字**。下一阶段使用公开 logged-bandit / uplift 数据与可控 simulator 构建 `GrowthAgentBench`，覆盖：
+仓库当前**不声明虚构的线上提升数字**。实验层计划使用公开 logged-bandit / uplift 数据与可控 simulator 构建 `GrowthAgentBench`，覆盖：
 
-- Cold-start acquisition
-- Multi-channel budget allocation
-- Coupon / incentive optimization
-- Retention with fatigue
-- Dormant-user reactivation
-- Delayed conversion
-- Distribution shift
-- Tool failure / missing evidence
-- support mismatch / propensity shift
-- world-model stress / long-horizon constraint violation
+- Cold-start acquisition；
+- Multi-channel budget allocation；
+- Coupon / incentive optimization；
+- Retention with fatigue；
+- Dormant-user reactivation；
+- Delayed conversion；
+- Distribution shift；
+- Tool failure / missing evidence；
+- support mismatch / propensity shift；
+- world-model stress / long-horizon constraint violation。
 
 建议 baseline：
 
-`Rule → ReAct → LinUCB/Thompson → Uplift/DR Policy → IQL/CQL → GRPO-only Planner → CausalLift-HRL → CausalLift-HRL + Conformal Gate → + GrowthPRM → + Harness Evolution`
+`Rule → ReAct → LinUCB/Thompson → Uplift/DR Policy → IQL/CQL → GRPO-only Planner → CausalLift-HRL → + Conformal Gate → + GrowthPRM → + Harness Evolution`
 
 指标包括：
 
-- AUUC / Qini / Incremental Conversion
-- Incremental LTV / CAC / ROAS
-- Policy Value / Regret
-- OPE estimator error / CI coverage
-- ESS ratio / support coverage
-- ROI / Budget violation rate
-- D7 / D30 retention
-- Fatigue / unsubscribe proxy
-- CVaR return / rollout violation rate
-- tool calls / latency / cost
-- distribution-shift recovery
-- evolution promotion / regression rate
+- AUUC / Qini / Incremental Conversion；
+- Incremental LTV / CAC / ROAS；
+- Policy Value / Regret；
+- OPE estimator error / CI coverage；
+- ESS ratio / support coverage；
+- ROI / Budget violation rate；
+- D7 / D30 retention；
+- Fatigue / unsubscribe proxy；
+- CVaR return / rollout violation rate；
+- tool calls / latency / cost；
+- distribution-shift recovery；
+- evolution promotion / regression rate。
 
 ---
 
@@ -383,8 +432,8 @@ PATCH_PROPOSED
 
 1. **Incrementality before conversion** — 优先回答“是否因为干预才发生”。
 2. **Legal action space before learning** — 不允许的动作不会因为模型置信度高而进入策略空间。
-3. **Overlap before OPE confidence** — 没有日志策略 support，就没有可信的离线策略提升。
-4. **Offline evidence before online exploration** — 优先使用 logged data、OPE、conformal calibration 与 simulator 降低探索风险。
+3. **Overlap before OPE confidence** — 没有 logging-policy support，就没有可信的离线策略提升。
+4. **Offline evidence before online exploration** — 优先使用 logged data、OPE、calibration 与 simulator 降低探索风险。
 5. **No-treatment is a real action** — 不营销也是增长策略。
 6. **Planner and numeric policy are separable** — LLM 负责语义规划，RL 负责可校验数值决策。
 7. **Observation is a learning signal** — PRM 奖励环境反馈带来的真实进展，而不是长推理文本。
@@ -394,29 +443,25 @@ PATCH_PROPOSED
 
 ---
 
-## Status
+## Implementation Status
 
-`v0.2` implements the frontier safety-and-credit layer while keeping the core dependency-free and auditable:
+当前仓库已经实现：
 
-- β\*-IPS additive-control-variate OPE
-- DR / IPS ablation path
-- overlap / propensity-tail diagnostics
-- split-conformal value and risk calibration
-- support-aware Counterfactual Verifier
-- GrowthPRM process reward
-- risk-sensitive CVaR model-based rollout
-- long-horizon fatigue / churn / budget transition model
-- event-sourced process-credit and verification path
+- Causal Belief + hierarchical policy contracts；
+- first-class `NO_TREATMENT`；
+- hard legal-action gate；
+- hash-chained Event Store；
+- incremental causal reward；
+- IPS / DR / β*-IPS OPE；
+- overlap / propensity-tail diagnostics；
+- split-conformal residual calibration；
+- support-aware Counterfactual Verifier；
+- GrowthPRM process reward；
+- risk-sensitive CVaR model-based rollout；
+- long-horizon fatigue / churn / budget transitions；
+- bounded Harness Evolution。
 
-Next milestones:
-
-- real logged-bandit adapters: Open Bandit Dataset / Criteo uplift
-- learned CATE / uplift uncertainty backend
-- pluggable IQL/CQL and constrained-RL trainer
-- Agent-RL planner backend through verl / Agent Lightning-style training separation
-- learned user world model + calibration diagnostics
-- GrowthAgentBench and reproducible experiment reports
-- MCP adapters for CRM / Ads / Experiment systems
+下一步只在有真实可复现实验后增加结果性声明。更详细边界见 `docs/IMPLEMENTATION_STATUS.md`。
 
 ---
 
