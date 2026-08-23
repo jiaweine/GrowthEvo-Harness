@@ -33,5 +33,8 @@ jobs:
       - name: Test
         run: pytest --cov=growthevo --cov-report=term-missing
 
-      - name: Demo smoke test
+      - name: Runtime demo smoke test
         run: python examples/demo.py
+
+      - name: Training demo smoke test
+        run: python examples/training_demo.py
