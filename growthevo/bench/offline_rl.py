@@ -12,6 +12,9 @@ from .real_world import (
 )
 
 
+FeatureMap = Mapping[str, Any]
+
+
 @dataclass(frozen=True, slots=True)
 class OfflineRLTransition:
     """One transition for external offline-RL backends.
@@ -19,14 +22,20 @@ class OfflineRLTransition:
     ``random_intervention`` records how the logged action was generated. It is
     metadata, not part of the policy state: a learned policy should not obtain a
     feature that only exists because of the historical logging mechanism.
+
+    ``action_id`` preserves the exact logged item. ``action_features`` can carry
+    item metadata or a precomputed embedding so large-action methods do not have
+    to model millions of video identifiers as an unstructured discrete action
+    space.
     """
 
     trajectory_id: str
     step_index: int
-    state: Mapping[str, float | int]
+    state: FeatureMap
     action_id: int
+    action_features: FeatureMap
     reward: float
-    next_state: Mapping[str, float | int]
+    next_state: FeatureMap
     done: bool
     random_intervention: bool
     feedback: Mapping[str, float]
@@ -37,6 +46,7 @@ class OfflineRLTransition:
             "step_index": self.step_index,
             "state": dict(self.state),
             "action_id": self.action_id,
+            "action_features": dict(self.action_features),
             "reward": self.reward,
             "next_state": dict(self.next_state),
             "done": self.done,
@@ -91,10 +101,11 @@ def _history_state(
     prior_reward_sum: float,
     prior_click_sum: float,
     prior_long_view_sum: float,
-) -> dict[str, float | int]:
+    user_features: FeatureMap | None = None,
+) -> dict[str, Any]:
     """Build a state from information available before current feedback."""
 
-    return {
+    state: dict[str, Any] = {
         "user_id": row.user_id,
         "date": row.date,
         "hourmin": row.hourmin,
@@ -104,6 +115,10 @@ def _history_state(
         "prior_click_rate": prior_click_sum / history_count if history_count else 0.0,
         "prior_long_view_rate": prior_long_view_sum / history_count if history_count else 0.0,
     }
+    if user_features:
+        for key, value in user_features.items():
+            state[f"user_feature:{key}"] = value
+    return state
 
 
 def kuairand_to_offline_rl(
@@ -111,13 +126,19 @@ def kuairand_to_offline_rl(
     *,
     max_steps_per_trajectory: int = 100,
     reward_weights: Mapping[str, float] = DEFAULT_KUAIRAND_REWARD_WEIGHTS,
+    user_feature_lookup: Mapping[int, FeatureMap] | None = None,
+    action_feature_lookup: Mapping[int, FeatureMap] | None = None,
 ) -> OfflineRLDataset:
     """Convert KuaiRand logs into leakage-aware offline-RL transitions.
 
-    The output is intentionally backend-neutral and maps cleanly to the common
-    interfaces used by conservative Q-learning, implicit Q-learning and
-    sequence-modeling baselines. Artificial chunk boundaries are terminal for
-    bootstrapping, so ``next_state`` is empty at those boundaries.
+    The output maps to the common transition interface used by conservative
+    Q-learning and implicit Q-learning while also retaining trajectories for
+    sequence-modeling baselines. Optional user and item features make the export
+    suitable for representation-based policies instead of forcing the enormous
+    catalog into a flat discrete-action head.
+
+    Artificial chunk boundaries are terminal for bootstrapping, so
+    ``next_state`` is empty at those boundaries.
     """
 
     if max_steps_per_trajectory <= 0:
@@ -132,6 +153,7 @@ def kuairand_to_offline_rl(
     transitions: list[OfflineRLTransition] = []
     for user_id in sorted(by_user):
         rows = sorted(by_user[user_id], key=lambda row: (row.time_ms, row.video_id))
+        user_features = (user_feature_lookup or {}).get(user_id, {})
         prior_reward_sum = 0.0
         prior_click_sum = 0.0
         prior_long_view_sum = 0.0
@@ -146,6 +168,7 @@ def kuairand_to_offline_rl(
                 prior_reward_sum=prior_reward_sum,
                 prior_click_sum=prior_click_sum,
                 prior_long_view_sum=prior_long_view_sum,
+                user_features=user_features,
             )
             reward = kuairand_reward(row, weights=reward_weights)
 
@@ -157,7 +180,7 @@ def kuairand_to_offline_rl(
             done = is_user_terminal or is_chunk_terminal
 
             if done:
-                next_state: dict[str, float | int] = {}
+                next_state: dict[str, Any] = {}
             else:
                 next_row = rows[offset + 1]
                 next_state = _history_state(
@@ -166,6 +189,7 @@ def kuairand_to_offline_rl(
                     prior_reward_sum=updated_reward_sum,
                     prior_click_sum=updated_click_sum,
                     prior_long_view_sum=updated_long_view_sum,
+                    user_features=user_features,
                 )
 
             transitions.append(
@@ -174,6 +198,7 @@ def kuairand_to_offline_rl(
                     step_index=step_index,
                     state=state,
                     action_id=row.video_id,
+                    action_features=dict((action_feature_lookup or {}).get(row.video_id, {})),
                     reward=reward,
                     next_state=next_state,
                     done=done,
