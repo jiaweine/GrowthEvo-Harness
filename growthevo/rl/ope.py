@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import fsum, sqrt
+from math import fsum, isfinite, sqrt
 from typing import Iterable, Literal
 
 from growthevo.models import PolicyEvidence
@@ -30,23 +30,31 @@ class LoggedBanditRecord:
 class OPEEstimate:
     """Counterfactual policy-value estimates plus deployment diagnostics.
 
-    ``beta_ips`` uses an estimated optimal additive control variate with
-    ``w - 1`` as the zero-mean control. This follows the 2026 SIGIR direction
-    that additive baseline corrections can dominate self-normalisation for OPE.
+    The suite intentionally includes estimators with different bias/variance
+    behavior. ``switch_dr`` follows the SWITCH idea of using the reward-model
+    estimate when importance weights enter a high-variance tail. ``dr_os`` uses
+    optimistic importance-weight shrinkage from the ICML shrinkage work. The
+    existing ``beta_ips`` additive control variate remains available as a
+    complementary estimator rather than being treated as a universal winner.
 
-    The estimator remains only as trustworthy as the logged propensities and
-    support assumptions. ``effective_sample_size``, ``support_coverage`` and the
-    weight-tail diagnostics are therefore first-class outputs rather than debug
-    metadata.
+    The estimators remain only as trustworthy as the logged propensities,
+    reward models and support assumptions. Overlap diagnostics are therefore
+    first-class outputs rather than debug metadata.
     """
 
     ips: float
     doubly_robust: float
+    switch_dr: float
+    dr_os: float
     beta_ips: float
     beta_star: float
     ips_standard_error: float
     dr_standard_error: float
+    switch_dr_standard_error: float
+    dr_os_standard_error: float
     beta_ips_standard_error: float
+    switch_threshold: float
+    dr_os_lambda: float
     effective_sample_size: float
     effective_sample_ratio: float
     support_coverage: float
@@ -89,16 +97,29 @@ def evaluate_policy(
     records: Iterable[LoggedBanditRecord],
     *,
     support_propensity_floor: float = 1e-3,
+    switch_threshold: float = 10.0,
+    dr_os_lambda: float = 100.0,
 ) -> OPEEstimate:
     """Evaluate a target policy from logged contextual-bandit feedback.
 
-    The implementation deliberately returns multiple estimators instead of
-    selecting one silently. Promotion code can compare IPS, DR and beta-IPS and
-    abstain when overlap diagnostics indicate unsupported extrapolation.
+    Returned estimators:
+
+    - IPS: unbiased under correct propensities but potentially high variance;
+    - DR: direct model plus importance-weighted residual correction;
+    - SWITCH-DR: suppresses the residual correction in the extreme-weight tail;
+    - DRos: smoothly shrinks the DR residual importance weight;
+    - beta-IPS: additive control-variate correction.
+
+    Hyperparameters are explicit so real-data experiments can tune them only on
+    a validation split and keep the final evaluation cohort untouched.
     """
 
     if not 0 < support_propensity_floor <= 1:
         raise ValueError("support_propensity_floor must be in (0, 1]")
+    if not isfinite(switch_threshold) or switch_threshold <= 0:
+        raise ValueError("switch_threshold must be a positive finite value")
+    if not isfinite(dr_os_lambda) or dr_os_lambda <= 0:
+        raise ValueError("dr_os_lambda must be a positive finite value")
 
     rows = list(records)
     if not rows:
@@ -109,6 +130,23 @@ def evaluate_policy(
     dr_terms = [
         row.target_q + weight * (row.reward - row.baseline_q)
         for weight, row in zip(weights, rows, strict=True)
+    ]
+    switch_terms = [
+        row.target_q
+        + (
+            weight * (row.reward - row.baseline_q)
+            if weight <= switch_threshold
+            else 0.0
+        )
+        for weight, row in zip(weights, rows, strict=True)
+    ]
+    shrunk_weights = [
+        dr_os_lambda * weight / (weight * weight + dr_os_lambda)
+        for weight in weights
+    ]
+    dr_os_terms = [
+        row.target_q + shrunk * (row.reward - row.baseline_q)
+        for shrunk, row in zip(shrunk_weights, rows, strict=True)
     ]
 
     # Additive control variate: X = w - E[w] with E[w] = 1 under valid
@@ -145,11 +183,17 @@ def evaluate_policy(
     return OPEEstimate(
         ips=_mean(ips_terms),
         doubly_robust=_mean(dr_terms),
+        switch_dr=_mean(switch_terms),
+        dr_os=_mean(dr_os_terms),
         beta_ips=_mean(beta_terms),
         beta_star=beta_star,
         ips_standard_error=_standard_error(ips_terms),
         dr_standard_error=_standard_error(dr_terms),
+        switch_dr_standard_error=_standard_error(switch_terms),
+        dr_os_standard_error=_standard_error(dr_os_terms),
         beta_ips_standard_error=_standard_error(beta_terms),
+        switch_threshold=switch_threshold,
+        dr_os_lambda=dr_os_lambda,
         effective_sample_size=ess,
         effective_sample_ratio=ess / n,
         support_coverage=supported / n,
@@ -167,13 +211,11 @@ def policy_evidence_from_ope(
     spend: float,
     fatigue: float,
     churn_risk: float,
-    estimator: Literal["beta_ips", "doubly_robust", "ips"] = "beta_ips",
+    estimator: Literal[
+        "beta_ips", "doubly_robust", "switch_dr", "dr_os", "ips"
+    ] = "beta_ips",
 ) -> PolicyEvidence:
-    """Compile OPE output into the verifier's evidence contract.
-
-    ``beta_ips`` is the default value estimator; DR and plain IPS remain
-    explicit choices for ablations and robustness checks.
-    """
+    """Compile OPE output into the verifier's evidence contract."""
 
     if estimator == "beta_ips":
         value = estimate.beta_ips
@@ -181,6 +223,12 @@ def policy_evidence_from_ope(
     elif estimator == "doubly_robust":
         value = estimate.doubly_robust
         standard_error = estimate.dr_standard_error
+    elif estimator == "switch_dr":
+        value = estimate.switch_dr
+        standard_error = estimate.switch_dr_standard_error
+    elif estimator == "dr_os":
+        value = estimate.dr_os
+        standard_error = estimate.dr_os_standard_error
     elif estimator == "ips":
         value = estimate.ips
         standard_error = estimate.ips_standard_error
