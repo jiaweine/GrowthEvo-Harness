@@ -17,6 +17,7 @@ from .real_world import (
     open_bandit_to_ope,
 )
 from .runner import GrowthAgentBench, PolicyBenchmarkResult
+from .statistics import TargetingBootstrapResult, bootstrap_randomized_targeting
 from .synthetic import (
     CATEBenchmarkResult,
     SyntheticGrowthSample,
@@ -37,6 +38,8 @@ __all__ = [
     "PolicyBenchmarkResult",
     "RandomizedTargetingResult",
     "SyntheticGrowthSample",
+    "TargetingBootstrapResult",
+    "bootstrap_randomized_targeting",
     "evaluate_cate",
     "evaluate_randomized_targeting",
     "kuairand_reward",
