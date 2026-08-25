@@ -1,5 +1,6 @@
 """Benchmark fixtures and real-world dataset adapters for growth-policy research."""
 
+from .kuairand_features import load_kuairand_user_features, load_kuairand_video_features
 from .offline_rl import OfflineRLDataset, OfflineRLTransition, kuairand_to_offline_rl
 from .real_world import (
     CriteoUpliftData,
@@ -43,6 +44,8 @@ __all__ = [
     "kuairand_to_planner_transitions",
     "load_criteo_uplift",
     "load_kuairand",
+    "load_kuairand_user_features",
+    "load_kuairand_video_features",
     "load_open_bandit",
     "make_synthetic_growth_bandit",
     "open_bandit_to_ope",
