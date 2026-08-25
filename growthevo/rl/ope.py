@@ -30,25 +30,30 @@ class LoggedBanditRecord:
 class OPEEstimate:
     """Counterfactual policy-value estimates plus deployment diagnostics.
 
-    The suite intentionally includes estimators with different bias/variance
-    behavior. ``switch_dr`` follows the SWITCH idea of using the reward-model
-    estimate when importance weights enter a high-variance tail. ``dr_os`` uses
-    optimistic importance-weight shrinkage from the ICML shrinkage work. The
-    existing ``beta_ips`` additive control variate remains available as a
-    complementary estimator rather than being treated as a universal winner.
+    The suite deliberately exposes estimators with different bias/variance
+    behavior instead of selecting one silently. ``switch_dr`` follows the
+    SWITCH idea of falling back to the reward-model estimate in a high-variance
+    importance-weight tail. ``dr_os`` uses optimistic importance-weight
+    shrinkage. ``self_normalized_ips`` trades some finite-sample bias for lower
+    sensitivity to global importance-weight scale. The existing ``beta_ips``
+    additive control variate remains a complementary estimator.
 
-    The estimators remain only as trustworthy as the logged propensities,
-    reward models and support assumptions. Overlap diagnostics are therefore
-    first-class outputs rather than debug metadata.
+    All estimators are only as trustworthy as the logged propensities, reward
+    models and support assumptions. Overlap diagnostics are first-class outputs
+    rather than debug metadata.
     """
 
+    direct_method: float
     ips: float
+    self_normalized_ips: float
     doubly_robust: float
     switch_dr: float
     dr_os: float
     beta_ips: float
     beta_star: float
+    dm_standard_error: float
     ips_standard_error: float
+    snips_standard_error: float
     dr_standard_error: float
     switch_dr_standard_error: float
     dr_os_standard_error: float
@@ -104,10 +109,12 @@ def evaluate_policy(
 
     Returned estimators:
 
+    - Direct Method: the reward model integrated under the target policy;
     - IPS: unbiased under correct propensities but potentially high variance;
-    - DR: direct model plus importance-weighted residual correction;
+    - self-normalized IPS: normalized importance weighting;
+    - Doubly Robust: direct model plus importance-weighted residual correction;
     - SWITCH-DR: suppresses the residual correction in the extreme-weight tail;
-    - DRos: smoothly shrinks the DR residual importance weight;
+    - optimistic DR shrinkage: smoothly shrinks the residual importance weight;
     - beta-IPS: additive control-variate correction.
 
     Hyperparameters are explicit so real-data experiments can tune them only on
@@ -126,6 +133,7 @@ def evaluate_policy(
         raise ValueError("at least one logged record is required")
 
     weights = [row.importance_weight for row in rows]
+    dm_terms = [row.target_q for row in rows]
     ips_terms = [weight * row.reward for weight, row in zip(weights, rows, strict=True)]
     dr_terms = [
         row.target_q + weight * (row.reward - row.baseline_q)
@@ -169,6 +177,20 @@ def evaluate_policy(
     squared_weight_sum = fsum(weight * weight for weight in weights)
     ess = (weight_sum * weight_sum / squared_weight_sum) if squared_weight_sum > 0 else 0.0
 
+    if weight_sum > 1e-15:
+        self_normalized_ips = fsum(ips_terms) / weight_sum
+        mean_weight = weight_sum / n
+        # First-order ratio-estimator influence values. Their standard error is
+        # an asymptotic diagnostic, not a replacement for bootstrap intervals.
+        snips_influence = [
+            weight * (row.reward - self_normalized_ips) / mean_weight
+            for weight, row in zip(weights, rows, strict=True)
+        ]
+        snips_standard_error = _standard_error(snips_influence)
+    else:
+        self_normalized_ips = float("nan")
+        snips_standard_error = float("nan")
+
     weight_mean = _mean(weights)
     weight_std = sqrt(max(0.0, _sample_variance(weights))) if n > 1 else 0.0
     weight_cv = weight_std / weight_mean if abs(weight_mean) > 1e-15 else float("inf")
@@ -181,13 +203,17 @@ def evaluate_policy(
     )
 
     return OPEEstimate(
+        direct_method=_mean(dm_terms),
         ips=_mean(ips_terms),
+        self_normalized_ips=self_normalized_ips,
         doubly_robust=_mean(dr_terms),
         switch_dr=_mean(switch_terms),
         dr_os=_mean(dr_os_terms),
         beta_ips=_mean(beta_terms),
         beta_star=beta_star,
+        dm_standard_error=_standard_error(dm_terms),
         ips_standard_error=_standard_error(ips_terms),
+        snips_standard_error=snips_standard_error,
         dr_standard_error=_standard_error(dr_terms),
         switch_dr_standard_error=_standard_error(switch_terms),
         dr_os_standard_error=_standard_error(dr_os_terms),
@@ -212,14 +238,26 @@ def policy_evidence_from_ope(
     fatigue: float,
     churn_risk: float,
     estimator: Literal[
-        "beta_ips", "doubly_robust", "switch_dr", "dr_os", "ips"
+        "direct_method",
+        "ips",
+        "self_normalized_ips",
+        "doubly_robust",
+        "switch_dr",
+        "dr_os",
+        "beta_ips",
     ] = "beta_ips",
 ) -> PolicyEvidence:
     """Compile OPE output into the verifier's evidence contract."""
 
-    if estimator == "beta_ips":
-        value = estimate.beta_ips
-        standard_error = estimate.beta_ips_standard_error
+    if estimator == "direct_method":
+        value = estimate.direct_method
+        standard_error = estimate.dm_standard_error
+    elif estimator == "ips":
+        value = estimate.ips
+        standard_error = estimate.ips_standard_error
+    elif estimator == "self_normalized_ips":
+        value = estimate.self_normalized_ips
+        standard_error = estimate.snips_standard_error
     elif estimator == "doubly_robust":
         value = estimate.doubly_robust
         standard_error = estimate.dr_standard_error
@@ -229,9 +267,9 @@ def policy_evidence_from_ope(
     elif estimator == "dr_os":
         value = estimate.dr_os
         standard_error = estimate.dr_os_standard_error
-    elif estimator == "ips":
-        value = estimate.ips
-        standard_error = estimate.ips_standard_error
+    elif estimator == "beta_ips":
+        value = estimate.beta_ips
+        standard_error = estimate.beta_ips_standard_error
     else:  # pragma: no cover - Literal protects typed callers.
         raise ValueError(f"unsupported estimator: {estimator}")
 
