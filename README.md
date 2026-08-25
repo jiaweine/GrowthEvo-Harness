@@ -534,7 +534,7 @@ python examples/real_world_benchmark.py kuairand data/kuairand.csv
 - full verl / Agent Lightning trainer integration；
 - hidden-confounding 下的无条件因果有效性。
 
-真实数据适配器 ≠ 已经得到真实业务提升结论。完整 benchmark 必须下载官方数据、固定 split / hyperparameter protocol，并在 untouched test cohort 上报告结果。
+真实数据适配器 ≠ 已经得到真实业务提升结论。完整 benchmark 必须下载官方数据、固定 split / hyperparameter protocol，并在 untouched test cohort 上报告结果。当前 CI 验证代码契约与 fixture，不把 fixture 指标当成真实数据结果。
 
 规则始终是：
 
