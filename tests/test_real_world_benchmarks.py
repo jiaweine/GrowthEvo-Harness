@@ -108,6 +108,39 @@ def test_open_bandit_loader_preserves_logged_propensity(tmp_path: Path) -> None:
     assert ope_rows[0].importance_weight == pytest.approx(2.0)
 
 
+def test_behavior_policy_recovery_matches_ips_and_self_normalized_ips() -> None:
+    rows = [
+        LoggedBanditRecord(
+            reward=1.0,
+            behavior_propensity=0.25,
+            target_action_probability=0.25,
+            baseline_q=0.4,
+            target_q=0.4,
+        ),
+        LoggedBanditRecord(
+            reward=0.0,
+            behavior_propensity=0.50,
+            target_action_probability=0.50,
+            baseline_q=0.4,
+            target_q=0.4,
+        ),
+        LoggedBanditRecord(
+            reward=1.0,
+            behavior_propensity=0.10,
+            target_action_probability=0.10,
+            baseline_q=0.4,
+            target_q=0.4,
+        ),
+    ]
+
+    estimate = evaluate_policy(rows)
+
+    assert estimate.direct_method == pytest.approx(0.4)
+    assert estimate.ips == pytest.approx(2.0 / 3.0)
+    assert estimate.self_normalized_ips == pytest.approx(2.0 / 3.0)
+    assert estimate.effective_sample_ratio == pytest.approx(1.0)
+
+
 def test_kuairand_sequence_state_does_not_include_current_feedback(tmp_path: Path) -> None:
     path = _write(
         tmp_path / "kuairand.csv",
