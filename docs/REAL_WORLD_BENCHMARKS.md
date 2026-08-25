@@ -39,13 +39,15 @@ When the exact assignment probability is not supplied, the loader uses the empir
 
 Do not report ordinary ROC-AUC as the main metric for targeting. A response model answers who is likely to convert, while the growth decision asks who changes behavior because of treatment.
 
-The repository provides `evaluate_randomized_targeting()`, which evaluates a top-score treatment policy by inverse weighting under the randomized assignment. Recommended reporting:
+The repository provides `evaluate_randomized_targeting()`, which evaluates a top-score treatment policy by inverse weighting under the randomized assignment. It also provides `bootstrap_randomized_targeting()`, which resamples treatment and control arms separately so confidence intervals retain the randomized-arm structure.
+
+Recommended reporting:
 
 - policy value for top 10%, 20%, and 30% targeting budgets;
 - incremental value versus treat-none;
 - treat-all and treat-none references;
 - treatment-effect ranking curves such as Qini/AUUC when using an external research stack;
-- bootstrap confidence intervals on all headline real-data metrics;
+- treatment/control-stratified bootstrap confidence intervals on headline metrics;
 - treatment/control counts inside each reported top-k slice.
 
 For CATE baselines, compare at minimum:
@@ -77,12 +79,16 @@ timestamp
 item_id
 position
 click
-propensity_score
-user features
-user-item affinity features
+logged action probability
+categorical user features
+numeric user-item affinity features
 ```
 
-`open_bandit_to_ope()` then converts a target policy and reward-model predictions into `LoggedBanditRecord` without replacing the observed propensity.
+Current public files name the logged action probability `propensity_score`. An official smaller historical sample used `action_prob`. `load_open_bandit()` accepts both names and normalizes them to `propensity_score` internally without estimating or replacing the logged probability.
+
+Official current files contain categorical user descriptors and numeric user-item affinity features. The adapter keeps those types separate instead of coercing category labels to arbitrary numbers.
+
+`open_bandit_to_ope()` converts a target policy and reward-model predictions into `LoggedBanditRecord` without replacing the observed propensity.
 
 ### OPE estimator suite
 
@@ -114,7 +120,7 @@ Thresholds for SWITCH-DR and the shrinkage coefficient must be tuned on validati
 
 Primary references:
 
-- Saito, Aihara, Matsutani, Narita, *Open Bandit Dataset and Pipeline: Towards Realistic and Reproducible Off-Policy Evaluation*, 2020/2021.
+- Saito, Aihara, Matsutani, Narita, *Open Bandit Dataset and Pipeline: Towards Realistic and Reproducible Off-Policy Evaluation*.
 - Wang, Agarwal, Dudik, *Optimal and Adaptive Off-policy Evaluation in Contextual Bandits*, ICML 2017.
 - Su, Dimakopoulou, Krishnamurthy, Dudik, *Doubly Robust Off-policy Evaluation with Shrinkage*, ICML 2020.
 
@@ -127,11 +133,13 @@ Dataset/pipeline resources:
 
 ## KuaiRand
 
-KuaiRand is the sequential benchmark. It provides production recommendation trajectories, explicit users and timestamps, many feedback channels, and randomized interventions interleaved with the standard recommender.
+KuaiRand is the sequential benchmark. It provides production recommendation trajectories, explicit users and timestamps, many feedback channels, randomized interventions, and official user/video feature tables.
 
 GrowthEvo uses it to test the part of the system that Criteo and Open Bandit cannot test: state evolution and long-horizon credit assignment.
 
-The adapter keeps the logged video action and constructs history-only observations. Current feedback is used as reward and only becomes state information at the next step. This prevents a common leakage bug in offline sequence benchmarks.
+The adapter keeps the logged video action and constructs history-only states. Current feedback is used as reward and only becomes state information at the next step. This prevents a common leakage bug in offline sequence benchmarks.
+
+`load_kuairand_user_features()` and `load_kuairand_video_features()` preserve mixed numeric/categorical metadata and support filtering to ids actually present in an experiment split. This matters because the video catalog is too large to load or model naively when only a small subset is used in one run.
 
 Default research reward:
 
@@ -151,9 +159,26 @@ These weights are an explicit benchmark choice, not a claim about Kuaishou's pro
 
 `is_rand` only says whether the displayed item came from the random intervention mechanism. It is **not** itself the probability of the displayed item. GrowthEvo therefore never converts `is_rand` into a propensity score.
 
+For the standard Offline RL export, `random_intervention` is metadata rather than a policy-state feature. This prevents a learned policy from exploiting logging-mechanism provenance that would not be a normal deployment state.
+
 If exact per-action probabilities are unavailable for a sequential experiment, use methods that do not require fabricated IPS weights and keep evaluation claims correspondingly limited.
 
-### Offline RL baselines
+### Offline RL export and baselines
+
+`kuairand_to_offline_rl()` exports backend-neutral transitions:
+
+```text
+state
+action_id
+action_features
+reward
+next_state
+done
+random_intervention metadata
+feedback diagnostics
+```
+
+The exact video id is retained for auditability, while optional action features allow a representation-based critic/policy instead of an impractical flat head over a huge catalog.
 
 For the sequential track, compare against methods designed for distribution shift rather than only PPO on static logs:
 
@@ -163,7 +188,9 @@ For the sequential track, compare against methods designed for distribution shif
 - Decision Transformer, NeurIPS 2021;
 - a sequence-aware advertising method such as MTORL, KDD 2025, where its task assumptions can be reproduced fairly.
 
-The reason for these baselines is structural. Offline advertising/recommendation data is dominated by behavior-policy support, extrapolation error, delayed reward, and budget constraints. CQL and IQL explicitly target out-of-distribution action/value problems; Decision Transformer tests whether conditional sequence modeling is competitive; MTORL is directly motivated by channel and budget decisions in online advertising.
+The reason for these baselines is structural. Offline advertising/recommendation data is dominated by behavior-policy support, extrapolation error, delayed reward, and budget constraints. CQL and IQL target out-of-distribution value problems; Decision Transformer tests conditional sequence modeling; MTORL is directly motivated by channel and budget decisions in online advertising.
+
+The large-action candidate-set and action-encoder contract is documented in `docs/OFFLINE_RL_BASELINES.md`.
 
 Primary resources:
 
@@ -181,7 +208,7 @@ Primary resources:
 
 Criteo:
 
-1. Split by rows with a fixed seed while stratifying treatment and outcome for development experiments.
+1. Split with a fixed seed while stratifying treatment and outcome for development experiments.
 2. Fit nuisance and CATE models only on training folds.
 3. Tune model/targeting hyperparameters on validation data.
 4. Report policy metrics once on the untouched test data.
@@ -201,7 +228,8 @@ KuaiRand:
 2. Keep all steps from a user in temporal order.
 3. Never let current feedback enter the current state.
 4. Compare behavior cloning before claiming an RL gain.
-5. Report action-support diagnostics and performance by random-intervention versus standard-recommender subsets.
+5. Fix candidate-action generation across CQL/IQL/sequence-model baselines.
+6. Report action-support diagnostics and random-intervention analyses separately from counterfactual policy-value claims.
 
 ---
 
@@ -224,7 +252,7 @@ Estimator | Open Bandit policy pair | estimate | ground truth | relative error |
 ### Sequential offline RL table
 
 ```text
-Method | KuaiRand reward | click | long-view | hate | support metric | seeds
+Method | KuaiRand reward | click | long-view | hate | support/candidate metric | seeds
 ```
 
 ### Ablation table
