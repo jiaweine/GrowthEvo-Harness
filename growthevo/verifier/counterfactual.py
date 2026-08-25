@@ -16,6 +16,20 @@ class VerifierConfig:
     min_support_coverage: float = 0.95
     max_importance_weight: float = 20.0
 
+    def __post_init__(self) -> None:
+        if self.z_score < 0:
+            raise ValueError("z_score must be non-negative")
+        if self.min_sample_size < 0:
+            raise ValueError("min_sample_size must be non-negative")
+        if self.min_effective_sample_size < 0:
+            raise ValueError("min_effective_sample_size must be non-negative")
+        if not 0 <= self.min_effective_sample_ratio <= 1:
+            raise ValueError("min_effective_sample_ratio must be in [0, 1]")
+        if not 0 <= self.min_support_coverage <= 1:
+            raise ValueError("min_support_coverage must be in [0, 1]")
+        if self.max_importance_weight < 0:
+            raise ValueError("max_importance_weight must be non-negative")
+
 
 class CounterfactualVerifier:
     """Conservative promotion gate for learned growth policies.
@@ -38,8 +52,11 @@ class CounterfactualVerifier:
         conformal: ConformalMargins | None = None,
     ) -> VerificationResult:
         cfg = self.config
+        if evidence.standard_error < 0:
+            raise ValueError("standard_error must be non-negative")
+
         value_delta = evidence.candidate_value - evidence.baseline_value
-        statistical_lcb = value_delta - cfg.z_score * max(0.0, evidence.standard_error)
+        statistical_lcb = value_delta - cfg.z_score * evidence.standard_error
         calibrated_lcb = (
             conformal.value_lcb(value_delta) if conformal is not None else statistical_lcb
         )
