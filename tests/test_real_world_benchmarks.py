@@ -76,9 +76,10 @@ def test_criteo_randomized_targeting_evaluates_a_policy_not_response_prediction(
 
     assert result.sample_size == 4
     assert result.selected_fraction == pytest.approx(0.5)
-    assert result.policy_value == pytest.approx(0.5)
+    assert result.policy_value == pytest.approx(1.0)
     assert result.treat_none_value == pytest.approx(0.5)
     assert result.treat_all_value == pytest.approx(1.0)
+    assert result.incremental_value_vs_none == pytest.approx(0.5)
 
 
 def test_open_bandit_loader_preserves_logged_propensity(tmp_path: Path) -> None:
