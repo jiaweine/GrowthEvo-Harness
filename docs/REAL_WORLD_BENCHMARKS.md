@@ -86,17 +86,17 @@ user-item affinity features
 
 ### OPE estimator suite
 
-The benchmark should compare estimators rather than silently picking one:
+The benchmark compares estimators rather than silently picking one:
 
-- Direct Method when a reward model is available;
+- Direct Method;
 - IPS;
+- self-normalized IPS;
 - Doubly Robust;
 - SWITCH-DR, following Wang, Agarwal, and Dudik, ICML 2017;
 - Doubly Robust with optimistic shrinkage, following Su, Dimakopoulou, Krishnamurthy, and Dudik, ICML 2020;
-- beta-IPS additive control variate already implemented in GrowthEvo;
-- self-normalized IPS as an additional ablation when using an external OPE package.
+- beta-IPS additive control variate already implemented in GrowthEvo.
 
-GrowthEvo now implements IPS, DR, SWITCH-DR, optimistic DR shrinkage, and beta-IPS in one output object so the same cohort exposes estimator disagreement.
+GrowthEvo implements all of these in one output object so the same cohort exposes estimator disagreement. The self-normalized IPS standard error is a first-order ratio-estimator diagnostic; paper-facing uncertainty should additionally use bootstrap or repeated-policy evaluation where the experimental protocol permits it.
 
 Every OPE table should include:
 
