@@ -38,6 +38,12 @@ class OPEEstimate:
     support assumptions. ``effective_sample_size``, ``support_coverage`` and the
     weight-tail diagnostics are therefore first-class outputs rather than debug
     metadata.
+
+    ``support_coverage`` is target-policy-mass weighted: unsupported records are
+    weighted by their importance mass rather than counted equally. This prevents
+    a small number of extremely high-weight, out-of-support records from being
+    hidden by a large number of low-impact supported rows. The unweighted
+    ``record_support_coverage`` is retained as a descriptive diagnostic.
     """
 
     ips: float
@@ -53,6 +59,7 @@ class OPEEstimate:
     max_importance_weight: float
     weight_coefficient_of_variation: float
     sample_size: int
+    record_support_coverage: float = 1.0
 
 
 def _mean(values: list[float]) -> float:
@@ -135,11 +142,19 @@ def evaluate_policy(
     weight_std = sqrt(max(0.0, _sample_variance(weights))) if n > 1 else 0.0
     weight_cv = weight_std / weight_mean if abs(weight_mean) > 1e-15 else float("inf")
 
-    supported = sum(
-        1
-        for row in rows
-        if row.target_action_probability == 0.0
+    support_mask = [
+        row.target_action_probability == 0.0
         or row.behavior_propensity >= support_propensity_floor
+        for row in rows
+    ]
+    supported_records = sum(support_mask)
+    supported_target_mass = fsum(
+        weight
+        for weight, supported in zip(weights, support_mask, strict=True)
+        if supported
+    )
+    target_mass_support_coverage = (
+        supported_target_mass / weight_sum if weight_sum > 1e-15 else 0.0
     )
 
     return OPEEstimate(
@@ -152,10 +167,11 @@ def evaluate_policy(
         beta_ips_standard_error=_standard_error(beta_terms),
         effective_sample_size=ess,
         effective_sample_ratio=ess / n,
-        support_coverage=supported / n,
+        support_coverage=target_mass_support_coverage,
         max_importance_weight=max(weights),
         weight_coefficient_of_variation=weight_cv,
         sample_size=n,
+        record_support_coverage=supported_records / n,
     )
 
 

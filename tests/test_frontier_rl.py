@@ -22,7 +22,7 @@ from growthevo.rl.process_reward import (
     ProcessState,
     TrajectoryStepSignal,
 )
-from growthevo.verifier.counterfactual import CounterfactualVerifier
+from growthevo.verifier.counterfactual import CounterfactualVerifier, VerifierConfig
 
 
 def _constraints(**overrides: object) -> GrowthConstraints:
@@ -84,7 +84,7 @@ def test_beta_star_ips_removes_linear_weight_variance() -> None:
     assert estimate.effective_sample_ratio < 1.0
 
 
-def test_ope_reports_practical_support_gap() -> None:
+def test_ope_reports_target_mass_support_gap() -> None:
     estimate = evaluate_policy(
         [
             LoggedBanditRecord(
@@ -105,7 +105,8 @@ def test_ope_reports_practical_support_gap() -> None:
         support_propensity_floor=1e-3,
     )
 
-    assert estimate.support_coverage == pytest.approx(0.5)
+    assert estimate.record_support_coverage == pytest.approx(0.5)
+    assert estimate.support_coverage == pytest.approx(1.0 / 5001.0)
     assert estimate.max_importance_weight == pytest.approx(5000.0)
 
 
@@ -131,12 +132,47 @@ def test_conformal_margins_are_residual_margins_not_absolute_bounds() -> None:
     assert calibration.spend_upper_margin == pytest.approx(5.0)
     assert calibration.fatigue_upper_margin == pytest.approx(0.05)
     assert calibration.churn_risk_upper_margin == pytest.approx(0.04)
+    assert calibration.per_metric_alpha == pytest.approx(0.01)
 
     assert calibration.value_lcb(0.20) == pytest.approx(0.15)
     assert calibration.roi_lcb(2.0) == pytest.approx(1.8)
     assert calibration.spend_ucb(50.0) == pytest.approx(55.0)
     assert calibration.fatigue_ucb(0.30) == pytest.approx(0.35)
     assert calibration.churn_risk_ucb(0.20) == pytest.approx(0.24)
+
+
+def test_conformal_familywise_correction_is_stricter_than_marginal_calibration() -> None:
+    records = [
+        ConformalCalibrationRecord(
+            predicted_value_delta=1.0,
+            observed_value_delta=1.0 - index / 100.0,
+            predicted_roi=2.0,
+            observed_roi=2.0,
+            predicted_spend=50.0,
+            observed_spend=50.0,
+            predicted_fatigue=0.30,
+            observed_fatigue=0.30,
+            predicted_churn_risk=0.20,
+            observed_churn_risk=0.20,
+        )
+        for index in range(100)
+    ]
+
+    familywise = ConformalPolicyCalibrator(
+        alpha=0.05,
+        min_calibration_size=30,
+    ).fit(records)
+    marginal = ConformalPolicyCalibrator(
+        alpha=0.05,
+        min_calibration_size=30,
+        simultaneous=False,
+    ).fit(records)
+
+    assert familywise.per_metric_alpha == pytest.approx(0.01)
+    assert marginal.per_metric_alpha == pytest.approx(0.05)
+    assert familywise.value_lower_margin == pytest.approx(0.99)
+    assert marginal.value_lower_margin == pytest.approx(0.95)
+    assert familywise.value_lower_margin > marginal.value_lower_margin
 
 
 def test_conformal_gate_can_block_statistically_positive_candidate() -> None:
@@ -196,6 +232,30 @@ def test_verifier_abstains_when_logging_support_is_weak() -> None:
 
     assert result.status is VerificationStatus.INSUFFICIENT_EVIDENCE
     assert "logging_support_below_gate" in result.reasons
+
+
+def test_verifier_rejects_negative_standard_error_instead_of_fail_open() -> None:
+    evidence = PolicyEvidence(
+        candidate_value=1.3,
+        baseline_value=1.0,
+        standard_error=-0.01,
+        sample_size=200,
+        effective_sample_size=120,
+        roi=2.0,
+        spend=10.0,
+        fatigue=0.2,
+        churn_risk=0.1,
+    )
+
+    with pytest.raises(ValueError, match="standard_error"):
+        CounterfactualVerifier().verify(evidence, _constraints())
+
+
+def test_verifier_config_rejects_invalid_probability_thresholds() -> None:
+    with pytest.raises(ValueError, match="min_support_coverage"):
+        VerifierConfig(min_support_coverage=1.1)
+    with pytest.raises(ValueError, match="min_effective_sample_ratio"):
+        VerifierConfig(min_effective_sample_ratio=-0.1)
 
 
 def test_growth_prm_rewards_grounded_information_gain() -> None:
