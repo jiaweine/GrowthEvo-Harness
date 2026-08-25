@@ -1,5 +1,6 @@
 """Benchmark fixtures and real-world dataset adapters for growth-policy research."""
 
+from .offline_rl import OfflineRLDataset, OfflineRLTransition, kuairand_to_offline_rl
 from .real_world import (
     CriteoUpliftData,
     DEFAULT_KUAIRAND_REWARD_WEIGHTS,
@@ -29,6 +30,8 @@ __all__ = [
     "DEFAULT_KUAIRAND_REWARD_WEIGHTS",
     "GrowthAgentBench",
     "KuaiRandInteraction",
+    "OfflineRLDataset",
+    "OfflineRLTransition",
     "OpenBanditInteraction",
     "PolicyBenchmarkResult",
     "RandomizedTargetingResult",
@@ -36,6 +39,7 @@ __all__ = [
     "evaluate_cate",
     "evaluate_randomized_targeting",
     "kuairand_reward",
+    "kuairand_to_offline_rl",
     "kuairand_to_planner_transitions",
     "load_criteo_uplift",
     "load_kuairand",
