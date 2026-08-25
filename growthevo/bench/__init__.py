@@ -1,5 +1,19 @@
-"""Deterministic benchmark fixtures for causal growth-policy research."""
+"""Benchmark fixtures and real-world dataset adapters for growth-policy research."""
 
+from .real_world import (
+    CriteoUpliftData,
+    DEFAULT_KUAIRAND_REWARD_WEIGHTS,
+    KuaiRandInteraction,
+    OpenBanditInteraction,
+    RandomizedTargetingResult,
+    evaluate_randomized_targeting,
+    kuairand_reward,
+    kuairand_to_planner_transitions,
+    load_criteo_uplift,
+    load_kuairand,
+    load_open_bandit,
+    open_bandit_to_ope,
+)
 from .runner import GrowthAgentBench, PolicyBenchmarkResult
 from .synthetic import (
     CATEBenchmarkResult,
@@ -11,10 +25,22 @@ from .synthetic import (
 
 __all__ = [
     "CATEBenchmarkResult",
+    "CriteoUpliftData",
+    "DEFAULT_KUAIRAND_REWARD_WEIGHTS",
     "GrowthAgentBench",
+    "KuaiRandInteraction",
+    "OpenBanditInteraction",
     "PolicyBenchmarkResult",
+    "RandomizedTargetingResult",
     "SyntheticGrowthSample",
     "evaluate_cate",
+    "evaluate_randomized_targeting",
+    "kuairand_reward",
+    "kuairand_to_planner_transitions",
+    "load_criteo_uplift",
+    "load_kuairand",
+    "load_open_bandit",
     "make_synthetic_growth_bandit",
+    "open_bandit_to_ope",
     "oracle_policy_value",
 ]
