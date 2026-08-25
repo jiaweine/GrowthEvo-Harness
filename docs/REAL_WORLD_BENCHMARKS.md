@@ -269,3 +269,7 @@ full system
 ```
 
 Do not turn missing real-world evidence into a synthetic proxy. If a dataset cannot validate a component, mark that cell as not identified by that dataset.
+
+## Evidence boundary
+
+This repository now contains adapters, estimators, uncertainty utilities, and offline-RL export contracts for the public datasets above. It does **not** vendor the large third-party datasets and it does not fabricate headline benchmark numbers. A result becomes paper evidence only after the official files are downloaded, a fixed train/validation/test protocol is recorded, hyperparameters are selected without final-test leakage, and the untouched evaluation split is run.
