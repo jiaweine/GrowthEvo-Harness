@@ -4,8 +4,8 @@ import argparse
 from pathlib import Path
 
 from growthevo.bench import (
-    evaluate_randomized_targeting,
-    kuairand_to_planner_transitions,
+    bootstrap_randomized_targeting,
+    kuairand_to_offline_rl,
     load_criteo_uplift,
     load_kuairand,
     load_open_bandit,
@@ -14,7 +14,6 @@ from growthevo.bench import (
 from growthevo.causal.dr_learner import CrossFittedDRLearner
 from growthevo.models import Channel
 from growthevo.rl.ope import evaluate_policy
-from growthevo.training.trajectory import TrajectoryTrainerAdapter
 
 
 def run_criteo(path: Path, max_rows: int) -> None:
@@ -28,10 +27,16 @@ def run_criteo(path: Path, max_rows: int) -> None:
 
     print(f"rows={len(data.records)} treatment_propensity={data.treatment_propensity:.6f}")
     for fraction in (0.10, 0.20, 0.30):
-        result = evaluate_randomized_targeting(test, scores, selected_fraction=fraction)
+        result = bootstrap_randomized_targeting(
+            test,
+            scores,
+            selected_fraction=fraction,
+            replicates=200,
+        )
         print(
-            f"target={fraction:.0%} policy_value={result.policy_value:.6f} "
-            f"incremental_vs_none={result.incremental_value_vs_none:.6f}"
+            f"target={fraction:.0%} policy_value={result.point.policy_value:.6f} "
+            f"incremental_vs_none={result.point.incremental_value_vs_none:.6f} "
+            f"ci=[{result.lower_incremental_value:.6f}, {result.upper_incremental_value:.6f}]"
         )
 
 
@@ -48,22 +53,22 @@ def run_open_bandit(path: Path, max_rows: int) -> None:
     print(f"rows={len(rows)} empirical_click={empirical_click:.6f}")
     print(
         "behavior-policy OPE "
-        f"IPS={estimate.ips:.6f} DR={estimate.doubly_robust:.6f} "
+        f"DM={estimate.direct_method:.6f} IPS={estimate.ips:.6f} "
+        f"SNIPS={estimate.self_normalized_ips:.6f} DR={estimate.doubly_robust:.6f} "
         f"SWITCH-DR={estimate.switch_dr:.6f} DRos={estimate.dr_os:.6f} "
-        f"ESS/N={estimate.effective_sample_ratio:.4f}"
+        f"beta-IPS={estimate.beta_ips:.6f} ESS/N={estimate.effective_sample_ratio:.4f}"
     )
 
 
 def run_kuairand(path: Path, max_rows: int) -> None:
     rows = load_kuairand(path, max_rows=max_rows)
-    transitions = kuairand_to_planner_transitions(rows)
-    batch = TrajectoryTrainerAdapter(normalize_advantages=False).build(transitions)
-    random_steps = sum(bool(row.observation["random_intervention"]) for row in batch.samples)
+    dataset = kuairand_to_offline_rl(rows)
     print(
-        f"rows={len(rows)} transitions={len(batch.samples)} "
-        f"random_interventions={random_steps}"
+        f"rows={len(rows)} transitions={len(dataset.transitions)} "
+        f"trajectories={dataset.trajectory_count} actions={dataset.action_count} "
+        f"random_intervention_rate={dataset.random_intervention_rate:.6f}"
     )
-    print(batch.to_jsonl().splitlines()[0])
+    print(dataset.to_jsonl().splitlines()[0])
 
 
 def main() -> None:
