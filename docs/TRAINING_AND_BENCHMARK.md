@@ -143,7 +143,9 @@ Open Bandit Dataset provides real production recommendation impressions with log
 
 Use this track for realistic OPE comparison. The built-in estimator suite contains:
 
+- Direct Method;
 - IPS;
+- self-normalized IPS;
 - Doubly Robust;
 - SWITCH-DR;
 - optimistic DR shrinkage;
@@ -168,7 +170,7 @@ The training stack can propose a better policy, but only the evidence chain can 
 
 ```text
 logged / randomized cohort
-    -> OPE (IPS / DR / SWITCH-DR / DR shrinkage / beta*-IPS)
+    -> OPE (DM / IPS / self-normalized IPS / DR / SWITCH-DR / DR shrinkage / beta*-IPS)
     -> ESS + support + weight-tail diagnostics
     -> conformal residual calibration when appropriate
     -> Counterfactual Verifier
