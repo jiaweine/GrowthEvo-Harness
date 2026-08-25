@@ -6,7 +6,7 @@
 
 **让 Growth Agent 在因果增量、行为策略 support、预算约束与可回滚边界内自主决策，并从真实轨迹与失败证据中安全学习。**
 
-`CAUSAL POMDP` · `CROSS-FITTED DR` · `HIERARCHICAL RL` · `SUPPORT-ANCHORED PI` · `β*-IPS / DR OPE` · `CONFORMAL GATE` · `GROWTHPRM` · `DYNAMICS-AWARE GAE` · `RISK-SENSITIVE MPC` · `HARNESS EVOLUTION`
+`CAUSAL POMDP` · `CROSS-FITTED DR` · `HIERARCHICAL RL` · `SUPPORT-ANCHORED PI` · `ROBUST OPE` · `CONFORMAL GATE` · `GROWTHPRM` · `DYNAMICS-AWARE GAE` · `RISK-SENSITIVE MPC` · `HARNESS EVOLUTION`
 
 </div>
 
@@ -53,7 +53,7 @@ flowchart LR
     OBS --> OUT[Delayed Business Outcome]
     OUT --> REWARD[Causal Outcome Reward]
 
-    REWARD --> OPE[IPS / DR / β*-IPS + Overlap]
+    REWARD --> OPE[DM / IPS / SNIPS / DR / SWITCH-DR / DRos / β*-IPS]
     OPE --> CAL[Conformal Calibration]
     CAL --> VERIFY[Counterfactual Verifier]
     VERIFY -->|pass| SHADOW[Shadow / Canary / Promotion]
@@ -254,8 +254,12 @@ credit_boundary
 
 仓库同时实现：
 
+- Direct Method；
 - IPS；
+- self-normalized IPS；
 - Doubly-Robust；
+- SWITCH-DR；
+- optimistic DR shrinkage；
 - estimated β*-IPS additive control variate；
 - estimator-specific standard errors；
 - ESS / ESS ratio；
@@ -326,22 +330,62 @@ Stress scenario 可以压低 uplift、抬高 cost、放大 fatigue。
 
 ---
 
-## 9. GrowthAgentBench
+## 9. Benchmark Tracks
 
-仓库内置一个可审计的 synthetic contextual-bandit oracle，专门做算法回归测试：
+Benchmark 不再把 synthetic 数字和真实数据证据混在一起。
+
+### Synthetic oracle
+
+仓库保留可审计的 synthetic contextual-bandit oracle，用于检查已知真实结构能否被 learner / policy 恢复：
 
 - heterogeneous treatment effects；
 - context-dependent behavior propensities；
 - `NO_TREATMENT / PUSH / EMAIL` potential outcomes；
-- configurable outcome noise；
 - held-out CATE RMSE / MAE / bias；
-- support / uncertainty diagnostics；
-- oracle policy value / regret；
-- no-treatment rate。
+- oracle policy value / regret。
 
-它可以检查 CATE learner 和 policy logic 是否恢复已知真实结构，但**synthetic benchmark 数字不属于业务提升结果**。
+**Synthetic 数字只属于算法回归测试，不属于真实业务提升结果。**
 
-下一步真实 benchmark 应接 Open Bandit Dataset / Criteo uplift，并保留 propensity、legal-action、holdout 和 delayed-outcome 语义。
+### Criteo Uplift
+
+`load_criteo_uplift()` 接真实随机广告增量实验。随机 `treatment` 映射为 `ADS`，control 映射为 `NO_TREATMENT`；post-treatment `exposure` 不会被错误当成 treatment。
+
+支持：
+
+- CATE / uplift learning；
+- top-budget targeting policy value；
+- treat-none / treat-all 对照；
+- treatment/control 分层 bootstrap 区间。
+
+### Open Bandit Dataset
+
+`load_open_bandit()` 保留真实 logged propensity，并区分类别型 user features 与数值 user-item affinity。当前公开 schema 的 `propensity_score` 与官方较早样例中的 `action_prob` 都可读取。
+
+它用于真实 contextual-bandit OPE，而不是伪装成长序列 RL 数据。
+
+### KuaiRand
+
+`load_kuairand()` 保留真实序列、丰富反馈与 `is_rand` 干预标记。`is_rand` **不会被伪造成 action propensity**。
+
+`kuairand_to_offline_rl()` 导出：
+
+```text
+state
+action_id
+action_features
+reward
+next_state
+done
+random_intervention metadata
+multi-feedback diagnostics
+```
+
+并支持按实验 ID 过滤加载官方 user / video feature tables。这样 CQL、IQL、Decision Transformer 等方法可以使用 action encoder，而不是把大规模视频 catalog 粗暴 one-hot 化。
+
+详细协议见：
+
+- `docs/REAL_WORLD_BENCHMARKS.md`
+- `docs/OFFLINE_RL_BASELINES.md`
 
 ---
 
@@ -377,11 +421,15 @@ GrowthEvo-Harness/
 ├── growthevo/
 │   ├── models.py
 │   ├── causal/
-│   │   ├── dr_learner.py          # cross-fitted DR / CATE reference learner
-│   │   └── serving.py             # fitted CATE -> Runtime belief bridge
+│   │   ├── dr_learner.py
+│   │   └── serving.py
 │   ├── bench/
-│   │   ├── synthetic.py           # known-ground-truth logged bandit oracle
-│   │   └── runner.py              # held-out CATE + oracle policy metrics
+│   │   ├── synthetic.py            # known-ground-truth regression oracle
+│   │   ├── runner.py               # synthetic held-out metrics
+│   │   ├── real_world.py           # Criteo / Open Bandit / KuaiRand logs
+│   │   ├── statistics.py           # randomized targeting bootstrap
+│   │   ├── kuairand_features.py    # filtered official feature-table loaders
+│   │   └── offline_rl.py           # state/action/reward/next-state export
 │   ├── runtime/
 │   │   ├── belief_state.py
 │   │   ├── event_store.py
@@ -397,7 +445,7 @@ GrowthEvo-Harness/
 │   │   ├── process_reward.py
 │   │   └── model_based.py
 │   ├── training/
-│   │   └── trajectory.py          # GAE + dynamics-aware trainer export
+│   │   └── trajectory.py
 │   ├── verifier/
 │   │   └── counterfactual.py
 │   ├── simulator/
@@ -407,12 +455,16 @@ GrowthEvo-Harness/
 │   │   └── optimizer.py
 │   └── tools/
 │       └── registry.py
-├── examples/demo.py
+├── examples/
+│   ├── demo.py
+│   └── real_world_benchmark.py
 ├── tests/
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── ALGORITHM.md
 │   ├── TRAINING_AND_BENCHMARK.md
+│   ├── REAL_WORLD_BENCHMARKS.md
+│   ├── OFFLINE_RL_BASELINES.md
 │   ├── FRONTIER_2026.md
 │   └── IMPLEMENTATION_STATUS.md
 └── .github/workflows/ci.yml
@@ -432,7 +484,7 @@ pytest
 python examples/demo.py
 ```
 
-Minimal causal benchmark example:
+Synthetic causal regression check:
 
 ```python
 from growthevo.bench import GrowthAgentBench
@@ -441,6 +493,14 @@ from growthevo.models import Channel
 bench = GrowthAgentBench.synthetic(sample_size=1200, seed=17)
 model, metrics = bench.fit_cate(treatment=Channel.PUSH)
 print(metrics)
+```
+
+Real-data adapters use locally downloaded official files and do not vendor third-party datasets into git:
+
+```bash
+python examples/real_world_benchmark.py criteo data/criteo.csv
+python examples/real_world_benchmark.py open-bandit data/open_bandit.csv
+python examples/real_world_benchmark.py kuairand data/kuairand.csv
 ```
 
 ---
@@ -454,23 +514,27 @@ print(metrics)
 - support-anchored conservative policy improvement；
 - hierarchical Runtime + hard legal action space；
 - GrowthPRM + dynamics-aware GAE export；
-- IPS / DR / β*-IPS + overlap diagnostics；
+- DM / IPS / self-normalized IPS / DR / SWITCH-DR / DR shrinkage / β*-IPS + overlap diagnostics；
+- Criteo Uplift randomized-treatment adapter + targeting bootstrap；
+- Open Bandit true-propensity adapter；
+- KuaiRand leakage-aware sequential adapter + user/video feature loading + standard Offline RL transition export；
 - split-conformal promotion margins；
 - Counterfactual Verifier；
 - CVaR model-based stress planning；
-- GrowthAgentBench synthetic oracle；
+- synthetic oracle regression benchmark；
 - bounded Harness Evolution。
 
 当前**不声称已经完成**：
 
-- production neural IQL/CQL/CPO/GRPO；
-- DARA/LBM 训练算法复现；
+- production neural IQL / CQL / CPO / GRPO trainer；
 - learned neural user simulator；
-- Open Bandit / Criteo benchmark result；
+- public real-data headline result table；
 - real online A/B uplift；
 - production ad-auction latency；
 - full verl / Agent Lightning trainer integration；
 - hidden-confounding 下的无条件因果有效性。
+
+真实数据适配器 ≠ 已经得到真实业务提升结论。完整 benchmark 必须下载官方数据、固定 split / hyperparameter protocol，并在 untouched test cohort 上报告结果。
 
 规则始终是：
 
@@ -482,7 +546,10 @@ print(metrics)
 
 `docs/FRONTIER_2026.md` 记录论文信号、代码映射和未实现边界。当前设计重点对齐：
 
-- β*-IPS / additive-control-variate OPE；
+- robust contextual-bandit OPE；
+- causal uplift / doubly robust estimation；
+- CQL / IQL / Decision Transformer 式 Offline RL 对照协议；
+- sequence-aware advertising Offline RL；
 - uncertainty-aware constrained advertising optimization；
 - hierarchical reasoning + numeric acting；
 - observation-grounded process reward；
