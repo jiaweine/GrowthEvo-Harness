@@ -116,38 +116,59 @@ When `done` or `credit_boundary` is true, bootstrap and advantage propagation st
 
 The adapter exports backend-neutral records/JSONL. It intentionally does not pretend to be a full verl, Agent Lightning, PPO or GRPO trainer.
 
-## 5. GrowthAgentBench
+## 5. Benchmark tracks
 
-`GrowthAgentBench` currently contains an auditable synthetic contextual-bandit fixture with known ground truth.
+GrowthEvo now separates algorithmic regression tests from real-world evidence.
 
-The generator includes:
+### Synthetic oracle
 
-- heterogeneous user context;
-- context-dependent logging propensities;
-- `NO_TREATMENT`, push and email actions;
-- known potential-outcome treatment effects;
-- configurable outcome noise.
+`GrowthAgentBench` retains an auditable synthetic contextual-bandit fixture with known ground truth. The generator includes heterogeneous context, context-dependent logging propensities, `NO_TREATMENT`, push and email actions, known potential-outcome treatment effects, and configurable outcome noise.
 
-Available held-out metrics include:
+Available oracle metrics include CATE RMSE/MAE/bias, support, uncertainty, oracle policy value/regret, and no-treatment rate. These numbers are implementation regression evidence, not business results.
 
-- CATE RMSE;
-- CATE MAE;
-- CATE bias;
-- mean support score;
-- mean serving uncertainty;
-- oracle policy value;
-- oracle regret;
-- no-treatment rate.
+### Criteo Uplift
 
-Synthetic benchmark metrics are regression evidence for the implementation, not business results.
+Criteo supplies randomized advertising incrementality data. GrowthEvo maps randomized treatment assignment to `ADS` and control to `NO_TREATMENT`, using `visit` or `conversion` as the outcome. The downstream `exposure` flag is never reinterpreted as assignment.
+
+Use this track for:
+
+- CATE and uplift ranking;
+- top-budget treatment policy evaluation;
+- treatment-vs-holdout incremental value;
+- comparison against S/T/X/R learners, doubly robust learners, and causal forests in the research stack.
+
+### Open Bandit Dataset
+
+Open Bandit Dataset provides real production recommendation impressions with logged behavior-policy propensity scores. GrowthEvo preserves those scores and adapts target-policy probabilities and reward-model predictions into `LoggedBanditRecord`.
+
+Use this track for realistic OPE comparison. The built-in estimator suite contains:
+
+- IPS;
+- Doubly Robust;
+- SWITCH-DR;
+- optimistic DR shrinkage;
+- beta-IPS additive control variate;
+- ESS, support, maximum-weight, and weight-dispersion diagnostics.
+
+SWITCH-DR follows the adaptive estimator direction from ICML 2017. Optimistic DR shrinkage follows the ICML 2020 shrinkage estimator. Hyperparameters must be selected on development data rather than final OPE error.
+
+### KuaiRand
+
+KuaiRand supplies sequential recommendation trajectories and randomized interventions. GrowthEvo converts the logs into history-only `PlannerTransition` observations: current feedback becomes reward and only enters state statistics on the next step.
+
+`is_rand` is retained as an intervention marker, not fabricated into a propensity score.
+
+Use this track for sequential offline RL and compare at least Behavior Cloning, CQL, IQL, Decision Transformer, and a sequence-aware advertising method when the task assumptions can be matched fairly.
+
+The detailed data mappings, experiment splits, baseline references, and result-table contracts live in `docs/REAL_WORLD_BENCHMARKS.md`.
 
 ## 6. Promotion remains separate
 
-The training stack can propose a better policy, but only the existing evidence chain can promote it:
+The training stack can propose a better policy, but only the evidence chain can promote it:
 
 ```text
 logged / randomized cohort
-    -> OPE (IPS / DR / beta*-IPS)
+    -> OPE (IPS / DR / SWITCH-DR / DR shrinkage / beta*-IPS)
     -> ESS + support + weight-tail diagnostics
     -> conformal residual calibration when appropriate
     -> Counterfactual Verifier
@@ -156,3 +177,5 @@ logged / randomized cohort
 ```
 
 This separation prevents reward hacking through training-time changes to the evaluator.
+
+Real-world benchmark success is still not automatic deployment evidence. Criteo identifies randomized incrementality, Open Bandit identifies contextual-bandit evaluation behavior, and KuaiRand tests sequential learning assumptions. A production promotion decision must use the platform's own logged/randomized cohort and business constraints.
