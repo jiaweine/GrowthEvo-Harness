@@ -82,14 +82,14 @@ def test_criteo_randomized_targeting_evaluates_a_policy_not_response_prediction(
     assert result.incremental_value_vs_none == pytest.approx(0.5)
 
 
-def test_open_bandit_loader_preserves_logged_propensity(tmp_path: Path) -> None:
+def test_open_bandit_loader_preserves_logged_propensity_and_feature_types(tmp_path: Path) -> None:
     path = _write(
         tmp_path / "bandit.csv",
         "\n".join(
             [
                 "timestamp,item_id,position,click,propensity_score,user_feature_0,user-item_affinity_0",
-                "2020-01-01 00:00:00,7,1,1,0.25,0.2,0.8",
-                "2020-01-01 00:00:01,3,2,0,0.50,0.4,0.1",
+                "2020-01-01 00:00:00,7,1,1,0.25,segment-A,0.8",
+                "2020-01-01 00:00:01,3,2,0,0.50,segment-B,0.1",
             ]
         ),
     )
@@ -103,9 +103,28 @@ def test_open_bandit_loader_preserves_logged_propensity(tmp_path: Path) -> None:
     )
 
     assert rows[0].propensity_score == pytest.approx(0.25)
-    assert rows[0].context == pytest.approx((0.2, 0.8))
+    assert rows[0].context == pytest.approx((0.8,))
+    assert rows[0].categorical_context == ("segment-A",)
     assert ope_rows[0].behavior_propensity == pytest.approx(0.25)
     assert ope_rows[0].importance_weight == pytest.approx(2.0)
+
+
+def test_open_bandit_loader_accepts_official_action_probability_alias(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path / "bandit-small.csv",
+        "\n".join(
+            [
+                "timestamp,item_id,position,click,action_prob,user_feature_0,user-item_affinity_0",
+                "2020-01-01 00:00:00,7,1,1,0.125,segment-A,0.8",
+            ]
+        ),
+    )
+
+    rows = load_open_bandit(path)
+
+    assert rows[0].propensity_score == pytest.approx(0.125)
+    assert rows[0].categorical_context == ("segment-A",)
+    assert rows[0].context == pytest.approx((0.8,))
 
 
 def test_behavior_policy_recovery_matches_ips_and_self_normalized_ips() -> None:
