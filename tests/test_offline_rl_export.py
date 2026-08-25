@@ -59,3 +59,21 @@ def test_offline_rl_export_keeps_multi_feedback_for_analysis(tmp_path: Path) -> 
     assert first.feedback["long_view"] == pytest.approx(1.0)
     assert first.feedback["is_hate"] == pytest.approx(0.0)
     assert '"action_id": 10' in dataset.to_jsonl()
+
+
+def test_offline_rl_export_accepts_representation_features(tmp_path: Path) -> None:
+    rows = load_kuairand(_fixture(tmp_path))
+    dataset = kuairand_to_offline_rl(
+        rows,
+        user_feature_lookup={1: {"activity": "high", "followers": 12}},
+        action_feature_lookup={
+            10: {"duration_ms": 9000.0, "category": "games"},
+            11: {"duration_ms": 9000.0, "category": "music"},
+        },
+    )
+
+    first, second, _ = dataset.transitions
+    assert first.state["user_feature:activity"] == "high"
+    assert first.state["user_feature:followers"] == 12
+    assert first.action_features["category"] == "games"
+    assert second.action_features["category"] == "music"
