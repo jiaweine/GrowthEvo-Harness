@@ -190,6 +190,7 @@ class OpenBanditInteraction:
     click: float
     propensity_score: float
     context: tuple[float, ...]
+    categorical_context: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.position < 0:
@@ -198,10 +199,17 @@ class OpenBanditInteraction:
             raise ValueError("propensity_score must be in (0, 1]")
 
 
-def _open_bandit_feature_columns(fieldnames: Iterable[str]) -> tuple[str, ...]:
+def _open_bandit_context_columns(
+    fieldnames: Iterable[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     names = list(fieldnames)
-    prefixes = ("user_feature", "user-item_affinity", "user_item_affinity")
-    return tuple(name for name in names if name.startswith(prefixes))
+    numeric = tuple(
+        name
+        for name in names
+        if name.startswith(("user-item_affinity", "user_item_affinity"))
+    )
+    categorical = tuple(name for name in names if name.startswith("user_feature"))
+    return numeric, categorical
 
 
 def load_open_bandit(
@@ -209,18 +217,33 @@ def load_open_bandit(
     *,
     max_rows: int | None = None,
 ) -> tuple[OpenBanditInteraction, ...]:
-    """Load Open Bandit Dataset impressions while preserving true propensities."""
+    """Load Open Bandit impressions while preserving logged propensities.
+
+    Current public files use ``propensity_score`` and contain categorical user
+    descriptors plus numeric user-item affinity features. Older official sample
+    files used ``action_prob`` for the same logged action probability. Both
+    schemas are accepted without coercing categorical user features to floats.
+    """
 
     if max_rows is not None and max_rows <= 0:
         raise ValueError("max_rows must be positive when provided")
     interactions: list[OpenBanditInteraction] = []
     with _open_csv(path) as handle:
         reader = csv.DictReader(handle)
-        required = {"timestamp", "item_id", "position", "click", "propensity_score"}
-        missing = required.difference(reader.fieldnames or ())
+        fieldnames = tuple(reader.fieldnames or ())
+        required = {"timestamp", "item_id", "position", "click"}
+        missing = required.difference(fieldnames)
         if missing:
             raise ValueError(f"missing Open Bandit columns: {sorted(missing)}")
-        feature_columns = _open_bandit_feature_columns(reader.fieldnames or ())
+        if "propensity_score" in fieldnames:
+            propensity_column = "propensity_score"
+        elif "action_prob" in fieldnames:
+            propensity_column = "action_prob"
+        else:
+            raise ValueError(
+                "missing Open Bandit propensity column: expected propensity_score or action_prob"
+            )
+        numeric_columns, categorical_columns = _open_bandit_context_columns(fieldnames)
         for index, row in enumerate(reader):
             if max_rows is not None and index >= max_rows:
                 break
@@ -230,8 +253,9 @@ def load_open_bandit(
                     item_id=_read_int(row, "item_id"),
                     position=_read_int(row, "position"),
                     click=_read_float(row, "click"),
-                    propensity_score=_read_float(row, "propensity_score"),
-                    context=tuple(_read_float(row, name) for name in feature_columns),
+                    propensity_score=_read_float(row, propensity_column),
+                    context=tuple(_read_float(row, name) for name in numeric_columns),
+                    categorical_context=tuple(row[name] for name in categorical_columns),
                 )
             )
     if not interactions:
