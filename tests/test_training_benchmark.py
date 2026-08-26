@@ -129,9 +129,10 @@ def test_support_anchored_policy_improvement_respects_tv_cap() -> None:
     assert result.total_variation_distance == pytest.approx(0.10)
     assert sum(result.probabilities.values()) == pytest.approx(1.0)
     assert result.pessimistic_candidate_value > result.pessimistic_baseline_value
+    assert "reference_pessimistic_proposal_used" in result.reasons
 
 
-def test_support_anchored_policy_excludes_unsupported_optimistic_action() -> None:
+def test_support_anchored_policy_freezes_low_support_action_mass() -> None:
     rows = _policy_estimates()
     rows[-1] = ActionValueEstimate(
         action=Channel.EMAIL,
@@ -146,10 +147,97 @@ def test_support_anchored_policy_excludes_unsupported_optimistic_action() -> Non
         value_uncertainty=0.01,
         behavior_probability=0.699,
     )
+
     result = SupportAnchoredPolicyImprover().improve(rows)
 
     assert result.selected_action is Channel.PUSH
-    assert "unsupported_actions_excluded" in result.reasons
+    assert result.probabilities[Channel.EMAIL] == pytest.approx(0.001)
+    assert "low_support_actions_anchored" in result.reasons
+
+
+def test_support_anchored_policy_accepts_external_learned_distribution() -> None:
+    rows = _policy_estimates()
+    result = SupportAnchoredPolicyImprover(
+        SafePolicyImprovementConfig(max_total_variation=0.50)
+    ).improve(
+        rows,
+        proposal_probabilities={
+            Channel.NO_TREATMENT: 0.20,
+            Channel.PUSH: 0.70,
+            Channel.EMAIL: 0.10,
+        },
+    )
+
+    assert result.changed
+    assert result.selected_action is Channel.PUSH
+    assert result.probabilities[Channel.PUSH] > 0.30
+    assert "reference_pessimistic_proposal_used" not in result.reasons
+    assert result.pessimistic_candidate_value > result.pessimistic_baseline_value
+
+
+def test_low_support_external_proposal_is_bootstrapped_to_behavior() -> None:
+    rows = _policy_estimates()
+    rows[-1] = ActionValueEstimate(
+        action=Channel.EMAIL,
+        value=5.0,
+        value_uncertainty=0.0,
+        behavior_probability=0.001,
+        expected_cost=0.0,
+    )
+    rows[0] = ActionValueEstimate(
+        action=Channel.NO_TREATMENT,
+        value=0.10,
+        value_uncertainty=0.01,
+        behavior_probability=0.699,
+    )
+
+    result = SupportAnchoredPolicyImprover(
+        SafePolicyImprovementConfig(max_total_variation=1.0)
+    ).improve(
+        rows,
+        proposal_probabilities={
+            Channel.NO_TREATMENT: 0.10,
+            Channel.PUSH: 0.10,
+            Channel.EMAIL: 0.80,
+        },
+    )
+
+    assert result.probabilities[Channel.EMAIL] == pytest.approx(0.001)
+    assert "proposal_support_constraint_active" in result.reasons
+
+
+def test_no_increase_mode_can_remove_unsupported_behavior_mass() -> None:
+    rows = _policy_estimates()
+    rows[-1] = ActionValueEstimate(
+        action=Channel.EMAIL,
+        value=-1.0,
+        value_uncertainty=0.0,
+        behavior_probability=0.001,
+        expected_cost=0.0,
+    )
+    rows[0] = ActionValueEstimate(
+        action=Channel.NO_TREATMENT,
+        value=0.10,
+        value_uncertainty=0.01,
+        behavior_probability=0.699,
+    )
+
+    result = SupportAnchoredPolicyImprover(
+        SafePolicyImprovementConfig(
+            max_total_variation=1.0,
+            unsupported_action_mode="no_increase",
+        )
+    ).improve(
+        rows,
+        proposal_probabilities={
+            Channel.NO_TREATMENT: 0.40,
+            Channel.PUSH: 0.60,
+            Channel.EMAIL: 0.0,
+        },
+    )
+
+    assert result.changed
+    assert result.probabilities[Channel.EMAIL] == pytest.approx(0.0)
 
 
 def test_support_anchored_policy_uses_no_treatment_when_behavior_cost_is_unsafe() -> None:
@@ -175,6 +263,18 @@ def test_support_anchored_policy_uses_no_treatment_when_behavior_cost_is_unsafe(
     assert result.safe_fallback
     assert result.selected_action is Channel.NO_TREATMENT
     assert result.probabilities[Channel.NO_TREATMENT] == pytest.approx(1.0)
+
+
+def test_minimum_pessimistic_gain_is_enforced_after_tv_contraction() -> None:
+    result = SupportAnchoredPolicyImprover(
+        SafePolicyImprovementConfig(
+            max_total_variation=0.01,
+            min_pessimistic_improvement=0.01,
+        )
+    ).improve(_policy_estimates())
+
+    assert result.changed is False
+    assert "minimum_pessimistic_gain_not_reached" in result.reasons
 
 
 def test_dynamics_boundary_stops_gae_credit_leakage() -> None:
