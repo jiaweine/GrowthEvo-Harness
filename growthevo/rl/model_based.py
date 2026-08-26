@@ -20,6 +20,16 @@ class WorldTransitionConfig:
     retention_to_intent: float = 0.15
     fatigue_uplift_decay: float = 0.20
 
+    def __post_init__(self) -> None:
+        if not 0 <= self.fatigue_decay_per_step <= 1:
+            raise ValueError("fatigue_decay_per_step must be in [0, 1]")
+        if self.churn_recovery_per_step < 0:
+            raise ValueError("churn_recovery_per_step must be non-negative")
+        if self.retention_to_intent < 0:
+            raise ValueError("retention_to_intent must be non-negative")
+        if self.fatigue_uplift_decay < 0:
+            raise ValueError("fatigue_uplift_decay must be non-negative")
+
 
 @dataclass(frozen=True, slots=True)
 class StressScenario:
@@ -52,6 +62,28 @@ class CandidateRolloutScore:
     violation_rate: float
     mean_cost: float
     robust_score: float
+    feasible: bool
+
+
+TouchStateUpdater = Callable[[CausalBelief, bool, int], tuple[int, int]]
+
+
+def conservative_touch_accumulator(
+    belief: CausalBelief,
+    treated: bool,
+    elapsed_days: int,
+) -> tuple[int, int]:
+    """Conservatively retain prior touch counts throughout a simulated plan.
+
+    The compact belief stores counts but not historical touch timestamps, so the
+    reference world cannot know exactly which touches expire from rolling 24h/7d
+    windows. It therefore never invents expiry. Production worlds can inject an
+    exact calendar-backed updater using ``elapsed_days``.
+    """
+
+    del elapsed_days
+    increment = int(treated)
+    return belief.touches_24h + increment, belief.touches_7d + increment
 
 
 class LongHorizonGrowthWorld:
@@ -64,10 +96,12 @@ class LongHorizonGrowthWorld:
         world_config: WorldModelConfig | None = None,
         transition_config: WorldTransitionConfig | None = None,
         reward_model: CausalRewardModel | None = None,
+        touch_state_updater: TouchStateUpdater = conservative_touch_accumulator,
     ) -> None:
         self.world = UserWorldModel(seed=seed, config=world_config)
         self.transition_config = transition_config or WorldTransitionConfig()
         self.reward_model = reward_model or CausalRewardModel()
+        self.touch_state_updater = touch_state_updater
 
     def transition(
         self,
@@ -101,6 +135,13 @@ class LongHorizonGrowthWorld:
         channel_uplift = {
             channel: uplift * uplift_decay for channel, uplift in belief.channel_uplift.items()
         }
+        touches_24h, touches_7d = self.touch_state_updater(
+            belief,
+            treated,
+            feedback.delay_days,
+        )
+        if touches_24h < 0 or touches_7d < 0:
+            raise ValueError("touch_state_updater returned negative touch counts")
 
         next_belief = replace(
             belief,
@@ -108,13 +149,13 @@ class LongHorizonGrowthWorld:
             channel_uplift=channel_uplift,
             fatigue=fatigue,
             churn_risk=churn,
-            touches_24h=belief.touches_24h + int(treated),
-            touches_7d=belief.touches_7d + int(treated),
+            touches_24h=touches_24h,
+            touches_7d=touches_7d,
             spend_to_date=belief.spend_to_date + feedback.cost,
             days_since_last_active=(
                 0
                 if feedback.realized_conversion
-                else belief.days_since_last_active + max(1, feedback.delay_days)
+                else belief.days_since_last_active + feedback.delay_days
             ),
         )
         return next_belief, reward, feedback.cost
@@ -169,13 +210,11 @@ WorldFactory = Callable[[int], LongHorizonGrowthWorld]
 
 
 class RiskSensitiveMPC:
-    """Rank open-loop plans with lower-tail return and safety diagnostics.
+    """Rank open-loop plans with lower-tail return and explicit feasibility.
 
-    Candidate plans are evaluated with common random numbers: every candidate is
-    replayed under the same rollout seeds. This reduces Monte Carlo noise in
-    pairwise plan comparisons and makes rankings invariant to candidate order.
-    The world constructor is injectable so research experiments can use learned
-    dynamics, ensembles, or calibrated simulators without modifying the planner.
+    Candidate plans use common random numbers. Constraint feasibility is ranked
+    before reward so a change in reward units cannot make an unsafe plan win by
+    overwhelming an arbitrary scalar violation penalty.
     """
 
     def __init__(
@@ -184,6 +223,7 @@ class RiskSensitiveMPC:
         rollouts: int = 32,
         cvar_alpha: float = 0.20,
         violation_penalty: float = 2.0,
+        max_violation_rate: float = 0.0,
         gamma: float = 0.99,
         base_seed: int = 101,
         world_factory: WorldFactory | None = None,
@@ -194,11 +234,14 @@ class RiskSensitiveMPC:
             raise ValueError("cvar_alpha must be in (0, 1]")
         if violation_penalty < 0:
             raise ValueError("violation_penalty must be non-negative")
+        if not 0 <= max_violation_rate <= 1:
+            raise ValueError("max_violation_rate must be in [0, 1]")
         if not 0 < gamma <= 1:
             raise ValueError("gamma must be in (0, 1]")
         self.rollouts = rollouts
         self.cvar_alpha = cvar_alpha
         self.violation_penalty = violation_penalty
+        self.max_violation_rate = max_violation_rate
         self.gamma = gamma
         self.base_seed = base_seed
         self.world_factory = world_factory
@@ -271,13 +314,21 @@ class RiskSensitiveMPC:
                     violation_rate=violation_rate,
                     mean_cost=mean_cost,
                     robust_score=robust_score,
+                    feasible=violation_rate <= self.max_violation_rate,
                 )
             )
 
         return tuple(
             sorted(
                 scores,
-                key=lambda score: (score.robust_score, score.cvar_return, score.mean_return, score.candidate_id),
+                key=lambda score: (
+                    score.feasible,
+                    -score.violation_rate,
+                    score.robust_score,
+                    score.cvar_return,
+                    score.mean_return,
+                    score.candidate_id,
+                ),
                 reverse=True,
             )
         )
