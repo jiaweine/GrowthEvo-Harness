@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import blake2b
 from math import fsum, sqrt
-from typing import Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Mapping, Protocol, Sequence
 
 from growthevo.models import Channel
 
@@ -49,13 +49,21 @@ def _solve_linear_system(matrix: list[list[float]], target: list[float]) -> list
     return [augmented[row][-1] for row in range(n)]
 
 
-class RidgeRegressor:
-    """Dependency-free ridge regressor used by the reference causal learner.
+class Regressor(Protocol):
+    """Minimal regression contract used by the causal cross-fitting pipeline."""
 
-    The class is deliberately small: production experiments can replace it with
-    sklearn, CausalML, EconML or a neural model while keeping the cross-fitting
-    and doubly-robust contracts unchanged.
-    """
+    def fit(self, features: Iterable[Sequence[float]], targets: Iterable[float]) -> "Regressor": ...
+
+    def predict_one(self, features: Sequence[float]) -> float: ...
+
+    def predict(self, features: Iterable[Sequence[float]]) -> tuple[float, ...]: ...
+
+
+RegressorFactory = Callable[[], Regressor]
+
+
+class RidgeRegressor:
+    """Dependency-free ridge backend for tests and transparent reference runs."""
 
     def __init__(self, ridge: float = 1e-3) -> None:
         if ridge <= 0:
@@ -104,17 +112,25 @@ class RidgeRegressor:
 
 @dataclass(frozen=True, slots=True)
 class LoggedTreatmentRecord:
-    """One logged growth decision with the full logging-policy probability vector."""
+    """One logged decision with the full behavior-policy probability vector.
+
+    ``group_id`` is optional but important for repeated-user or clustered data.
+    When supplied, all rows from the same group are kept in one nuisance fold so
+    cross-fitting cannot leak a user's outcome history across train and holdout.
+    """
 
     unit_id: str
     features: FeatureVector
     action: Channel
     outcome: float
     action_propensities: Mapping[Channel, float]
+    group_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.unit_id:
             raise ValueError("unit_id cannot be empty")
+        if self.group_id is not None and not self.group_id:
+            raise ValueError("group_id cannot be empty when provided")
         _validate_features(self.features)
         if self.action not in self.action_propensities:
             raise ValueError("logged action must have a propensity")
@@ -139,16 +155,16 @@ class CATEEstimate:
 
 @dataclass(frozen=True, slots=True)
 class FittedTreatmentEffect:
-    """Fitted one-vs-control DR-Learner with explicit support diagnostics.
+    """Fitted one-vs-control DR learner with explicit support diagnostics.
 
-    ``uncertainty`` is a residual/extrapolation diagnostic, not a causal
-    confidence interval. Promotion still belongs to randomized/logged OPE and
-    the Counterfactual Verifier.
+    ``uncertainty`` uses second-stage out-of-fold residual scale plus feature
+    extrapolation. It remains a model diagnostic, not a causal confidence
+    interval; deployment evidence still belongs to randomized/logged evaluation.
     """
 
     treatment: Channel
     control: Channel
-    model: RidgeRegressor
+    model: Regressor
     residual_scale: float
     sample_size: int
     overlap_coverage: float
@@ -179,17 +195,12 @@ class FittedTreatmentEffect:
 
 
 class CrossFittedDRLearner:
-    """Cross-fitted one-vs-control doubly-robust treatment-effect learner.
+    """Cross-fitted one-vs-control doubly robust treatment-effect learner.
 
-    For a treatment ``a`` and control ``a0``, records are restricted to the pair
-    and logging propensities are renormalized within that pair. Outcome models
-    are trained on K-1 folds, and each held-out sample receives the standard
-    augmented inverse-propensity pseudo-outcome:
-
-        m1(x)-m0(x) + A(Y-m1(x))/e(x) - (1-A)(Y-m0(x))/(1-e(x)).
-
-    A second-stage model is fitted only on out-of-fold pseudo-outcomes, avoiding
-    the most direct nuisance-model leakage into treatment-effect fitting.
+    Outcome and effect regressors are factories rather than fixed model classes.
+    This keeps the orthogonalization/cross-fitting contract stable while allowing
+    production experiments to plug in forests, boosting, neural estimators, or
+    other regressors without editing causal logic.
     """
 
     def __init__(
@@ -198,6 +209,8 @@ class CrossFittedDRLearner:
         n_folds: int = 5,
         ridge: float = 1e-3,
         propensity_floor: float = 0.02,
+        outcome_model_factory: RegressorFactory | None = None,
+        effect_model_factory: RegressorFactory | None = None,
     ) -> None:
         if n_folds < 2:
             raise ValueError("n_folds must be at least 2")
@@ -208,10 +221,12 @@ class CrossFittedDRLearner:
         self.n_folds = n_folds
         self.ridge = ridge
         self.propensity_floor = propensity_floor
+        self.outcome_model_factory = outcome_model_factory or (lambda: RidgeRegressor(self.ridge))
+        self.effect_model_factory = effect_model_factory or (lambda: RidgeRegressor(self.ridge))
 
     @staticmethod
-    def _stable_key(unit_id: str) -> bytes:
-        return blake2b(unit_id.encode("utf-8"), digest_size=16).digest()
+    def _stable_key(value: str) -> bytes:
+        return blake2b(value.encode("utf-8"), digest_size=16).digest()
 
     def _fold_assignments(
         self,
@@ -219,6 +234,22 @@ class CrossFittedDRLearner:
         treatment: Channel,
         control: Channel,
     ) -> list[int]:
+        if any(row.group_id is not None for row in rows):
+            assignments = [
+                int.from_bytes(self._stable_key(row.group_id or row.unit_id), "big") % self.n_folds
+                for row in rows
+            ]
+            for fold in range(self.n_folds):
+                train_actions = {
+                    row.action for index, row in enumerate(rows) if assignments[index] != fold
+                }
+                if treatment not in train_actions or control not in train_actions:
+                    raise ValueError(
+                        "group-aware folds leave a training split without treatment/control rows; "
+                        "reduce n_folds or provide more groups"
+                    )
+            return assignments
+
         assignments = [-1] * len(rows)
         for action in (treatment, control):
             indices = [index for index, row in enumerate(rows) if row.action is action]
@@ -232,6 +263,12 @@ class CrossFittedDRLearner:
         if any(fold < 0 for fold in assignments):  # pragma: no cover - defensive.
             raise RuntimeError("failed to assign every treatment/control row to a fold")
         return assignments
+
+    def _new_outcome_model(self) -> Regressor:
+        return self.outcome_model_factory()
+
+    def _new_effect_model(self) -> Regressor:
+        return self.effect_model_factory()
 
     def fit(
         self,
@@ -261,11 +298,11 @@ class CrossFittedDRLearner:
             if not treatment_train or not control_train:
                 raise ValueError("every training split must contain treatment and control rows")
 
-            treatment_model = RidgeRegressor(self.ridge).fit(
+            treatment_model = self._new_outcome_model().fit(
                 (row.features for row in treatment_train),
                 (row.outcome for row in treatment_train),
             )
-            control_model = RidgeRegressor(self.ridge).fit(
+            control_model = self._new_outcome_model().fit(
                 (row.features for row in control_train),
                 (row.outcome for row in control_train),
             )
@@ -290,17 +327,36 @@ class CrossFittedDRLearner:
                     pseudo = m1 - m0 - (row.outcome - m0) / (1.0 - e)
                 pseudo_outcomes[index] = pseudo
 
-        effect_model = RidgeRegressor(self.ridge).fit(
-            (row.features for row in rows),
-            pseudo_outcomes,
-        )
-        fitted = effect_model.predict(row.features for row in rows)
+        effect_oof_predictions = [0.0] * len(rows)
+        for fold in range(self.n_folds):
+            train_indices = [index for index in range(len(rows)) if folds[index] != fold]
+            held_indices = [index for index in range(len(rows)) if folds[index] == fold]
+            if not held_indices:
+                continue
+            effect_fold_model = self._new_effect_model().fit(
+                (rows[index].features for index in train_indices),
+                (pseudo_outcomes[index] for index in train_indices),
+            )
+            for index in held_indices:
+                effect_oof_predictions[index] = effect_fold_model.predict_one(rows[index].features)
+
         residual_scale = sqrt(
             max(
                 0.0,
-                fsum((pseudo - prediction) ** 2 for pseudo, prediction in zip(pseudo_outcomes, fitted, strict=True))
+                fsum(
+                    (pseudo - prediction) ** 2
+                    for pseudo, prediction in zip(
+                        pseudo_outcomes,
+                        effect_oof_predictions,
+                        strict=True,
+                    )
+                )
                 / len(rows),
             )
+        )
+        effect_model = self._new_effect_model().fit(
+            (row.features for row in rows),
+            pseudo_outcomes,
         )
         bounds = tuple(
             (
