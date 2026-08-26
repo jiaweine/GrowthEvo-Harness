@@ -198,7 +198,7 @@ def test_verifier_abstains_when_logging_support_is_weak() -> None:
     assert "logging_support_below_gate" in result.reasons
 
 
-def test_growth_prm_rewards_grounded_information_gain() -> None:
+def test_growth_prm_rewards_information_gain_without_rewarding_confidence() -> None:
     before = ProcessState(goal_progress=0.2, evidence_quality=0.2, constraint_slack=0.8)
     after = ProcessState(goal_progress=0.3, evidence_quality=0.5, constraint_slack=0.8)
     model = GrowthProcessRewardModel()
@@ -221,9 +221,30 @@ def test_growth_prm_rewards_grounded_information_gain() -> None:
             tool_success=True,
         )
     )
+    high_need = model.score_step(
+        TrajectoryStepSignal(
+            step_id="query-user-history-high-need",
+            before=before,
+            after=after,
+            action_entropy=0.9,
+            information_need=1.0,
+            tool_success=True,
+        )
+    )
+    low_need = model.score_step(
+        TrajectoryStepSignal(
+            step_id="query-user-history-low-need",
+            before=before,
+            after=after,
+            action_entropy=0.9,
+            information_need=0.2,
+            tool_success=True,
+        )
+    )
 
-    assert confident.observation_credit > uncertain.observation_credit
-    assert confident.total > uncertain.total
+    assert confident.observation_credit == pytest.approx(uncertain.observation_credit)
+    assert high_need.observation_credit > low_need.observation_credit
+    assert high_need.total > low_need.total
 
 
 def test_growth_prm_penalizes_duplicate_failed_side_effect() -> None:
