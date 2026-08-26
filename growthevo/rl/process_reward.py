@@ -29,11 +29,13 @@ class ProcessState:
 class TrajectoryStepSignal:
     """One planner/tool step with environment-grounded learning signals.
 
-    ``action_entropy`` is normalized to [0, 1]. Low entropy means the planner
-    was confident before observing the tool/environment response. Crediting a
-    subsequent evidence gain by ``1 - action_entropy`` mirrors the 2026 agentic
-    RL direction of learning from observations, rather than rewarding only the
-    final answer.
+    ``action_entropy`` is retained as an audit diagnostic. It is deliberately
+    not used as a proxy for epistemic uncertainty: a policy can be confidently
+    wrong, and directly rewarding low entropy creates an incentive to collapse.
+
+    ``information_need`` is optional and should come from an upstream uncertainty
+    or value-of-information model. When omitted, evidence gain is credited
+    without an entropy multiplier.
     """
 
     step_id: str
@@ -41,6 +43,7 @@ class TrajectoryStepSignal:
     after: ProcessState
     action_entropy: float
     tool_success: bool
+    information_need: float | None = None
     direct_cost: float = 0.0
     duplicate_evidence: bool = False
     irreversible_side_effect: bool = False
@@ -49,6 +52,8 @@ class TrajectoryStepSignal:
         if not self.step_id:
             raise ValueError("step_id cannot be empty")
         _unit("action_entropy", self.action_entropy)
+        if self.information_need is not None:
+            _unit("information_need", self.information_need)
         if self.direct_cost < 0:
             raise ValueError("direct_cost must be non-negative")
 
@@ -76,6 +81,7 @@ class ProcessStepReward:
     step_id: str
     potential_delta: float
     observation_credit: float
+    information_need_multiplier: float
     tool_credit: float
     cost_penalty: float
     duplicate_penalty: float
@@ -94,14 +100,10 @@ class TrajectoryReward:
 class GrowthProcessRewardModel:
     """Fine-grained reward for tool-using growth planners.
 
-    The design combines two signals that are useful for long-horizon agent RL:
-
-    * potential-based progress over goal/evidence/constraint state;
-    * observation-grounded credit for informative tool/environment responses.
-
-    It intentionally does not reward verbose reasoning or raw tool count.
-    Duplicate evidence, failed tools, irreversible side effects and cost receive
-    explicit negative credit.
+    The model combines potential-based progress with environment-grounded
+    evidence gain. Policy confidence is observed but not rewarded by itself.
+    If a calibrated information-need signal exists, it can scale the evidence
+    credit explicitly; otherwise the evidence gain stands on its own.
     """
 
     def __init__(self, weights: ProcessRewardWeights | None = None) -> None:
@@ -120,8 +122,8 @@ class GrowthProcessRewardModel:
         potential_delta = w.gamma * self._potential(signal.after) - self._potential(signal.before)
 
         evidence_gain = max(0.0, signal.after.evidence_quality - signal.before.evidence_quality)
-        action_confidence = 1.0 - signal.action_entropy
-        observation_credit = w.observation_grounding * action_confidence * evidence_gain
+        information_need = 1.0 if signal.information_need is None else signal.information_need
+        observation_credit = w.observation_grounding * information_need * evidence_gain
 
         tool_credit = w.tool_success if signal.tool_success else -w.tool_failure
         cost_penalty = w.direct_cost * signal.direct_cost
@@ -142,6 +144,7 @@ class GrowthProcessRewardModel:
             step_id=signal.step_id,
             potential_delta=potential_delta,
             observation_credit=observation_credit,
+            information_need_multiplier=information_need,
             tool_credit=tool_credit,
             cost_penalty=cost_penalty,
             duplicate_penalty=duplicate_penalty,
