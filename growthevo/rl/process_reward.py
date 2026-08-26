@@ -64,7 +64,7 @@ class ProcessRewardWeights:
     evidence_potential: float = 0.6
     constraint_potential: float = 0.5
     observation_grounding: float = 0.8
-    tool_success: float = 0.10
+    successful_tool_bonus: float = 0.0
     tool_failure: float = 0.30
     direct_cost: float = 0.20
     duplicate_evidence: float = 0.15
@@ -74,6 +74,15 @@ class ProcessRewardWeights:
     def __post_init__(self) -> None:
         if not 0 < self.gamma <= 1:
             raise ValueError("gamma must be in (0, 1]")
+        for name, value in (
+            ("successful_tool_bonus", self.successful_tool_bonus),
+            ("tool_failure", self.tool_failure),
+            ("direct_cost", self.direct_cost),
+            ("duplicate_evidence", self.duplicate_evidence),
+            ("irreversible_side_effect", self.irreversible_side_effect),
+        ):
+            if value < 0:
+                raise ValueError(f"{name} must be non-negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,10 +109,10 @@ class TrajectoryReward:
 class GrowthProcessRewardModel:
     """Fine-grained reward for tool-using growth planners.
 
-    The model combines potential-based progress with environment-grounded
-    evidence gain. Policy confidence is observed but not rewarded by itself.
-    If a calibrated information-need signal exists, it can scale the evidence
-    credit explicitly; otherwise the evidence gain stands on its own.
+    Useful tool calls earn credit through measurable state or evidence progress,
+    not merely because the tool returned successfully. The default success bonus
+    is therefore zero; failures remain penalized. A non-zero success bonus is
+    available only as an explicit experiment configuration.
     """
 
     def __init__(self, weights: ProcessRewardWeights | None = None) -> None:
@@ -125,7 +134,7 @@ class GrowthProcessRewardModel:
         information_need = 1.0 if signal.information_need is None else signal.information_need
         observation_credit = w.observation_grounding * information_need * evidence_gain
 
-        tool_credit = w.tool_success if signal.tool_success else -w.tool_failure
+        tool_credit = w.successful_tool_bonus if signal.tool_success else -w.tool_failure
         cost_penalty = w.direct_cost * signal.direct_cost
         duplicate_penalty = w.duplicate_evidence if signal.duplicate_evidence else 0.0
         side_effect_penalty = (
