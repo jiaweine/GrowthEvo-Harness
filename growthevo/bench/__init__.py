@@ -1,7 +1,13 @@
 """Benchmark fixtures and real-world dataset adapters for growth-policy research."""
 
 from .kuairand_features import load_kuairand_user_features, load_kuairand_video_features
-from .offline_rl import OfflineRLDataset, OfflineRLTransition, kuairand_to_offline_rl
+from .offline_rl import (
+    HistorySummary,
+    OfflineRLDataset,
+    OfflineRLTransition,
+    default_kuairand_state_builder,
+    kuairand_to_offline_rl,
+)
 from .real_world import (
     CriteoUpliftData,
     DEFAULT_KUAIRAND_REWARD_WEIGHTS,
@@ -31,6 +37,7 @@ __all__ = [
     "CriteoUpliftData",
     "DEFAULT_KUAIRAND_REWARD_WEIGHTS",
     "GrowthAgentBench",
+    "HistorySummary",
     "KuaiRandInteraction",
     "OfflineRLDataset",
     "OfflineRLTransition",
@@ -40,6 +47,7 @@ __all__ = [
     "SyntheticGrowthSample",
     "TargetingBootstrapResult",
     "bootstrap_randomized_targeting",
+    "default_kuairand_state_builder",
     "evaluate_cate",
     "evaluate_randomized_targeting",
     "kuairand_reward",
