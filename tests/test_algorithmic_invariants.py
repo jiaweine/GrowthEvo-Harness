@@ -146,7 +146,7 @@ def test_ope_does_not_apply_untuned_robustness_constants() -> None:
     assert estimate.dr_os == pytest.approx(estimate.doubly_robust)
 
 
-def test_ope_support_coverage_tracks_target_mass_not_row_fraction() -> None:
+def test_ope_support_coverage_tracks_importance_mass_not_row_fraction() -> None:
     estimate = evaluate_policy(
         [
             LoggedBanditRecord(
@@ -167,7 +167,8 @@ def test_ope_support_coverage_tracks_target_mass_not_row_fraction() -> None:
         support_propensity_floor=1e-3,
     )
 
-    assert estimate.support_coverage == pytest.approx(0.1)
+    assert estimate.record_support_coverage == pytest.approx(0.5)
+    assert estimate.support_coverage == pytest.approx(0.2 / 9000.2)
     assert estimate.mean_importance_weight > 1.0
     assert estimate.importance_weight_normalization_error > 0.0
 
@@ -215,7 +216,6 @@ def test_dr_learner_uses_injected_outcome_and_effect_backends() -> None:
 def test_grouped_cross_fitting_keeps_same_group_in_one_fold() -> None:
     learner = CrossFittedDRLearner(n_folds=2)
 
-    groups: list[str] = []
     parity_seen: dict[int, str] = {}
     index = 0
     while len(parity_seen) < 2:
