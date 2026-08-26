@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from math import ceil, fsum
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 from growthevo.models import CausalBelief, Channel, GrowthAction, GrowthConstraints
 from growthevo.rl.causal_reward import CausalRewardModel
@@ -55,7 +55,7 @@ class CandidateRolloutScore:
 
 
 class LongHorizonGrowthWorld:
-    """State-transition wrapper around the one-step stochastic user twin."""
+    """State-transition wrapper around a one-step stochastic user model."""
 
     def __init__(
         self,
@@ -165,13 +165,17 @@ class LongHorizonGrowthWorld:
         )
 
 
-class RiskSensitiveMPC:
-    """Rank open-loop growth plans using lower-tail return and safety violations.
+WorldFactory = Callable[[int], LongHorizonGrowthWorld]
 
-    This is a reference model-based planning backend, not a claim that the toy
-    world model is deployment-faithful. Production use should fit and calibrate
-    the transition model on logged trajectories and stress it under detected
-    distribution shifts before any online experiment.
+
+class RiskSensitiveMPC:
+    """Rank open-loop plans with lower-tail return and safety diagnostics.
+
+    Candidate plans are evaluated with common random numbers: every candidate is
+    replayed under the same rollout seeds. This reduces Monte Carlo noise in
+    pairwise plan comparisons and makes rankings invariant to candidate order.
+    The world constructor is injectable so research experiments can use learned
+    dynamics, ensembles, or calibrated simulators without modifying the planner.
     """
 
     def __init__(
@@ -182,6 +186,7 @@ class RiskSensitiveMPC:
         violation_penalty: float = 2.0,
         gamma: float = 0.99,
         base_seed: int = 101,
+        world_factory: WorldFactory | None = None,
     ) -> None:
         if rollouts <= 0:
             raise ValueError("rollouts must be positive")
@@ -189,11 +194,19 @@ class RiskSensitiveMPC:
             raise ValueError("cvar_alpha must be in (0, 1]")
         if violation_penalty < 0:
             raise ValueError("violation_penalty must be non-negative")
+        if not 0 < gamma <= 1:
+            raise ValueError("gamma must be in (0, 1]")
         self.rollouts = rollouts
         self.cvar_alpha = cvar_alpha
         self.violation_penalty = violation_penalty
         self.gamma = gamma
         self.base_seed = base_seed
+        self.world_factory = world_factory
+
+    def _make_world(self, seed: int) -> LongHorizonGrowthWorld:
+        if self.world_factory is not None:
+            return self.world_factory(seed)
+        return LongHorizonGrowthWorld(seed=seed)
 
     def evaluate(
         self,
@@ -202,17 +215,35 @@ class RiskSensitiveMPC:
         constraints: GrowthConstraints,
         *,
         stress: StressScenario | None = None,
+        rollout_seeds: Sequence[int] | None = None,
     ) -> tuple[CandidateRolloutScore, ...]:
+        candidate_rows = [(candidate_id, tuple(actions)) for candidate_id, actions in candidates]
+        if not candidate_rows:
+            raise ValueError("at least one candidate plan is required")
+        identifiers = [candidate_id for candidate_id, _ in candidate_rows]
+        if any(not candidate_id for candidate_id in identifiers):
+            raise ValueError("candidate_id cannot be empty")
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError("candidate_id values must be unique")
+        if any(not actions for _, actions in candidate_rows):
+            raise ValueError("candidate plans cannot be empty")
+
+        if rollout_seeds is None:
+            seeds = tuple(self.base_seed + index for index in range(self.rollouts))
+        else:
+            seeds = tuple(int(seed) for seed in rollout_seeds)
+            if not seeds:
+                raise ValueError("rollout_seeds cannot be empty")
+            if len(set(seeds)) != len(seeds):
+                raise ValueError("rollout_seeds must be unique")
+
         scores: list[CandidateRolloutScore] = []
-        for candidate_index, (candidate_id, actions) in enumerate(candidates):
-            if not candidate_id:
-                raise ValueError("candidate_id cannot be empty")
+        for candidate_id, actions in candidate_rows:
             returns: list[float] = []
             costs: list[float] = []
             violations = 0
-            for rollout_index in range(self.rollouts):
-                seed = self.base_seed + candidate_index * 10_000 + rollout_index
-                world = LongHorizonGrowthWorld(seed=seed)
+            for seed in seeds:
+                world = self._make_world(seed)
                 trace = world.rollout(
                     initial_belief,
                     actions,
@@ -227,9 +258,10 @@ class RiskSensitiveMPC:
             ordered_returns = sorted(returns)
             tail_n = max(1, ceil(len(ordered_returns) * self.cvar_alpha))
             cvar = fsum(ordered_returns[:tail_n]) / tail_n
-            violation_rate = violations / self.rollouts
-            mean_return = fsum(returns) / self.rollouts
-            mean_cost = fsum(costs) / self.rollouts
+            sample_count = len(seeds)
+            violation_rate = violations / sample_count
+            mean_return = fsum(returns) / sample_count
+            mean_cost = fsum(costs) / sample_count
             robust_score = cvar - self.violation_penalty * violation_rate
             scores.append(
                 CandidateRolloutScore(
@@ -242,6 +274,10 @@ class RiskSensitiveMPC:
                 )
             )
 
-        if not scores:
-            raise ValueError("at least one candidate plan is required")
-        return tuple(sorted(scores, key=lambda score: score.robust_score, reverse=True))
+        return tuple(
+            sorted(
+                scores,
+                key=lambda score: (score.robust_score, score.cvar_return, score.mean_return, score.candidate_id),
+                reverse=True,
+            )
+        )
