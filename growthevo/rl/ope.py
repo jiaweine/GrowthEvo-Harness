@@ -28,19 +28,12 @@ class LoggedBanditRecord:
 
 @dataclass(frozen=True, slots=True)
 class OPEEstimate:
-    """Counterfactual policy-value estimates plus deployment diagnostics.
+    """Counterfactual policy-value estimates plus overlap diagnostics.
 
-    The suite deliberately exposes estimators with different bias/variance
-    behavior instead of selecting one silently. ``switch_dr`` follows the
-    SWITCH idea of falling back to the reward-model estimate in a high-variance
-    importance-weight tail. ``dr_os`` uses optimistic importance-weight
-    shrinkage. ``self_normalized_ips`` trades some finite-sample bias for lower
-    sensitivity to global importance-weight scale. The existing ``beta_ips``
-    additive control variate remains a complementary estimator.
-
-    All estimators are only as trustworthy as the logged propensities, reward
-    models and support assumptions. Overlap diagnostics are first-class outputs
-    rather than debug metadata.
+    Robust estimators are never silently tuned on the evaluation cohort. When a
+    SWITCH threshold or shrinkage coefficient is omitted, the corresponding
+    estimator reduces to ordinary doubly robust evaluation. Paper experiments
+    should select those hyperparameters on a separate validation protocol.
     """
 
     direct_method: float
@@ -58,12 +51,14 @@ class OPEEstimate:
     switch_dr_standard_error: float
     dr_os_standard_error: float
     beta_ips_standard_error: float
-    switch_threshold: float
-    dr_os_lambda: float
+    switch_threshold: float | None
+    dr_os_lambda: float | None
     effective_sample_size: float
     effective_sample_ratio: float
     support_coverage: float
     max_importance_weight: float
+    mean_importance_weight: float
+    importance_weight_normalization_error: float
     weight_coefficient_of_variation: float
     sample_size: int
 
@@ -102,30 +97,27 @@ def evaluate_policy(
     records: Iterable[LoggedBanditRecord],
     *,
     support_propensity_floor: float = 1e-3,
-    switch_threshold: float = 10.0,
-    dr_os_lambda: float = 100.0,
+    switch_threshold: float | None = None,
+    dr_os_lambda: float | None = None,
 ) -> OPEEstimate:
     """Evaluate a target policy from logged contextual-bandit feedback.
 
-    Returned estimators:
-
-    - Direct Method: the reward model integrated under the target policy;
-    - IPS: unbiased under correct propensities but potentially high variance;
-    - self-normalized IPS: normalized importance weighting;
-    - Doubly Robust: direct model plus importance-weighted residual correction;
-    - SWITCH-DR: suppresses the residual correction in the extreme-weight tail;
-    - optimistic DR shrinkage: smoothly shrinks the residual importance weight;
-    - beta-IPS: additive control-variate correction.
-
-    Hyperparameters are explicit so real-data experiments can tune them only on
-    a validation split and keep the final evaluation cohort untouched.
+    ``switch_threshold`` and ``dr_os_lambda`` are intentionally optional. A
+    missing value means "no robustness hyperparameter was selected" and makes
+    that estimator equal ordinary DR. This avoids embedding arbitrary shrinkage
+    constants in a headline evaluation. Select non-null values on validation
+    data and pass them explicitly for final evaluation.
     """
 
     if not 0 < support_propensity_floor <= 1:
         raise ValueError("support_propensity_floor must be in (0, 1]")
-    if not isfinite(switch_threshold) or switch_threshold <= 0:
+    if switch_threshold is not None and (
+        not isfinite(switch_threshold) or switch_threshold <= 0
+    ):
         raise ValueError("switch_threshold must be a positive finite value")
-    if not isfinite(dr_os_lambda) or dr_os_lambda <= 0:
+    if dr_os_lambda is not None and (
+        not isfinite(dr_os_lambda) or dr_os_lambda <= 0
+    ):
         raise ValueError("dr_os_lambda must be a positive finite value")
 
     rows = list(records)
@@ -139,27 +131,34 @@ def evaluate_policy(
         row.target_q + weight * (row.reward - row.baseline_q)
         for weight, row in zip(weights, rows, strict=True)
     ]
-    switch_terms = [
-        row.target_q
-        + (
-            weight * (row.reward - row.baseline_q)
-            if weight <= switch_threshold
-            else 0.0
-        )
-        for weight, row in zip(weights, rows, strict=True)
-    ]
-    shrunk_weights = [
-        dr_os_lambda * weight / (weight * weight + dr_os_lambda)
-        for weight in weights
-    ]
+
+    if switch_threshold is None:
+        switch_terms = list(dr_terms)
+    else:
+        switch_terms = [
+            row.target_q
+            + (
+                weight * (row.reward - row.baseline_q)
+                if weight <= switch_threshold
+                else 0.0
+            )
+            for weight, row in zip(weights, rows, strict=True)
+        ]
+
+    if dr_os_lambda is None:
+        shrunk_weights = list(weights)
+    else:
+        shrunk_weights = [
+            dr_os_lambda * weight / (weight * weight + dr_os_lambda)
+            for weight in weights
+        ]
     dr_os_terms = [
         row.target_q + shrunk * (row.reward - row.baseline_q)
         for shrunk, row in zip(shrunk_weights, rows, strict=True)
     ]
 
     # Additive control variate: X = w - E[w] with E[w] = 1 under valid
-    # propensities. The population variance-minimising coefficient is
-    # Cov(wR, w-1) / Var(w-1); we estimate it from the logged cohort.
+    # propensities and a correctly normalized target policy.
     control = [weight - 1.0 for weight in weights]
     control_variance = _sample_variance(control)
     beta_star = (
@@ -180,8 +179,6 @@ def evaluate_policy(
     if weight_sum > 1e-15:
         self_normalized_ips = fsum(ips_terms) / weight_sum
         mean_weight = weight_sum / n
-        # First-order ratio-estimator influence values. Their standard error is
-        # an asymptotic diagnostic, not a replacement for bootstrap intervals.
         snips_influence = [
             weight * (row.reward - self_normalized_ips) / mean_weight
             for weight, row in zip(weights, rows, strict=True)
@@ -190,17 +187,24 @@ def evaluate_policy(
     else:
         self_normalized_ips = float("nan")
         snips_standard_error = float("nan")
+        mean_weight = 0.0
 
-    weight_mean = _mean(weights)
     weight_std = sqrt(max(0.0, _sample_variance(weights))) if n > 1 else 0.0
-    weight_cv = weight_std / weight_mean if abs(weight_mean) > 1e-15 else float("inf")
+    weight_cv = weight_std / mean_weight if abs(mean_weight) > 1e-15 else float("inf")
 
-    supported = sum(
-        1
-        for row in rows
-        if row.target_action_probability == 0.0
-        or row.behavior_propensity >= support_propensity_floor
-    )
+    # Weight support by the target policy's probability on the logged action.
+    # A plain row fraction can look healthy even when most target-policy mass is
+    # concentrated on poorly supported actions.
+    target_mass = fsum(row.target_action_probability for row in rows)
+    if target_mass > 1e-15:
+        supported_target_mass = fsum(
+            row.target_action_probability
+            for row in rows
+            if row.behavior_propensity >= support_propensity_floor
+        )
+        support_coverage = supported_target_mass / target_mass
+    else:
+        support_coverage = 1.0
 
     return OPEEstimate(
         direct_method=_mean(dm_terms),
@@ -222,8 +226,10 @@ def evaluate_policy(
         dr_os_lambda=dr_os_lambda,
         effective_sample_size=ess,
         effective_sample_ratio=ess / n,
-        support_coverage=supported / n,
+        support_coverage=max(0.0, min(1.0, support_coverage)),
         max_importance_weight=max(weights),
+        mean_importance_weight=mean_weight,
+        importance_weight_normalization_error=abs(mean_weight - 1.0),
         weight_coefficient_of_variation=weight_cv,
         sample_size=n,
     )
