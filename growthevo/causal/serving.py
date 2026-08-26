@@ -36,10 +36,10 @@ class UpliftServingPrediction:
 class CausalUpliftServingBridge:
     """Expose fitted treatment-effect models through the Runtime observation contract.
 
-    The bridge does not silently turn low support into a confident zero effect.
-    It also keeps raw effects when a probability-scale uplift must be clipped to
-    the Runtime's [-1, 1] contract. Support loss and clipping distance both
-    increase serving uncertainty, while raw predictions remain auditable.
+    The bridge preserves channel-specific effect, uncertainty, and support. The
+    aggregate uncertainty remains available for legacy consumers, but policies
+    can make channel-specific conservative decisions instead of inheriting the
+    worst uncertainty from an unrelated action.
     """
 
     def __init__(self, models: Mapping[Channel, FittedTreatmentEffect]) -> None:
@@ -71,9 +71,12 @@ class CausalUpliftServingBridge:
         uncertainties = {
             channel: max(
                 0.0,
-                prediction.uncertainty
-                + abs(prediction.effect) * (1.0 - prediction.support_score)
-                + abs(prediction.effect - effects[channel]),
+                min(
+                    1.0,
+                    prediction.uncertainty
+                    + abs(prediction.effect) * (1.0 - prediction.support_score)
+                    + abs(prediction.effect - effects[channel]),
+                ),
             )
             for channel, prediction in predictions.items()
         }
@@ -105,5 +108,7 @@ class CausalUpliftServingBridge:
             observation,
             channel_uplift=prediction.channel_effects,
             uplift_uncertainty=prediction.aggregate_uncertainty,
+            channel_uncertainty=prediction.channel_uncertainty,
+            channel_support=prediction.channel_support,
         )
         return enriched, prediction
