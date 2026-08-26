@@ -34,6 +34,11 @@ class OPEEstimate:
     SWITCH threshold or shrinkage coefficient is omitted, the corresponding
     estimator reduces to ordinary doubly robust evaluation. Paper experiments
     should select those hyperparameters on a separate validation protocol.
+
+    ``support_coverage`` is importance-mass weighted, which approximates how much
+    of the target-policy distribution is represented by practically supported
+    logged actions. ``record_support_coverage`` is retained only as a descriptive
+    row-count diagnostic.
     """
 
     direct_method: float
@@ -56,6 +61,7 @@ class OPEEstimate:
     effective_sample_size: float
     effective_sample_ratio: float
     support_coverage: float
+    record_support_coverage: float
     max_importance_weight: float
     mean_importance_weight: float
     importance_weight_normalization_error: float
@@ -103,10 +109,9 @@ def evaluate_policy(
     """Evaluate a target policy from logged contextual-bandit feedback.
 
     ``switch_threshold`` and ``dr_os_lambda`` are intentionally optional. A
-    missing value means "no robustness hyperparameter was selected" and makes
-    that estimator equal ordinary DR. This avoids embedding arbitrary shrinkage
-    constants in a headline evaluation. Select non-null values on validation
-    data and pass them explicitly for final evaluation.
+    missing value means no robust hyperparameter was selected and makes that
+    estimator equal ordinary DR. Select non-null values on validation data and
+    pass them explicitly for final evaluation.
     """
 
     if not 0 < support_propensity_floor <= 1:
@@ -157,8 +162,6 @@ def evaluate_policy(
         for shrunk, row in zip(shrunk_weights, rows, strict=True)
     ]
 
-    # Additive control variate: X = w - E[w] with E[w] = 1 under valid
-    # propensities and a correctly normalized target policy.
     control = [weight - 1.0 for weight in weights]
     control_variance = _sample_variance(control)
     beta_star = (
@@ -192,19 +195,20 @@ def evaluate_policy(
     weight_std = sqrt(max(0.0, _sample_variance(weights))) if n > 1 else 0.0
     weight_cv = weight_std / mean_weight if abs(mean_weight) > 1e-15 else float("inf")
 
-    # Weight support by the target policy's probability on the logged action.
-    # A plain row fraction can look healthy even when most target-policy mass is
-    # concentrated on poorly supported actions.
-    target_mass = fsum(row.target_action_probability for row in rows)
-    if target_mass > 1e-15:
-        supported_target_mass = fsum(
-            row.target_action_probability
-            for row in rows
-            if row.behavior_propensity >= support_propensity_floor
-        )
-        support_coverage = supported_target_mass / target_mass
-    else:
-        support_coverage = 1.0
+    support_mask = [
+        row.target_action_probability == 0.0
+        or row.behavior_propensity >= support_propensity_floor
+        for row in rows
+    ]
+    supported_records = sum(support_mask)
+    supported_importance_mass = fsum(
+        weight
+        for weight, supported in zip(weights, support_mask, strict=True)
+        if supported
+    )
+    support_coverage = (
+        supported_importance_mass / weight_sum if weight_sum > 1e-15 else 0.0
+    )
 
     return OPEEstimate(
         direct_method=_mean(dm_terms),
@@ -227,6 +231,7 @@ def evaluate_policy(
         effective_sample_size=ess,
         effective_sample_ratio=ess / n,
         support_coverage=max(0.0, min(1.0, support_coverage)),
+        record_support_coverage=supported_records / n,
         max_importance_weight=max(weights),
         mean_importance_weight=mean_weight,
         importance_weight_normalization_error=abs(mean_weight - 1.0),
