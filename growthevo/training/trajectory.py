@@ -10,11 +10,10 @@ from typing import Any, Iterable, Mapping
 class PlannerTransition:
     """One planner/tool transition prepared for external Agent-RL trainers.
 
-    ``credit_boundary`` resets GAE propagation when a transition crosses a
-    dynamics regime that should not share local credit (for example, a rollback,
-    environment reset, user-segment switch or delayed-outcome boundary). This is
-    a runtime-level analogue of recent dynamics-aware long-horizon credit work;
-    it does not prescribe one specific trainer implementation.
+    ``done`` means a true environment terminal. ``credit_boundary`` only stops
+    multi-step advantage propagation across a dynamics or attribution boundary;
+    it does not by itself erase the value of the observed next state. Keeping
+    those semantics separate avoids treating a bookkeeping boundary as terminal.
     """
 
     trajectory_id: str
@@ -88,10 +87,11 @@ class PlannerTrainingBatch:
 class TrajectoryTrainerAdapter:
     """Compile event-derived planner transitions into GAE training samples.
 
-    The adapter intentionally stops before any PPO/GRPO/IQL framework API. The
-    resulting records are stable enough to feed a separate training service,
-    while Runtime facts, legal-action flags and observation payloads remain
-    owned by GrowthEvo.
+    A true terminal controls value bootstrapping. A credit boundary controls only
+    eligibility-trace propagation. This distinction is important for rollback,
+    attribution, or regime boundaries where the next state is still observed and
+    should retain its critic value even though later rewards should not be blamed
+    on the preceding planner step.
     """
 
     def __init__(
@@ -100,6 +100,7 @@ class TrajectoryTrainerAdapter:
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         normalize_advantages: bool = True,
+        require_contiguous_steps: bool = True,
     ) -> None:
         if not 0 < gamma <= 1:
             raise ValueError("gamma must be in (0, 1]")
@@ -108,6 +109,7 @@ class TrajectoryTrainerAdapter:
         self.gamma = gamma
         self.gae_lambda = gae_lambda
         self.normalize_advantages = normalize_advantages
+        self.require_contiguous_steps = require_contiguous_steps
 
     def build(self, transitions: Iterable[PlannerTransition]) -> PlannerTrainingBatch:
         rows = list(transitions)
@@ -124,19 +126,27 @@ class TrajectoryTrainerAdapter:
             indices = [row.step_index for row in trajectory]
             if len(indices) != len(set(indices)):
                 raise ValueError(f"duplicate step_index in trajectory {trajectory_id!r}")
+            if self.require_contiguous_steps and indices:
+                expected = list(range(indices[0], indices[0] + len(indices)))
+                if indices != expected:
+                    raise ValueError(
+                        f"non-contiguous step_index in trajectory {trajectory_id!r}; "
+                        "split the trajectory or disable contiguous-step validation explicitly"
+                    )
 
             next_advantage = 0.0
             reverse: list[tuple[PlannerTransition, float, float]] = []
             for row in reversed(trajectory):
-                bootstrap = 0.0 if row.done or row.credit_boundary else 1.0
+                value_bootstrap = 0.0 if row.done else 1.0
+                trace_continuation = 0.0 if row.done or row.credit_boundary else 1.0
                 delta = (
                     row.reward
-                    + self.gamma * bootstrap * row.next_value_estimate
+                    + self.gamma * value_bootstrap * row.next_value_estimate
                     - row.value_estimate
                 )
                 advantage = (
                     delta
-                    + self.gamma * self.gae_lambda * bootstrap * next_advantage
+                    + self.gamma * self.gae_lambda * trace_continuation * next_advantage
                 )
                 return_target = row.value_estimate + advantage
                 reverse.append((row, advantage, return_target))
