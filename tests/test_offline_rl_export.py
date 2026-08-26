@@ -23,31 +23,46 @@ def _fixture(tmp_path: Path) -> Path:
     return path
 
 
-def test_offline_rl_state_excludes_logging_mechanism(tmp_path: Path) -> None:
+def test_offline_rl_state_excludes_logging_mechanism_and_raw_identifier(tmp_path: Path) -> None:
     rows = load_kuairand(_fixture(tmp_path))
-    dataset = kuairand_to_offline_rl(rows, max_steps_per_trajectory=10)
+    dataset = kuairand_to_offline_rl(rows, max_steps_per_segment=10)
 
     first, second, third = dataset.transitions
     assert "random_intervention" not in first.state
+    assert "user_id" not in first.state
+    assert first.user_id == 1
     assert first.random_intervention is False
     assert second.random_intervention is True
     assert first.next_state["prior_click_rate"] == pytest.approx(1.0)
     assert second.state == first.next_state
+    assert third.terminated is True
     assert third.done is True
     assert third.next_state == {}
     assert dataset.trajectory_count == 1
+    assert dataset.segment_count == 1
     assert dataset.action_count == 3
     assert dataset.random_intervention_rate == pytest.approx(1.0 / 3.0)
 
 
-def test_offline_rl_chunk_boundary_stops_bootstrap(tmp_path: Path) -> None:
+def test_offline_rl_segment_boundary_bootstraps_instead_of_faking_terminal(tmp_path: Path) -> None:
     rows = load_kuairand(_fixture(tmp_path))
-    dataset = kuairand_to_offline_rl(rows, max_steps_per_trajectory=2)
+    dataset = kuairand_to_offline_rl(rows, max_steps_per_segment=2)
 
-    assert dataset.transitions[1].done is True
-    assert dataset.transitions[1].next_state == {}
-    assert dataset.transitions[2].trajectory_id.endswith("chunk-1")
-    assert dataset.transitions[2].step_index == 0
+    boundary = dataset.transitions[1]
+    next_segment = dataset.transitions[2]
+
+    assert boundary.truncated is True
+    assert boundary.terminated is False
+    assert boundary.done is False
+    assert boundary.bootstrap_allowed is True
+    assert boundary.next_state == next_segment.state
+    assert boundary.trajectory_id == next_segment.trajectory_id
+    assert boundary.segment_id != next_segment.segment_id
+    assert next_segment.step_index == 2
+    assert next_segment.segment_step_index == 0
+    assert dataset.trajectory_count == 1
+    assert dataset.segment_count == 2
+    assert dataset.truncation_rate == pytest.approx(1.0 / 3.0)
 
 
 def test_offline_rl_export_keeps_multi_feedback_for_analysis(tmp_path: Path) -> None:
@@ -58,7 +73,10 @@ def test_offline_rl_export_keeps_multi_feedback_for_analysis(tmp_path: Path) -> 
     assert first.feedback["is_click"] == pytest.approx(1.0)
     assert first.feedback["long_view"] == pytest.approx(1.0)
     assert first.feedback["is_hate"] == pytest.approx(0.0)
-    assert '"action_id": 10' in dataset.to_jsonl()
+    payload = dataset.to_jsonl()
+    assert '"action_id": 10' in payload
+    assert '"terminated": false' in payload
+    assert '"bootstrap_allowed": true' in payload
 
 
 def test_offline_rl_export_accepts_representation_features(tmp_path: Path) -> None:
@@ -77,3 +95,27 @@ def test_offline_rl_export_accepts_representation_features(tmp_path: Path) -> No
     assert first.state["user_feature:followers"] == 12
     assert first.action_features["category"] == "games"
     assert second.action_features["category"] == "music"
+
+
+def test_offline_rl_state_builder_is_injectable(tmp_path: Path) -> None:
+    rows = load_kuairand(_fixture(tmp_path))
+
+    def build_state(row, history, user_features):
+        return {
+            "tab": row.tab,
+            "history": history.count,
+            "profile": user_features.get("profile", "unknown"),
+        }
+
+    dataset = kuairand_to_offline_rl(
+        rows,
+        user_feature_lookup={1: {"profile": "frequent"}},
+        state_builder=build_state,
+    )
+
+    assert dataset.transitions[0].state == {
+        "tab": 1,
+        "history": 0,
+        "profile": "frequent",
+    }
+    assert dataset.transitions[1].state["history"] == 1
