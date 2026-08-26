@@ -32,9 +32,10 @@ class ConformalCalibrationRecord:
 class ConformalMargins:
     """One-sided non-negative error margins, not absolute metric bounds.
 
-    Naming these fields as margins prevents a subtle but important ambiguity:
-    the fitted values are quantiles of prediction residuals. They become lower
-    or upper bounds only after being applied to a new prediction.
+    ``alpha`` is the requested gate-level error budget. ``per_metric_alpha`` is
+    the marginal level used when simultaneous calibration is enabled. The number
+    of calibrated metrics is derived from the actual residual collection rather
+    than duplicated as a separate constant.
     """
 
     alpha: float
@@ -44,6 +45,7 @@ class ConformalMargins:
     spend_upper_margin: float
     fatigue_upper_margin: float
     churn_risk_upper_margin: float
+    per_metric_alpha: float | None = None
 
     def value_lcb(self, predicted_delta: float) -> float:
         return predicted_delta - self.value_lower_margin
@@ -62,12 +64,7 @@ class ConformalMargins:
 
 
 def _conservative_quantile(residuals: list[float], alpha: float) -> float:
-    """Finite-sample split-conformal one-sided quantile.
-
-    The rank is ceil((n + 1) * (1 - alpha)), capped at n. We clip the margin at
-    zero so calibration can never make the promotion gate less conservative than
-    the raw prediction.
-    """
+    """Finite-sample split-conformal one-sided quantile."""
 
     if not residuals:
         raise ValueError("at least one calibration residual is required")
@@ -77,15 +74,28 @@ def _conservative_quantile(residuals: list[float], alpha: float) -> float:
 
 
 class ConformalPolicyCalibrator:
-    """Calibrate value and constraint prediction errors from matured cohorts."""
+    """Calibrate simultaneous promotion bounds from matured policy cohorts.
 
-    def __init__(self, alpha: float = 0.05, min_calibration_size: int = 30) -> None:
+    Promotion checks several metrics at once. Reusing the full marginal error
+    budget independently for every metric does not preserve a gate-level error
+    budget, so simultaneous calibration is enabled by default. The Bonferroni
+    allocation is computed from the actual calibrated metric set.
+    """
+
+    def __init__(
+        self,
+        alpha: float = 0.05,
+        min_calibration_size: int = 30,
+        *,
+        simultaneous: bool = True,
+    ) -> None:
         if not 0 < alpha < 1:
             raise ValueError("alpha must be in (0, 1)")
         if min_calibration_size <= 0:
             raise ValueError("min_calibration_size must be positive")
         self.alpha = alpha
         self.min_calibration_size = min_calibration_size
+        self.simultaneous = simultaneous
 
     def fit(self, records: Iterable[ConformalCalibrationRecord]) -> ConformalMargins:
         rows = list(records)
@@ -94,26 +104,27 @@ class ConformalPolicyCalibrator:
                 f"need at least {self.min_calibration_size} calibration cohorts, got {len(rows)}"
             )
 
-        # Lower-bound quantities use predicted - observed residuals. Upper-bound
-        # risk/cost quantities use observed - predicted residuals.
-        value_residuals = [
-            row.predicted_value_delta - row.observed_value_delta for row in rows
-        ]
-        roi_residuals = [row.predicted_roi - row.observed_roi for row in rows]
-        spend_residuals = [row.observed_spend - row.predicted_spend for row in rows]
-        fatigue_residuals = [
-            row.observed_fatigue - row.predicted_fatigue for row in rows
-        ]
-        churn_residuals = [
-            row.observed_churn_risk - row.predicted_churn_risk for row in rows
-        ]
+        residuals = {
+            "value": [row.predicted_value_delta - row.observed_value_delta for row in rows],
+            "roi": [row.predicted_roi - row.observed_roi for row in rows],
+            "spend": [row.observed_spend - row.predicted_spend for row in rows],
+            "fatigue": [row.observed_fatigue - row.predicted_fatigue for row in rows],
+            "churn": [
+                row.observed_churn_risk - row.predicted_churn_risk for row in rows
+            ],
+        }
+        metric_count = len(residuals)
+        if metric_count <= 0:  # pragma: no cover - defensive for future refactors.
+            raise RuntimeError("no conformal metrics configured")
+        per_metric_alpha = self.alpha / metric_count if self.simultaneous else self.alpha
 
         return ConformalMargins(
             alpha=self.alpha,
             calibration_size=len(rows),
-            value_lower_margin=_conservative_quantile(value_residuals, self.alpha),
-            roi_lower_margin=_conservative_quantile(roi_residuals, self.alpha),
-            spend_upper_margin=_conservative_quantile(spend_residuals, self.alpha),
-            fatigue_upper_margin=_conservative_quantile(fatigue_residuals, self.alpha),
-            churn_risk_upper_margin=_conservative_quantile(churn_residuals, self.alpha),
+            value_lower_margin=_conservative_quantile(residuals["value"], per_metric_alpha),
+            roi_lower_margin=_conservative_quantile(residuals["roi"], per_metric_alpha),
+            spend_upper_margin=_conservative_quantile(residuals["spend"], per_metric_alpha),
+            fatigue_upper_margin=_conservative_quantile(residuals["fatigue"], per_metric_alpha),
+            churn_risk_upper_margin=_conservative_quantile(residuals["churn"], per_metric_alpha),
+            per_metric_alpha=per_metric_alpha,
         )
