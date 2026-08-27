@@ -20,6 +20,7 @@ __all__ = [
     "ProcessState",
     "RewardWeights",
     "RiskSensitiveMPC",
+    "RiskSensitiveMPCConfig",
     "SafePolicyImprovementConfig",
     "StressScenario",
     "SupportAnchoredPolicyImprover",
@@ -66,12 +67,23 @@ def __getattr__(name: str) -> Any:
             "ProcessState": ProcessState,
             "TrajectoryStepSignal": TrajectoryStepSignal,
         }[name]
-    if name in {"CandidateRolloutScore", "RiskSensitiveMPC", "StressScenario"}:
-        from .model_based import CandidateRolloutScore, RiskSensitiveMPC, StressScenario
+    if name in {
+        "CandidateRolloutScore",
+        "RiskSensitiveMPC",
+        "RiskSensitiveMPCConfig",
+        "StressScenario",
+    }:
+        from .model_based import (
+            CandidateRolloutScore,
+            RiskSensitiveMPC,
+            RiskSensitiveMPCConfig,
+            StressScenario,
+        )
 
         return {
             "CandidateRolloutScore": CandidateRolloutScore,
             "RiskSensitiveMPC": RiskSensitiveMPC,
+            "RiskSensitiveMPCConfig": RiskSensitiveMPCConfig,
             "StressScenario": StressScenario,
         }[name]
     if name in {
