@@ -6,180 +6,168 @@
 
 **让 Growth Agent 在因果增量、行为策略 support、预算约束与可回滚边界内自主决策，并从真实轨迹与失败证据中安全学习。**
 
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![CI](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml)
+
 `CAUSAL POMDP` · `CROSS-FITTED DR` · `HIERARCHICAL RL` · `SUPPORT-ANCHORED PI` · `ROBUST OPE` · `CONFORMAL GATE` · `GROWTHPRM` · `DYNAMICS-AWARE GAE` · `RISK-SENSITIVE MPC` · `HARNESS EVOLUTION`
 
 </div>
 
 ---
 
-## Product Thesis
+## Why this repository exists
 
-传统营销自动化解决“执行什么活动”；GrowthEvo 解决更难的决策问题：
+传统营销自动化回答“执行哪个活动”；GrowthEvo 研究更难的长期决策问题：
 
-> **对谁、什么时候、通过什么渠道、给什么权益或内容、投入多少预算，以及什么时候应该什么都不做。**
+> **对谁、什么时候、通过什么渠道、投入多少预算，以及什么时候应该什么都不做。**
 
-项目把用户增长建模为带预算、ROI、触达频控、用户疲劳、延迟反馈和部分可观测状态的 **Causal POMDP**。
-
-核心目标不是 raw conversion，而是 incremental outcome：
+项目把用户增长建模为带预算、ROI、频控、疲劳、延迟反馈和部分可观测状态的 **Causal POMDP**。核心目标不是 raw conversion，而是 incremental outcome：
 
 \[
 \tau(x,a)=\mathbb E[Y(a)-Y(a_0)\mid X=x],
 \qquad a_0=NO\_TREATMENT.
 \]
 
-一个本来就会购买的用户不应该因为“转化概率高”而被错误发券。`NO_TREATMENT` / holdout 因此是一级动作，不是异常分支。
+`NO_TREATMENT` / holdout 是一级动作。一个本来就会购买的用户，不应该仅因为转化概率高而被错误发券。
 
 ---
 
-## End-to-End Learning + Runtime Loop
+## Runtime and learning loop
 
 ```mermaid
 flowchart LR
-    LOG[Logged / Randomized Growth Data] --> DR[Cross-Fitted DR-Learner]
-    DR --> SERVE[CATE Serving Bridge]
-    SERVE --> BELIEF[Causal Belief State]
+    LOG[Logged / Randomized Data] --> DR[Cross-Fitted DR]
+    DR --> SERVE[CATE Serving]
+    SERVE --> BELIEF[Causal Belief]
 
-    GOAL[Growth Goal + Constraints] --> BELIEF
-    BELIEF --> PLAN[Growth Hypothesis Planner]
-    PLAN --> POLICY[Hierarchical Numeric Policy]
-    POLICY --> SPI[Support-Anchored Policy Improvement]
+    GOAL[Goal + Constraints] --> BELIEF
+    BELIEF --> PLAN[Hypothesis Planner]
+    PLAN --> POLICY[Hierarchical Policy]
+    POLICY --> SPI[Support-Anchored PI]
     SPI --> LEGAL{Legal Action Gate}
-    LEGAL -->|allowed| EXEC[Tool / Channel Execution]
-    LEGAL -->|blocked| HOLD[NO_TREATMENT / Holdout]
+    LEGAL -->|allowed| EXEC[Execution]
+    LEGAL -->|blocked| HOLD[NO_TREATMENT]
 
-    EXEC --> OBS[Environment Observation]
-    OBS --> PRM[GrowthPRM Step Credit]
-    PRM --> TRAJ[Dynamics-Aware GAE / Trainer Export]
-    OBS --> OUT[Delayed Business Outcome]
-    OUT --> REWARD[Causal Outcome Reward]
-
-    REWARD --> OPE[DM / IPS / SNIPS / DR / SWITCH-DR / DRos / β*-IPS]
-    OPE --> CAL[Conformal Calibration]
-    CAL --> VERIFY[Counterfactual Verifier]
-    VERIFY -->|pass| SHADOW[Shadow / Canary / Promotion]
-    VERIFY -->|fail / unsupported| FAIL[Failure Trace]
-    FAIL --> EVOLVE[Harness Evolution]
-    EVOLVE --> STRESS[World-Model Stress / CVaR MPC]
-    STRESS --> PLAN
+    EXEC --> OBS[Observation]
+    OBS --> PRM[GrowthPRM]
+    PRM --> GAE[GAE / Trainer Export]
+    OBS --> OUT[Delayed Outcome]
+    OUT --> OPE[DM / IPS / SNIPS / DR / Robust OPE]
+    OPE --> VERIFY[Conformal + Verifier]
+    VERIFY -->|pass| PROMOTE[Shadow / Canary / Promotion]
+    VERIFY -->|insufficient / fail| FAILURE[Failure Trace]
+    FAILURE --> EVOLVE[Harness Evolution]
+    EVOLVE --> MPC[World-Model Stress / CVaR]
+    MPC --> PLAN
 ```
 
-训练、执行和晋级故意分开：**训练器可以提出更好的策略，但不能修改裁判。**
+**Learning、Runtime、Verifier 故意分开。训练器可以提出候选策略，但不能修改裁判。**
 
 ---
 
-## 1. Cross-Fitted Causal Uplift Learning
+## 1. Cross-Fitted causal learning
 
-`growthevo/causal/dr_learner.py` 提供一个可审计的 Cross-Fitted DR-Learner。
+`growthevo/causal/dr_learner.py` 实现可审计的 one-vs-control Cross-Fitted DR learner。
 
-每条 logged decision 保存完整 behavior-policy probability vector：
+每条 logged decision 保存：
 
 ```text
 unit_id
+group_id (optional)
 features
 action
 outcome
 action_propensities[action -> probability]
 ```
 
-对 treatment `a` 与 `NO_TREATMENT`，多臂 propensity 先在 treatment/control pair 内重归一化：
+多臂日志先在 treatment/control pair 内重归一化：
 
 \[
-e_a(x)=\frac{\mu(a|x)}{\mu(a|x)+\mu(a_0|x)}.
+e_a(x)=\frac{\mu(a\mid x)}{\mu(a\mid x)+\mu(a_0\mid x)}.
 \]
 
-然后在 held-out fold 上构造 AIPW / DR pseudo-outcome：
+held-out fold 上构造 AIPW / DR pseudo-outcome：
 
 \[
-\tilde\tau_i=
-\hat m_1(x_i)-\hat m_0(x_i)
-+\frac{A_i(Y_i-\hat m_1(x_i))}{\hat e(x_i)}
--\frac{(1-A_i)(Y_i-\hat m_0(x_i))}{1-\hat e(x_i)}.
+\widetilde\tau_i=
+\widehat m_1(x_i)-\widehat m_0(x_i)
++\frac{A_i(Y_i-\widehat m_1(x_i))}{e_i}
+-\frac{(1-A_i)(Y_i-\widehat m_0(x_i))}{1-e_i}.
 \]
 
-二阶段 effect model **只训练在 out-of-fold pseudo-outcomes 上**，减少 nuisance model 直接泄漏。
+关键实现约束：
 
-仓库内置 dependency-free ridge backend，方便 CI 审计统计流程；生产实验可以换成 CausalML / EconML / causal forest / neural uplift，而不改变 Runtime contract。
+- outcome model 与 effect model 都可注入，Ridge 只是 dependency-free reference backend；
+- 重复用户/cluster 可以用 `group_id` 保持在同一 cross-fitting fold；
+- grouped folds 会同时平衡 treatment/control mass，而不是简单 hash 取模；
+- **默认不做 propensity clipping**；
+- strict positivity、practical overlap threshold、propensity clipping 是三件不同的事情；
+- 如果显式 clipping，会记录 `propensity_clip_fraction`；
+- effect uncertainty 使用 second-stage out-of-fold residual + extrapolation diagnostic，**不冒充 causal confidence interval**。
 
-### CATE Serving Bridge
+### Serving uncertainty without changing its meaning
 
-`CausalUpliftServingBridge` 把训练后的 per-channel CATE 接回 `UserObservation`：
+`CausalUpliftServingBridge` 保留逐渠道：
 
 ```text
-raw_channel_effects
-channel_effects
-channel_uncertainty
-channel_support
-clipped_channels
+raw effect
+clipped probability-scale effect
+model uncertainty diagnostic
+support
+optional calibrated / inferential effect lower bound
 ```
 
-- 低 support 不会被偷偷变成“置信度很高的零 uplift”；
-- extrapolation 会放大 uncertainty；
-- probability-scale uplift 超出 `[-1,1]` 时保留 raw effect、显式记录 clipping，并把 clipping distance 加进 uncertainty。
-
-所以训练模型无法通过非法概率范围悄悄污染 Runtime belief。
+只有外部 causal inference / calibration backend 明确提供下界时，policy 才会把它当下界使用。普通 residual diagnostic 不会被改名成置信区间。
 
 ---
 
-## 2. CausalLift-HRL · Hierarchical Decision Policy
+## 2. Hierarchical decision policy without business hard-coding
 
-高层策略选择增长 option：
-
-\[
-\pi_H(z_t\mid b_t,g)
-\]
+高层 Planner 负责语义 option：
 
 ```text
 ACQUIRE / ACTIVATE / RETAIN / REACTIVATE
 UPSELL / EXPLORE / HOLDOUT / STOP
 ```
 
-低层策略选择数值动作：
+低层 policy 负责因果渠道排序；offer、budget、schedule、creative 等业务参数由可注入 `ActionParameterizer` 生成。
 
-\[
-\pi_A(a_t\mid b_t,z_t)
-\]
+因此 policy 核心不会写死：
 
-```text
-channel + offer + timing + creative + budget + frequency cost
-```
+- 某个 option 必须给多少权益；
+- 某个渠道必须几点发送；
+- 某个 creative 命名规则；
+- 某个业务固定成本。
 
-LLM/Planner 负责语义目标、证据获取和子任务规划；数值 policy 负责可验证的渠道、权益和预算决策。两者不会混成一个自由文本动作。
+保守渠道价值优先使用显式 effect lower bound；没有校准下界时才退回 model-diagnostic uncertainty penalty。
+
+`EXPLORE` 的 uncertainty bonus **只影响探索排序，不进入 ROI 安全价值**。高不确定性不能被当成“更赚钱”的证据。
 
 ---
 
-## 3. Support-Anchored Conservative Policy Improvement
+## 3. Support-Anchored policy improvement
 
-离线 value model 最危险的失败之一，是对 logging policy 没覆盖的动作产生乐观外推。
+`SupportAnchoredPolicyImprover` 是 safety layer，不是另一个 policy learner。
 
-`SupportAnchoredPolicyImprover` 先计算 pessimistic value：
+上游模型可以提交任意 learned policy distribution；安全层再根据：
 
-\[
-LCB(a)=\hat Q(a)-z\hat\sigma(a).
-\]
-
-低于 behavior support floor 的 treatment action 不参与 improvement；`NO_TREATMENT` 永远保留。
-
-候选 policy 不是直接跳到 argmax，而是与 behavior policy 混合：
-
-\[
-\pi_{new}=(1-\eta)\mu+\eta\delta_{a^*}.
-\]
-
-`η` 同时受：
-
+- behavior support；
+- pessimistic action value；
 - total-variation update cap；
-- expected-cost upper bound；
-- pessimistic improvement 条件约束。
+- expected-cost bound；
+- minimum pessimistic improvement；
 
-如果当前 behavior policy 本身已经超过硬 cost limit，模块可以直接安全降级到 `NO_TREATMENT`。
+把 proposal 向 behavior policy 收缩。
 
-这个模块是 offline improvement guard，**不是最终部署证明**；晋级仍必须经过 OPE + Counterfactual Verifier。
+低 support action 可以配置成冻结 behavior mass，或只允许减少、禁止增加。`NO_TREATMENT` 始终保留为安全动作。
+
+这类约束只说明“候选更新更保守”，**不等于部署证明**。
 
 ---
 
-## 4. Legal Action Space Before Learning
+## 4. Legal action space
 
-Policy 只能从合法动作空间中学习：
+Policy 只能从合法动作空间中执行：
 
 \[
 \mathcal A_{legal}(s)=
@@ -190,119 +178,91 @@ Policy 只能从合法动作空间中学习：
 \cap\mathcal A_{risk}.
 \]
 
-硬约束包括：
-
-- Consent / suppression；
-- max budget；
-- max offer value；
-- 24h / 7d frequency cap；
-- max fatigue；
-- max churn risk。
-
-被拒绝的 treatment 不会在同一步偷偷换一个营销动作绕过 gate，而是降级到 holdout。
+被 hard gate 拒绝的 treatment 不会在同一步偷偷切换到另一个营销动作绕过约束，而是回退到 `NO_TREATMENT`。
 
 ---
 
-## 5. GrowthPRM + Dynamics-Aware Planner Credit
+## 5. Reward and trajectory semantics
 
-终局转化或 D30 LTV 太稀疏，无法给长链 Planner 足够 credit。
+### Causal outcome reward
 
-GrowthPRM 使用：
+默认环境 reward 优先采用可解释的 **net incremental value**，避免同时重复奖励由同一 conversion 派生出的多个指标。
 
-\[
-r_t^{proc}=
-\gamma\Phi(s_{t+1})-\Phi(s_t)
-+\lambda_{obs}(1-H(a_t))\Delta Evidence_t
--Cost_t-Penalty_t.
-\]
+模型 epistemic uncertainty 属于 policy / verifier 风险信息，默认不写进环境 reward，因此模型变准不会导致 reward definition 自己漂移。
 
-奖励真正的 Goal/Evidence/Constraint progress，惩罚：
+### GrowthPRM
+
+Process reward 奖励 Goal / Evidence / Constraint progress，并惩罚：
 
 - failed tool；
 - duplicate evidence；
-- unnecessary cost；
+- unnecessary direct cost；
 - irreversible side effect。
 
-`TrajectoryTrainerAdapter` 再把真实 planner/tool transition 转成 backend-neutral training samples，并计算 GAE：
+成功调用工具默认不会“白拿分”；必须产生可验证 progress/evidence 才得到正向信用。
 
-\[
-\delta_t=r_t+\gamma V(s_{t+1})-V(s_t),
-\qquad
-A_t=\delta_t+\gamma\lambda A_{t+1}.
-\]
+### GAE
 
-`credit_boundary` 会在 rollback、environment reset、user/segment switch、delayed-outcome attribution boundary 等动态不连续位置切断 advantage propagation，避免把不相关的状态转移错误归因到前一步。
-
-导出格式保留：
+`PlannerTransition` 区分：
 
 ```text
-observation
-action
-reward
-value / next_value
-legal_action
-tool_success
-done
-credit_boundary
+done          = true environment terminal
+truncated     = export/window boundary
+credit_boundary = attribution/dynamics boundary
 ```
 
-可交给外部 PPO/GRPO/Agent-RL trainer，但 Runtime 事实和安全语义仍归 GrowthEvo 所有。
+语义是：
+
+- `done` 关闭 next-state value bootstrap；
+- `truncated` 保留 value bootstrap，但切断跨窗口 trace；
+- `credit_boundary` 切断长期 advantage propagation，但不自动宣称环境终止；
+- external trainer export 保留 `done / truncated / metadata`，不会丢终止语义。
 
 ---
 
-## 6. Off-Policy Evaluation + Overlap Diagnostics
+## 6. Off-Policy Evaluation
 
-仓库同时实现：
+`growthevo/rl/ope.py` 同时输出：
 
 - Direct Method；
 - IPS；
 - self-normalized IPS；
-- Doubly-Robust；
+- Doubly Robust；
 - SWITCH-DR；
 - optimistic DR shrinkage；
-- estimated β*-IPS additive control variate；
-- estimator-specific standard errors；
+- additive-control-variate IPS；
 - ESS / ESS ratio；
-- practical support coverage；
-- maximum importance weight；
-- weight coefficient of variation。
+- importance-mass-weighted support coverage；
+- descriptive row support coverage；
+- max / mean importance weight；
+- importance-weight normalization error；
+- weight coefficient of variation；
+- IID 或 protocol-defined cluster-robust standard error。
 
-β*-IPS reference form：
+### Hyperparameters do not tune themselves on the final test set
 
-\[
-\hat V_{\beta}=
-\frac1n\sum_i[w_i r_i-\hat\beta(w_i-1)].
-\]
+SWITCH threshold、DR shrinkage coefficient、control-variate coefficient 都必须由 validation/tuning protocol 显式给出。
 
-**高 point estimate + 差 overlap = 证据不足，不是上线理由。**
+control-variate coefficient 可以用：
+
+```python
+beta = estimate_beta_coefficient(validation_records)
+result = evaluate_policy(test_records, beta_coefficient=beta)
+```
+
+如果没有传入 coefficient，control-variate estimator 退化为普通 IPS；最终 test cohort 计算出的 empirical optimum 只作为 diagnostic，不会悄悄用于自己的成绩。
+
+### Dependence-aware uncertainty
+
+`LoggedBanditRecord.cluster_id` 是可选的。若实验协议能定义独立 block，例如 day、campaign、session 或其他 sampling unit，可以为每条记录提供 cluster id，OPE 会计算 cluster-robust standard error。
+
+Estimator 本身不会硬猜“按天”还是“按 session”才正确。
 
 ---
 
-## 7. Split-Conformal Counterfactual Gate
+## 7. Promotion gate fails closed without an evidence protocol
 
-成熟 shadow/canary cohort 可以提供 one-sided residual calibration margin。
-
-实现严格区分 margin 与 bound：
-
-```text
-value_lower_margin
-roi_lower_margin
-spend_upper_margin
-fatigue_upper_margin
-churn_risk_upper_margin
-```
-
-实际 bound 必须通过：
-
-```text
-value_lcb()
-roi_lcb()
-spend_ucb()
-fatigue_ucb()
-churn_risk_ucb()
-```
-
-Verifier 对 candidate 的结果只有：
+`CounterfactualVerifier` 返回：
 
 ```text
 PASS
@@ -310,169 +270,140 @@ FAIL
 INSUFFICIENT_EVIDENCE
 ```
 
-样本少、ESS 低、support 差或 importance-weight tail 太重，会返回 `INSUFFICIENT_EVIDENCE`，不会误判成“策略失败”。
+统计显著性规则与 evidence-quality gate 分开配置。
+
+GrowthEvo **没有内置一套自称普适的 sample size / ESS / support / max-weight 常数**。如果部署或 benchmark 没有显式提供 statistical gate 与 evidence-quality gate，verification 直接返回 `INSUFFICIENT_EVIDENCE`。
+
+Conformal calibration 对 value、ROI、spend、fatigue、churn risk 使用 simultaneous promotion-gate calibration；它不能让原始统计 bound 变得更宽松。
 
 ---
 
-## 8. Risk-Sensitive Long-Horizon Planning
+## 8. Risk-sensitive model-based planning
 
-重复营销会改变未来 fatigue、churn、spend、touch count 和 effective uplift。
+`RiskSensitiveMPC` 用 stochastic world model 做 stress/ranking，但 world model 不是 causal truth。
 
-`RiskSensitiveMPC` 在 stochastic World Model 上做多 seed rollout，并按 downside CVaR 与 violation probability 排序：
+实现包括：
 
-\[
-Score(plan)=CVaR_{\alpha}(Return)-\lambda P(ConstraintViolation).
-\]
+- injectable world factory；
+- configurable channel delay / churn response；
+- common random numbers：所有候选 plan 使用相同 rollout seeds；
+- downside CVaR diagnostics；
+- hard feasibility 与 reward scale 分离。
 
-Stress scenario 可以压低 uplift、抬高 cost、放大 fatigue。
-
-**World Model 只用于 replay / stress / ranking，不是因果真值，也不能单独晋级 policy。**
+违反硬约束的 plan 不会因为 reward 数值尺度变大而“买过”安全门。
 
 ---
 
-## 9. Benchmark Tracks
+## 9. Real-data benchmark tracks
 
-Benchmark 不再把 synthetic 数字和真实数据证据混在一起。
-
-### Synthetic oracle
-
-仓库保留可审计的 synthetic contextual-bandit oracle，用于检查已知真实结构能否被 learner / policy 恢复：
-
-- heterogeneous treatment effects；
-- context-dependent behavior propensities；
-- `NO_TREATMENT / PUSH / EMAIL` potential outcomes；
-- held-out CATE RMSE / MAE / bias；
-- oracle policy value / regret。
-
-**Synthetic 数字只属于算法回归测试，不属于真实业务提升结果。**
+真实数据集各自回答不同的问题，不把它们硬拼成一个总分。
 
 ### Criteo Uplift
 
-`load_criteo_uplift()` 接真实随机广告增量实验。随机 `treatment` 映射为 `ADS`，control 映射为 `NO_TREATMENT`；post-treatment `exposure` 不会被错误当成 treatment。
+用途：随机广告增量实验、CATE / uplift ranking、budgeted targeting policy value。
 
-支持：
+关键语义：
 
-- CATE / uplift learning；
-- top-budget targeting policy value；
-- treat-none / treat-all 对照；
-- treatment/control 分层 bootstrap 区间。
+- randomized `treatment` 是 treatment；
+- post-assignment `exposure` **不是** treatment；
+- 支持 treat-none / treat-all reference；
+- 支持 treatment/control-stratified bootstrap。
 
 ### Open Bandit Dataset
 
-`load_open_bandit()` 保留真实 logged propensity，并区分类别型 user features 与数值 user-item affinity。当前公开 schema 的 `propensity_score` 与官方较早样例中的 `action_prob` 都可读取。
+用途：真实 logged propensity 下的 contextual-bandit OPE。
 
-它用于真实 contextual-bandit OPE，而不是伪装成长序列 RL 数据。
+实现保留：
+
+- logged propensity；
+- categorical user context；
+- user-item affinity；
+- `item_context.csv` 原始 anonymized action features；
+- protocol-defined cluster key。
+
+Item feature loader 不擅自把匿名 hash / category 当连续数值。具体 encoding 由 reward model / policy backend 决定。
 
 ### KuaiRand
 
-`load_kuairand()` 保留真实序列、丰富反馈与 `is_rand` 干预标记。`is_rand` **不会被伪造成 action propensity**。
+用途：长序列 recommendation / offline RL 数据接口。
 
-`kuairand_to_offline_rl()` 导出：
+实现原则：
 
-```text
-state
-action_id
-action_features
-reward
-next_state
-done
-random_intervention metadata
-multi-feedback diagnostics
-```
+- `is_rand` 只是 logging provenance，**不是 action propensity**；
+- current feedback 不进入 current state；
+- raw user id 默认不进入 policy state；
+- 完整 user trajectory 默认保留；
+- 人为 window boundary 是 truncation，不是真实 terminal；
+- user/video features 与 action representation 可注入；
+- 导出 `(state, action, reward, next_state, terminated, truncated)`。
 
-并支持按实验 ID 过滤加载官方 user / video feature tables。这样 CQL、IQL、Decision Transformer 等方法可以使用 action encoder，而不是把大规模视频 catalog 粗暴 one-hot 化。
+可用于外部 Behavior Cloning、CQL、IQL、Decision Transformer 等实验，但仓库目前不把“已经提供数据接口”写成“已经训练出这些模型的真实成绩”。
 
-详细协议见：
+详细协议：
 
 - `docs/REAL_WORLD_BENCHMARKS.md`
 - `docs/OFFLINE_RL_BASELINES.md`
+- `docs/IMPLEMENTATION_STATUS.md`
 
 ---
 
-## 10. Event-Sourced Harness Evolution
+## 10. Evidence boundary
 
-关键状态写入 append-only hash chain：
+当前仓库已经实现真实数据 adapter 与算法评估接口，但**没有在 README 声称尚未附带可复现实验 artifact 的真实 benchmark 数字**。
+
+Synthetic GrowthAgentBench 用于算法回归，因为它有已知 potential outcomes；synthetic metrics 不属于真实业务 uplift。
+
+真实结果进入 README 前至少应能追溯到：
 
 ```text
-GOAL_COMPILED
-BELIEF_UPDATED
-HYPOTHESIS_PLANNED
-ACTION_PROPOSED
-ACTION_ALLOWED / ACTION_BLOCKED
-FEEDBACK_OBSERVED
-REWARD_ASSIGNED
-PROCESS_REWARD_ASSIGNED
-ROLLOUT_EVALUATED
-VERIFICATION_COMPLETED
-FAILURE_CLASSIFIED
-PATCH_PROPOSED
+dataset fingerprint
+split definition
+seed
+feature/action preprocessing
+model configuration
+OPE / CATE hyperparameters
+metric definition
+result artifact
 ```
 
-Evolver 只能修改 whitelisted cognitive coordinates：Planner template、feature/memory/tool routing、delegation、exploration、short-horizon reward shaping。
+规则是：
 
-冻结项包括 North-Star Metric、Consent、Budget Ledger、Event Store、Verifier、Deployment Gate 和 `NO_TREATMENT` 语义。
+> **code first → reproducible evidence second → README result last**
 
 ---
 
-## Repository Layout
+## Repository layout
 
 ```text
 GrowthEvo-Harness/
 ├── growthevo/
-│   ├── models.py
 │   ├── causal/
 │   │   ├── dr_learner.py
 │   │   └── serving.py
 │   ├── bench/
-│   │   ├── synthetic.py            # known-ground-truth regression oracle
-│   │   ├── runner.py               # synthetic held-out metrics
-│   │   ├── real_world.py           # Criteo / Open Bandit / KuaiRand logs
-│   │   ├── statistics.py           # randomized targeting bootstrap
-│   │   ├── kuairand_features.py    # filtered official feature-table loaders
-│   │   └── offline_rl.py           # state/action/reward/next-state export
+│   │   ├── synthetic.py
+│   │   ├── real_world.py
+│   │   ├── open_bandit_ope.py
+│   │   ├── open_bandit_features.py
+│   │   ├── kuairand_features.py
+│   │   ├── planner_sequences.py
+│   │   ├── offline_rl.py
+│   │   └── statistics.py
 │   ├── runtime/
-│   │   ├── belief_state.py
-│   │   ├── event_store.py
-│   │   ├── legal_action.py
-│   │   ├── planner.py
-│   │   └── engine.py
 │   ├── rl/
-│   │   ├── causal_reward.py
-│   │   ├── hierarchical_policy.py
-│   │   ├── safe_policy_improvement.py
-│   │   ├── ope.py
-│   │   ├── conformal.py
-│   │   ├── process_reward.py
-│   │   └── model_based.py
 │   ├── training/
-│   │   └── trajectory.py
 │   ├── verifier/
-│   │   └── counterfactual.py
 │   ├── simulator/
-│   │   └── user_world_model.py
-│   ├── evolution/
-│   │   ├── failure_miner.py
-│   │   └── optimizer.py
-│   └── tools/
-│       └── registry.py
+│   └── evolution/
 ├── examples/
-│   ├── demo.py
-│   └── real_world_benchmark.py
 ├── tests/
 ├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── ALGORITHM.md
-│   ├── TRAINING_AND_BENCHMARK.md
-│   ├── REAL_WORLD_BENCHMARKS.md
-│   ├── OFFLINE_RL_BASELINES.md
-│   ├── FRONTIER_2026.md
-│   └── IMPLEMENTATION_STATUS.md
 └── .github/workflows/ci.yml
 ```
 
 ---
 
-## Quick Start
+## Quick start
 
 ```bash
 git clone https://github.com/jiaweine/GrowthEvo-Harness.git
@@ -484,7 +415,7 @@ pytest
 python examples/demo.py
 ```
 
-Synthetic causal regression check:
+Minimal synthetic regression fixture:
 
 ```python
 from growthevo.bench import GrowthAgentBench
@@ -495,72 +426,8 @@ model, metrics = bench.fit_cate(treatment=Channel.PUSH)
 print(metrics)
 ```
 
-Real-data adapters use locally downloaded official files and do not vendor third-party datasets into git:
-
-```bash
-python examples/real_world_benchmark.py criteo data/criteo.csv
-python examples/real_world_benchmark.py open-bandit data/open_bandit.csv
-python examples/real_world_benchmark.py kuairand data/kuairand.csv
-```
-
 ---
 
-## Claims Boundary
+## Research boundary
 
-当前代码已经实现：
-
-- Cross-Fitted DR causal learner；
-- CATE serving bridge；
-- support-anchored conservative policy improvement；
-- hierarchical Runtime + hard legal action space；
-- GrowthPRM + dynamics-aware GAE export；
-- DM / IPS / self-normalized IPS / DR / SWITCH-DR / DR shrinkage / β*-IPS + overlap diagnostics；
-- Criteo Uplift randomized-treatment adapter + targeting bootstrap；
-- Open Bandit true-propensity adapter；
-- KuaiRand leakage-aware sequential adapter + user/video feature loading + standard Offline RL transition export；
-- split-conformal promotion margins；
-- Counterfactual Verifier；
-- CVaR model-based stress planning；
-- synthetic oracle regression benchmark；
-- bounded Harness Evolution。
-
-当前**不声称已经完成**：
-
-- production neural IQL / CQL / CPO / GRPO trainer；
-- learned neural user simulator；
-- public real-data headline result table；
-- real online A/B uplift；
-- production ad-auction latency；
-- full verl / Agent Lightning trainer integration；
-- hidden-confounding 下的无条件因果有效性。
-
-真实数据适配器 ≠ 已经得到真实业务提升结论。完整 benchmark 必须下载官方数据、固定 split / hyperparameter protocol，并在 untouched test cohort 上报告结果。当前 CI 验证代码契约与 fixture，不把 fixture 指标当成真实数据结果。
-
-规则始终是：
-
-> **code first → reproducible evidence second → README result last.**
-
----
-
-## Research Alignment
-
-`docs/FRONTIER_2026.md` 记录论文信号、代码映射和未实现边界。当前设计重点对齐：
-
-- robust contextual-bandit OPE；
-- causal uplift / doubly robust estimation；
-- CQL / IQL / Decision Transformer 式 Offline RL 对照协议；
-- sequence-aware advertising Offline RL；
-- uncertainty-aware constrained advertising optimization；
-- hierarchical reasoning + numeric acting；
-- observation-grounded process reward；
-- dynamics-aware long-horizon credit assignment；
-- support-constrained / safe-anchored offline policy improvement；
-- auditable user simulation。
-
-研究年份属于论文引用，不作为项目版本标签。
-
----
-
-## Disclaimer
-
-GrowthEvo-Harness is a research and engineering project for studying autonomous growth decision systems. Real marketing deployment requires product-specific consent, privacy, experimentation, anti-abuse and regulatory controls.
+The repository is a research and engineering harness. Real marketing deployment still requires product-specific privacy, consent, experimentation, abuse prevention, regulatory review, calibrated causal evidence, and rollback infrastructure.
