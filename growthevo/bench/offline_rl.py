@@ -3,13 +3,10 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from json import dumps
+from math import isfinite
 from typing import Any, Callable, Iterable, Mapping
 
-from .real_world import (
-    DEFAULT_KUAIRAND_REWARD_WEIGHTS,
-    KuaiRandInteraction,
-    kuairand_reward,
-)
+from .real_world import KuaiRandInteraction, kuairand_reward
 
 
 FeatureMap = Mapping[str, Any]
@@ -38,6 +35,8 @@ class HistorySummary:
 
 
 StateBuilder = Callable[[KuaiRandInteraction, HistorySummary, FeatureMap], FeatureMap]
+RewardFunction = Callable[[KuaiRandInteraction], float]
+CandidateSetProvider = Callable[[KuaiRandInteraction, HistorySummary], Iterable[int]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,8 +49,9 @@ class OfflineRLTransition:
     bootstrap from ``next_state`` across it.
 
     Logging provenance and stable identifiers remain metadata rather than policy
-    features. ``action_features`` can carry item metadata or a learned embedding
-    so large-action methods are not forced into a flat one-hot action space.
+    features. Candidate actions are present only when an experiment protocol
+    supplies them; an empty tuple means the log does not identify the decision
+    set and must not be interpreted as "the whole item catalog".
     """
 
     trajectory_id: str
@@ -69,6 +69,14 @@ class OfflineRLTransition:
     timestamp_ms: int
     random_intervention: bool
     feedback: Mapping[str, float]
+    candidate_action_ids: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.candidate_action_ids:
+            if len(set(self.candidate_action_ids)) != len(self.candidate_action_ids):
+                raise ValueError("candidate_action_ids must be unique")
+            if self.action_id not in self.candidate_action_ids:
+                raise ValueError("logged action must be present in candidate_action_ids")
 
     @property
     def done(self) -> bool:
@@ -89,6 +97,7 @@ class OfflineRLTransition:
             "state": dict(self.state),
             "action_id": self.action_id,
             "action_features": dict(self.action_features),
+            "candidate_action_ids": list(self.candidate_action_ids),
             "reward": self.reward,
             "next_state": dict(self.next_state),
             "terminated": self.terminated,
@@ -129,6 +138,10 @@ class OfflineRLDataset:
     @property
     def truncation_rate(self) -> float:
         return sum(row.truncated for row in self.transitions) / len(self.transitions)
+
+    @property
+    def candidate_set_coverage(self) -> float:
+        return sum(bool(row.candidate_action_ids) for row in self.transitions) / len(self.transitions)
 
     def to_records(self) -> tuple[dict[str, Any], ...]:
         return tuple(row.to_record() for row in self.transitions)
@@ -175,30 +188,67 @@ def default_kuairand_state_builder(
     return state
 
 
+def _resolve_reward(
+    row: KuaiRandInteraction,
+    *,
+    reward_function: RewardFunction | None,
+    reward_weights: Mapping[str, float] | None,
+) -> float:
+    if (reward_function is None) == (reward_weights is None):
+        raise ValueError("provide exactly one of reward_function or reward_weights")
+    if reward_function is not None:
+        reward = float(reward_function(row))
+    else:
+        assert reward_weights is not None
+        reward = kuairand_reward(row, weights=reward_weights)
+    if not isfinite(reward):
+        raise ValueError("reward function must return a finite value")
+    return reward
+
+
+def _candidate_actions(
+    row: KuaiRandInteraction,
+    history: HistorySummary,
+    provider: CandidateSetProvider | None,
+) -> tuple[int, ...]:
+    if provider is None:
+        return ()
+    candidates = tuple(int(action_id) for action_id in provider(row, history))
+    if not candidates:
+        raise ValueError("candidate provider returned an empty decision set")
+    if len(set(candidates)) != len(candidates):
+        raise ValueError("candidate provider returned duplicate action ids")
+    if row.video_id not in candidates:
+        raise ValueError("candidate set must contain the logged action")
+    return candidates
+
+
 def kuairand_to_offline_rl(
     interactions: Iterable[KuaiRandInteraction],
     *,
+    reward_function: RewardFunction | None = None,
+    reward_weights: Mapping[str, float] | None = None,
     max_steps_per_segment: int = 100,
-    reward_weights: Mapping[str, float] = DEFAULT_KUAIRAND_REWARD_WEIGHTS,
     user_feature_lookup: Mapping[int, FeatureMap] | None = None,
     action_feature_lookup: Mapping[int, FeatureMap] | None = None,
     state_builder: StateBuilder = default_kuairand_state_builder,
+    candidate_provider: CandidateSetProvider | None = None,
 ) -> OfflineRLDataset:
     """Convert KuaiRand logs into backend-neutral offline-RL transitions.
 
-    The conversion keeps three semantics separate:
+    Reward scalarization is deliberately not chosen by the adapter. The research
+    protocol must supply either an explicit reward function or explicit feedback
+    weights. Likewise, candidate sets are exported only when a protocol-defined
+    provider can reconstruct a defensible decision set. This prevents CQL/IQL/DT
+    comparisons from silently using different negative-action universes.
 
-    * real episode termination: the final observed interaction for a user;
-    * export truncation: a fixed-size sequence window used for batching;
-    * logging provenance: whether the historical recommender used randomization.
-
-    Artificial window boundaries do not zero the Bellman bootstrap target. This
-    follows the standard treatment of time-limit truncation when the underlying
-    task itself has not terminated.
+    Artificial window boundaries do not zero the Bellman bootstrap target.
     """
 
     if max_steps_per_segment <= 0:
         raise ValueError("max_steps_per_segment must be positive")
+    if (reward_function is None) == (reward_weights is None):
+        raise ValueError("provide exactly one of reward_function or reward_weights")
 
     by_user: dict[int, list[KuaiRandInteraction]] = defaultdict(list)
     for row in interactions:
@@ -221,7 +271,12 @@ def kuairand_to_offline_rl(
             segment_step_index = offset % max_steps_per_segment
             segment_id = f"{trajectory_id}-segment-{segment_index}"
             state = dict(state_builder(row, history, user_features))
-            reward = kuairand_reward(row, weights=reward_weights)
+            candidates = _candidate_actions(row, history, candidate_provider)
+            reward = _resolve_reward(
+                row,
+                reward_function=reward_function,
+                reward_weights=reward_weights,
+            )
 
             next_history = HistorySummary(
                 count=history.count + 1,
@@ -230,10 +285,7 @@ def kuairand_to_offline_rl(
                 long_view_sum=history.long_view_sum + row.long_view,
             )
             terminated = offset == len(rows) - 1
-            truncated = (
-                not terminated
-                and segment_step_index == max_steps_per_segment - 1
-            )
+            truncated = not terminated and segment_step_index == max_steps_per_segment - 1
 
             if terminated:
                 next_state: dict[str, Any] = {}
@@ -250,6 +302,7 @@ def kuairand_to_offline_rl(
                     state=state,
                     action_id=row.video_id,
                     action_features=dict(action_lookup.get(row.video_id, {})),
+                    candidate_action_ids=candidates,
                     reward=reward,
                     next_state=next_state,
                     terminated=terminated,
