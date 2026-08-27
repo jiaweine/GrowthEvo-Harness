@@ -20,6 +20,13 @@ class LoggedBanditRecord:
             raise ValueError("behavior_propensity must be in (0, 1]")
         if not 0 <= self.target_action_probability <= 1:
             raise ValueError("target_action_probability must be in [0, 1]")
+        for name, value in (
+            ("reward", self.reward),
+            ("baseline_q", self.baseline_q),
+            ("target_q", self.target_q),
+        ):
+            if not isfinite(value):
+                raise ValueError(f"{name} must be finite")
 
     @property
     def importance_weight(self) -> float:
@@ -30,10 +37,17 @@ class LoggedBanditRecord:
 class OPEEstimate:
     """Counterfactual policy-value estimates plus overlap diagnostics.
 
-    Robust estimators are never silently tuned on the evaluation cohort. When a
-    SWITCH threshold or shrinkage coefficient is omitted, the corresponding
-    estimator reduces to ordinary doubly robust evaluation. Paper experiments
-    should select those hyperparameters on a separate validation protocol.
+    Robustness and control-variate coefficients are never silently tuned on the
+    evaluation cohort. ``switch_threshold``, ``dr_os_lambda``, and
+    ``beta_coefficient`` must be selected on validation data and passed in.
+    Missing SWITCH/shrinkage parameters reduce to ordinary DR; a missing beta
+    coefficient reduces beta-IPS to ordinary IPS.
+
+    ``beta_star`` is retained only as an evaluation-cohort diagnostic showing
+    the variance-minimising empirical coefficient one *would* obtain on this
+    cohort. It is deliberately not applied to ``beta_ips`` unless the caller
+    explicitly passes a coefficient. This prevents final-test outcomes from
+    choosing their own estimator coefficient.
 
     ``support_coverage`` is importance-mass weighted, which approximates how much
     of the target-policy distribution is represented by practically supported
@@ -48,6 +62,7 @@ class OPEEstimate:
     switch_dr: float
     dr_os: float
     beta_ips: float
+    beta_coefficient: float | None
     beta_star: float
     dm_standard_error: float
     ips_standard_error: float
@@ -99,19 +114,45 @@ def _sample_variance(values: list[float]) -> float:
     return _sample_covariance(values, values)
 
 
+def _beta_from_terms(ips_terms: list[float], control: list[float]) -> float:
+    control_variance = _sample_variance(control)
+    if control_variance <= 1e-15:
+        return 0.0
+    return _sample_covariance(ips_terms, control) / control_variance
+
+
+def estimate_beta_coefficient(records: Iterable[LoggedBanditRecord]) -> float:
+    """Estimate the additive IPS control-variate coefficient on tuning data.
+
+    Call this on a validation/logging cohort that is disjoint from final policy
+    evaluation, then pass the returned coefficient to ``evaluate_policy``. The
+    function is intentionally separate from evaluation so estimator tuning is a
+    visible part of the experimental protocol rather than hidden test-set fit.
+    """
+
+    rows = list(records)
+    if not rows:
+        raise ValueError("at least one logged record is required")
+    weights = [row.importance_weight for row in rows]
+    ips_terms = [weight * row.reward for weight, row in zip(weights, rows, strict=True)]
+    control = [weight - 1.0 for weight in weights]
+    return _beta_from_terms(ips_terms, control)
+
+
 def evaluate_policy(
     records: Iterable[LoggedBanditRecord],
     *,
     support_propensity_floor: float = 1e-3,
     switch_threshold: float | None = None,
     dr_os_lambda: float | None = None,
+    beta_coefficient: float | None = None,
 ) -> OPEEstimate:
     """Evaluate a target policy from logged contextual-bandit feedback.
 
-    ``switch_threshold`` and ``dr_os_lambda`` are intentionally optional. A
-    missing value means no robust hyperparameter was selected and makes that
-    estimator equal ordinary DR. Select non-null values on validation data and
-    pass them explicitly for final evaluation.
+    Robust-estimator hyperparameters and the additive-control-variate coefficient
+    are external inputs. Select them on validation data. With no explicit beta
+    coefficient, beta-IPS equals IPS while ``beta_star`` remains a non-operative
+    diagnostic of the evaluation cohort.
     """
 
     if not 0 < support_propensity_floor <= 1:
@@ -124,6 +165,8 @@ def evaluate_policy(
         not isfinite(dr_os_lambda) or dr_os_lambda <= 0
     ):
         raise ValueError("dr_os_lambda must be a positive finite value")
+    if beta_coefficient is not None and not isfinite(beta_coefficient):
+        raise ValueError("beta_coefficient must be finite when provided")
 
     rows = list(records)
     if not rows:
@@ -163,14 +206,10 @@ def evaluate_policy(
     ]
 
     control = [weight - 1.0 for weight in weights]
-    control_variance = _sample_variance(control)
-    beta_star = (
-        _sample_covariance(ips_terms, control) / control_variance
-        if control_variance > 1e-15
-        else 0.0
-    )
+    beta_star = _beta_from_terms(ips_terms, control)
+    beta_used = 0.0 if beta_coefficient is None else float(beta_coefficient)
     beta_terms = [
-        ips_term - beta_star * control_value
+        ips_term - beta_used * control_value
         for ips_term, control_value in zip(ips_terms, control, strict=True)
     ]
 
@@ -218,6 +257,7 @@ def evaluate_policy(
         switch_dr=_mean(switch_terms),
         dr_os=_mean(dr_os_terms),
         beta_ips=_mean(beta_terms),
+        beta_coefficient=beta_coefficient,
         beta_star=beta_star,
         dm_standard_error=_standard_error(dm_terms),
         ips_standard_error=_standard_error(ips_terms),
@@ -256,9 +296,15 @@ def policy_evidence_from_ope(
         "switch_dr",
         "dr_os",
         "beta_ips",
-    ] = "beta_ips",
+    ] = "doubly_robust",
 ) -> PolicyEvidence:
-    """Compile OPE output into the verifier's evidence contract."""
+    """Compile OPE output into the verifier's evidence contract.
+
+    Doubly robust evaluation is the default evidence estimator because it needs
+    no evaluation-cohort hyperparameter fit. beta-IPS remains available when a
+    coefficient was tuned externally; if no coefficient was supplied it is
+    exactly IPS rather than a silently test-fitted estimator.
+    """
 
     if estimator == "direct_method":
         value = estimate.direct_method
