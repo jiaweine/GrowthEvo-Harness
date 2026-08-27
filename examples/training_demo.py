@@ -74,7 +74,11 @@ def main() -> None:
         max_expected_cost=0.05,
     )
 
+    # GAE hyperparameters are also an explicit training protocol choice rather
+    # than package-wide defaults.
     trainer_batch = TrajectoryTrainerAdapter(
+        gamma=0.99,
+        gae_lambda=0.95,
         normalize_advantages=False,
     ).build(
         [
