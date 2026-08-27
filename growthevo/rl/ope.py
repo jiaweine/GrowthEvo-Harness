@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import fsum, isfinite, sqrt
-from typing import Iterable, Literal
+from typing import Hashable, Iterable, Literal
 
 from growthevo.models import PolicyEvidence
 
@@ -14,6 +14,7 @@ class LoggedBanditRecord:
     target_action_probability: float
     baseline_q: float
     target_q: float
+    cluster_id: Hashable | None = None
 
     def __post_init__(self) -> None:
         if not 0 < self.behavior_propensity <= 1:
@@ -46,13 +47,12 @@ class OPEEstimate:
     ``beta_star`` is retained only as an evaluation-cohort diagnostic showing
     the variance-minimising empirical coefficient one *would* obtain on this
     cohort. It is deliberately not applied to ``beta_ips`` unless the caller
-    explicitly passes a coefficient. This prevents final-test outcomes from
-    choosing their own estimator coefficient.
+    explicitly passes a coefficient.
 
-    ``support_coverage`` is importance-mass weighted, which approximates how much
-    of the target-policy distribution is represented by practically supported
-    logged actions. ``record_support_coverage`` is retained only as a descriptive
-    row-count diagnostic.
+    Standard errors are i.i.d. by default. If every record supplies a
+    ``cluster_id``, cluster-robust standard errors are computed from cluster-level
+    influence sums. The clustering unit is deliberately supplied by the data
+    protocol rather than hard-coded into the estimator.
     """
 
     direct_method: float
@@ -71,6 +71,8 @@ class OPEEstimate:
     switch_dr_standard_error: float
     dr_os_standard_error: float
     beta_ips_standard_error: float
+    standard_error_method: Literal["iid", "cluster"]
+    cluster_count: int | None
     switch_threshold: float | None
     dr_os_lambda: float | None
     effective_sample_size: float
@@ -95,6 +97,26 @@ def _standard_error(values: list[float]) -> float:
     center = _mean(values)
     sample_variance = fsum((value - center) ** 2 for value in values) / (n - 1)
     return sqrt(max(0.0, sample_variance) / n)
+
+
+def _cluster_standard_error(values: list[float], cluster_ids: list[Hashable]) -> float:
+    if len(values) != len(cluster_ids):
+        raise ValueError("cluster ids must align with estimator terms")
+    clusters = set(cluster_ids)
+    cluster_count = len(clusters)
+    if cluster_count < 2:
+        raise ValueError("cluster-robust standard error requires at least two clusters")
+    center = _mean(values)
+    cluster_influence = {cluster: 0.0 for cluster in clusters}
+    for value, cluster in zip(values, cluster_ids, strict=True):
+        cluster_influence[cluster] += value - center
+    variance = (
+        cluster_count
+        / (cluster_count - 1)
+        * fsum(total * total for total in cluster_influence.values())
+        / (len(values) * len(values))
+    )
+    return sqrt(max(0.0, variance))
 
 
 def _sample_covariance(left: list[float], right: list[float]) -> float:
@@ -122,13 +144,7 @@ def _beta_from_terms(ips_terms: list[float], control: list[float]) -> float:
 
 
 def estimate_beta_coefficient(records: Iterable[LoggedBanditRecord]) -> float:
-    """Estimate the additive IPS control-variate coefficient on tuning data.
-
-    Call this on a validation/logging cohort that is disjoint from final policy
-    evaluation, then pass the returned coefficient to ``evaluate_policy``. The
-    function is intentionally separate from evaluation so estimator tuning is a
-    visible part of the experimental protocol rather than hidden test-set fit.
-    """
+    """Estimate the additive IPS control-variate coefficient on tuning data."""
 
     rows = list(records)
     if not rows:
@@ -149,10 +165,9 @@ def evaluate_policy(
 ) -> OPEEstimate:
     """Evaluate a target policy from logged contextual-bandit feedback.
 
-    Robust-estimator hyperparameters and the additive-control-variate coefficient
-    are external inputs. Select them on validation data. With no explicit beta
-    coefficient, beta-IPS equals IPS while ``beta_star`` remains a non-operative
-    diagnostic of the evaluation cohort.
+    The estimator never guesses an independence unit. Leave ``cluster_id`` empty
+    for conventional i.i.d. standard errors, or provide it on every record to
+    obtain cluster-robust uncertainty under a protocol-defined grouping.
     """
 
     if not 0 < support_propensity_floor <= 1:
@@ -171,6 +186,23 @@ def evaluate_policy(
     rows = list(records)
     if not rows:
         raise ValueError("at least one logged record is required")
+
+    has_cluster = [row.cluster_id is not None for row in rows]
+    if any(has_cluster) and not all(has_cluster):
+        raise ValueError("cluster_id must be provided for every record or none")
+    cluster_ids = [row.cluster_id for row in rows if row.cluster_id is not None]
+    if cluster_ids:
+        if len(set(cluster_ids)) < 2:
+            raise ValueError("cluster-robust standard error requires at least two clusters")
+        standard_error_method: Literal["iid", "cluster"] = "cluster"
+        cluster_count: int | None = len(set(cluster_ids))
+
+        def standard_error(values: list[float]) -> float:
+            return _cluster_standard_error(values, cluster_ids)
+    else:
+        standard_error_method = "iid"
+        cluster_count = None
+        standard_error = _standard_error
 
     weights = [row.importance_weight for row in rows]
     dm_terms = [row.target_q for row in rows]
@@ -225,7 +257,7 @@ def evaluate_policy(
             weight * (row.reward - self_normalized_ips) / mean_weight
             for weight, row in zip(weights, rows, strict=True)
         ]
-        snips_standard_error = _standard_error(snips_influence)
+        snips_standard_error = standard_error(snips_influence)
     else:
         self_normalized_ips = float("nan")
         snips_standard_error = float("nan")
@@ -259,13 +291,15 @@ def evaluate_policy(
         beta_ips=_mean(beta_terms),
         beta_coefficient=beta_coefficient,
         beta_star=beta_star,
-        dm_standard_error=_standard_error(dm_terms),
-        ips_standard_error=_standard_error(ips_terms),
+        dm_standard_error=standard_error(dm_terms),
+        ips_standard_error=standard_error(ips_terms),
         snips_standard_error=snips_standard_error,
-        dr_standard_error=_standard_error(dr_terms),
-        switch_dr_standard_error=_standard_error(switch_terms),
-        dr_os_standard_error=_standard_error(dr_os_terms),
-        beta_ips_standard_error=_standard_error(beta_terms),
+        dr_standard_error=standard_error(dr_terms),
+        switch_dr_standard_error=standard_error(switch_terms),
+        dr_os_standard_error=standard_error(dr_os_terms),
+        beta_ips_standard_error=standard_error(beta_terms),
+        standard_error_method=standard_error_method,
+        cluster_count=cluster_count,
         switch_threshold=switch_threshold,
         dr_os_lambda=dr_os_lambda,
         effective_sample_size=ess,
@@ -298,13 +332,7 @@ def policy_evidence_from_ope(
         "beta_ips",
     ] = "doubly_robust",
 ) -> PolicyEvidence:
-    """Compile OPE output into the verifier's evidence contract.
-
-    Doubly robust evaluation is the default evidence estimator because it needs
-    no evaluation-cohort hyperparameter fit. beta-IPS remains available when a
-    coefficient was tuned externally; if no coefficient was supplied it is
-    exactly IPS rather than a silently test-fitted estimator.
-    """
+    """Compile OPE output into the verifier's evidence contract."""
 
     if estimator == "direct_method":
         value = estimate.direct_method
