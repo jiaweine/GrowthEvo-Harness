@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from math import ceil, fsum
+from math import ceil, fsum, isfinite, log, sqrt
 from typing import Callable, Iterable, Sequence
 
 from growthevo.models import CausalBelief, Channel, GrowthAction, GrowthConstraints
@@ -21,6 +21,14 @@ class WorldTransitionConfig:
     fatigue_uplift_decay: float = 0.20
 
     def __post_init__(self) -> None:
+        for name, value in (
+            ("fatigue_decay_per_step", self.fatigue_decay_per_step),
+            ("churn_recovery_per_step", self.churn_recovery_per_step),
+            ("retention_to_intent", self.retention_to_intent),
+            ("fatigue_uplift_decay", self.fatigue_uplift_decay),
+        ):
+            if not isfinite(value):
+                raise ValueError(f"{name} must be finite")
         if not 0 <= self.fatigue_decay_per_step <= 1:
             raise ValueError("fatigue_decay_per_step must be in [0, 1]")
         if self.churn_recovery_per_step < 0:
@@ -40,8 +48,13 @@ class StressScenario:
     fatigue_multiplier: float = 1.0
 
     def __post_init__(self) -> None:
-        if self.uplift_multiplier < 0 or self.cost_multiplier < 0 or self.fatigue_multiplier < 0:
-            raise ValueError("stress multipliers must be non-negative")
+        for name, value in (
+            ("uplift_multiplier", self.uplift_multiplier),
+            ("cost_multiplier", self.cost_multiplier),
+            ("fatigue_multiplier", self.fatigue_multiplier),
+        ):
+            if not isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and non-negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,13 +69,52 @@ class RolloutTrace:
 
 @dataclass(frozen=True, slots=True)
 class CandidateRolloutScore:
+    """World-model rollout diagnostics for one candidate plan.
+
+    ``violation_rate`` is the empirical simulator violation frequency.
+    ``monte_carlo_violation_ucb`` adds a distribution-free Hoeffding bound for
+    finite rollout sampling error only. It does *not* cover world-model bias or
+    deployment shift, so this object must not be treated as real-world policy
+    safety evidence without separate model validation/stress protocols.
+    """
+
     candidate_id: str
     mean_return: float
     cvar_return: float
     violation_rate: float
+    monte_carlo_violation_ucb: float
+    monte_carlo_delta: float
+    rollout_count: int
     mean_cost: float
     robust_score: float
     feasible: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RiskSensitiveMPCConfig:
+    """Explicit Monte Carlo risk protocol for model-based plan ranking."""
+
+    rollouts: int
+    cvar_alpha: float
+    violation_penalty: float
+    max_violation_rate: float
+    monte_carlo_delta: float
+    gamma: float
+    base_seed: int
+
+    def __post_init__(self) -> None:
+        if self.rollouts <= 0:
+            raise ValueError("rollouts must be positive")
+        if not isfinite(self.cvar_alpha) or not 0 < self.cvar_alpha <= 1:
+            raise ValueError("cvar_alpha must be a finite value in (0, 1]")
+        if not isfinite(self.violation_penalty) or self.violation_penalty < 0:
+            raise ValueError("violation_penalty must be finite and non-negative")
+        if not isfinite(self.max_violation_rate) or not 0 <= self.max_violation_rate <= 1:
+            raise ValueError("max_violation_rate must be a finite value in [0, 1]")
+        if not isfinite(self.monte_carlo_delta) or not 0 < self.monte_carlo_delta < 1:
+            raise ValueError("monte_carlo_delta must be a finite value in (0, 1)")
+        if not isfinite(self.gamma) or not 0 < self.gamma <= 1:
+            raise ValueError("gamma must be a finite value in (0, 1]")
 
 
 TouchStateUpdater = Callable[[CausalBelief, bool, int], tuple[int, int]]
@@ -166,13 +218,13 @@ class LongHorizonGrowthWorld:
         actions: Sequence[GrowthAction],
         constraints: GrowthConstraints,
         *,
-        gamma: float = 0.99,
+        gamma: float,
         stress: StressScenario | None = None,
     ) -> RolloutTrace:
         if not actions:
             raise ValueError("rollout requires at least one action")
-        if not 0 < gamma <= 1:
-            raise ValueError("gamma must be in (0, 1]")
+        if not isfinite(gamma) or not 0 < gamma <= 1:
+            raise ValueError("gamma must be a finite value in (0, 1]")
 
         belief = initial_belief
         discounted_return = 0.0
@@ -209,47 +261,35 @@ class LongHorizonGrowthWorld:
 WorldFactory = Callable[[int], LongHorizonGrowthWorld]
 
 
+def _hoeffding_upper_rate(rate: float, sample_count: int, delta: float) -> float:
+    """One-sided Monte Carlo sampling bound for a Bernoulli violation rate."""
+
+    radius = sqrt(log(1.0 / delta) / (2.0 * sample_count))
+    return min(1.0, rate + radius)
+
+
 class RiskSensitiveMPC:
-    """Rank open-loop plans with lower-tail return and explicit feasibility.
+    """Rank open-loop plans under an explicit model and risk protocol.
 
     Candidate plans use common random numbers. Constraint feasibility is ranked
     before reward so a change in reward units cannot make an unsafe plan win by
-    overwhelming an arbitrary scalar violation penalty.
+    overwhelming an arbitrary scalar penalty.
+
+    The caller must provide both ``RiskSensitiveMPCConfig`` and ``world_factory``.
+    GrowthEvo does not silently select a simulator, CVaR tail, rollout count,
+    discount factor, violation tolerance, or confidence budget.
     """
 
     def __init__(
         self,
         *,
-        rollouts: int = 32,
-        cvar_alpha: float = 0.20,
-        violation_penalty: float = 2.0,
-        max_violation_rate: float = 0.0,
-        gamma: float = 0.99,
-        base_seed: int = 101,
-        world_factory: WorldFactory | None = None,
+        config: RiskSensitiveMPCConfig,
+        world_factory: WorldFactory,
     ) -> None:
-        if rollouts <= 0:
-            raise ValueError("rollouts must be positive")
-        if not 0 < cvar_alpha <= 1:
-            raise ValueError("cvar_alpha must be in (0, 1]")
-        if violation_penalty < 0:
-            raise ValueError("violation_penalty must be non-negative")
-        if not 0 <= max_violation_rate <= 1:
-            raise ValueError("max_violation_rate must be in [0, 1]")
-        if not 0 < gamma <= 1:
-            raise ValueError("gamma must be in (0, 1]")
-        self.rollouts = rollouts
-        self.cvar_alpha = cvar_alpha
-        self.violation_penalty = violation_penalty
-        self.max_violation_rate = max_violation_rate
-        self.gamma = gamma
-        self.base_seed = base_seed
+        if not callable(world_factory):
+            raise ValueError("world_factory must be callable")
+        self.config = config
         self.world_factory = world_factory
-
-    def _make_world(self, seed: int) -> LongHorizonGrowthWorld:
-        if self.world_factory is not None:
-            return self.world_factory(seed)
-        return LongHorizonGrowthWorld(seed=seed)
 
     def evaluate(
         self,
@@ -271,8 +311,9 @@ class RiskSensitiveMPC:
         if any(not actions for _, actions in candidate_rows):
             raise ValueError("candidate plans cannot be empty")
 
+        cfg = self.config
         if rollout_seeds is None:
-            seeds = tuple(self.base_seed + index for index in range(self.rollouts))
+            seeds = tuple(cfg.base_seed + index for index in range(cfg.rollouts))
         else:
             seeds = tuple(int(seed) for seed in rollout_seeds)
             if not seeds:
@@ -286,12 +327,12 @@ class RiskSensitiveMPC:
             costs: list[float] = []
             violations = 0
             for seed in seeds:
-                world = self._make_world(seed)
+                world = self.world_factory(seed)
                 trace = world.rollout(
                     initial_belief,
                     actions,
                     constraints,
-                    gamma=self.gamma,
+                    gamma=cfg.gamma,
                     stress=stress,
                 )
                 returns.append(trace.discounted_return)
@@ -299,22 +340,30 @@ class RiskSensitiveMPC:
                 violations += int(trace.violated)
 
             ordered_returns = sorted(returns)
-            tail_n = max(1, ceil(len(ordered_returns) * self.cvar_alpha))
+            tail_n = max(1, ceil(len(ordered_returns) * cfg.cvar_alpha))
             cvar = fsum(ordered_returns[:tail_n]) / tail_n
             sample_count = len(seeds)
             violation_rate = violations / sample_count
+            violation_ucb = _hoeffding_upper_rate(
+                violation_rate,
+                sample_count,
+                cfg.monte_carlo_delta,
+            )
             mean_return = fsum(returns) / sample_count
             mean_cost = fsum(costs) / sample_count
-            robust_score = cvar - self.violation_penalty * violation_rate
+            robust_score = cvar - cfg.violation_penalty * violation_ucb
             scores.append(
                 CandidateRolloutScore(
                     candidate_id=candidate_id,
                     mean_return=mean_return,
                     cvar_return=cvar,
                     violation_rate=violation_rate,
+                    monte_carlo_violation_ucb=violation_ucb,
+                    monte_carlo_delta=cfg.monte_carlo_delta,
+                    rollout_count=sample_count,
                     mean_cost=mean_cost,
                     robust_score=robust_score,
-                    feasible=violation_rate <= self.max_violation_rate,
+                    feasible=violation_ucb <= cfg.max_violation_rate,
                 )
             )
 
@@ -323,7 +372,7 @@ class RiskSensitiveMPC:
                 scores,
                 key=lambda score: (
                     score.feasible,
-                    -score.violation_rate,
+                    -score.monte_carlo_violation_ucb,
                     score.robust_score,
                     score.cvar_return,
                     score.mean_return,
