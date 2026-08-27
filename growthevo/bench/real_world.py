@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-from collections import defaultdict
+import csv
 from dataclasses import dataclass
 from gzip import open as gzip_open
-from pathlib import Path
-import csv
 from math import fsum
-from typing import Callable, Iterable, Literal, Mapping, TextIO
+from pathlib import Path
+from typing import Iterable, Mapping, TextIO
 
 from growthevo.causal.dr_learner import LoggedTreatmentRecord
 from growthevo.models import Channel
-from growthevo.rl.ope import LoggedBanditRecord
-from growthevo.training.trajectory import PlannerTransition
 
 
 PathLike = str | Path
@@ -34,21 +31,18 @@ def _read_float(row: Mapping[str, str], key: str) -> float:
 
 
 def _read_int(row: Mapping[str, str], key: str) -> int:
-    return int(_read_float(row, key))
+    value = _read_float(row, key)
+    integer = int(value)
+    if value != integer:
+        raise ValueError(f"column {key!r} must be integer-valued")
+    return integer
 
 
-@dataclass(frozen=True, slots=True)
-class CriteoUpliftData:
-    """Randomized advertising records adapted to GrowthEvo's causal contract.
-
-    The randomized assignment column is the treatment. The post-assignment
-    ``exposure`` field is intentionally not used as treatment because doing so
-    would condition on a downstream variable and break the randomized design.
-    """
-
-    records: tuple[LoggedTreatmentRecord, ...]
-    treatment_propensity: float
-    outcome_name: Literal["visit", "conversion"]
+def _read_binary(row: Mapping[str, str], key: str) -> float:
+    value = _read_float(row, key)
+    if value not in {0.0, 1.0}:
+        raise ValueError(f"column {key!r} must be binary")
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,70 +55,6 @@ class RandomizedTargetingResult:
     incremental_value_vs_none: float
 
 
-def load_criteo_uplift(
-    path: PathLike,
-    *,
-    outcome: Literal["visit", "conversion"] = "visit",
-    max_rows: int | None = None,
-    treatment_propensity: float | None = None,
-) -> CriteoUpliftData:
-    """Load the public Criteo randomized uplift benchmark.
-
-    The official file contains twelve dense anonymized features named f0..f11,
-    randomized ``treatment``, two binary outcomes, and a post-treatment exposure
-    indicator. When the original assignment probability is not supplied, the
-    empirical randomized arm share in the loaded cohort is used.
-    """
-
-    if max_rows is not None and max_rows <= 0:
-        raise ValueError("max_rows must be positive when provided")
-    if treatment_propensity is not None and not 0 < treatment_propensity < 1:
-        raise ValueError("treatment_propensity must be in (0, 1)")
-
-    feature_names = tuple(f"f{index}" for index in range(12))
-    raw: list[tuple[tuple[float, ...], bool, float]] = []
-    with _open_csv(path) as handle:
-        reader = csv.DictReader(handle)
-        required = set(feature_names) | {"treatment", outcome}
-        missing = required.difference(reader.fieldnames or ())
-        if missing:
-            raise ValueError(f"missing Criteo columns: {sorted(missing)}")
-        for index, row in enumerate(reader):
-            if max_rows is not None and index >= max_rows:
-                break
-            features = tuple(_read_float(row, name) for name in feature_names)
-            treated = bool(_read_int(row, "treatment"))
-            y = _read_float(row, outcome)
-            raw.append((features, treated, y))
-
-    if not raw:
-        raise ValueError("Criteo file produced no rows")
-    observed_propensity = fsum(1.0 for _, treated, _ in raw if treated) / len(raw)
-    propensity = treatment_propensity or observed_propensity
-    if not 0 < propensity < 1:
-        raise ValueError("loaded cohort must contain both treatment and control")
-
-    action_propensities = {
-        Channel.NO_TREATMENT: 1.0 - propensity,
-        Channel.ADS: propensity,
-    }
-    records = tuple(
-        LoggedTreatmentRecord(
-            unit_id=f"criteo-{index}",
-            features=features,
-            action=Channel.ADS if treated else Channel.NO_TREATMENT,
-            outcome=y,
-            action_propensities=action_propensities,
-        )
-        for index, (features, treated, y) in enumerate(raw)
-    )
-    return CriteoUpliftData(
-        records=records,
-        treatment_propensity=propensity,
-        outcome_name=outcome,
-    )
-
-
 def evaluate_randomized_targeting(
     records: Iterable[LoggedTreatmentRecord],
     scores: Iterable[float],
@@ -135,8 +65,8 @@ def evaluate_randomized_targeting(
     """Evaluate a top-score treatment policy with randomized inverse weighting.
 
     This metric evaluates the actual targeting decision instead of treating
-    response prediction as uplift. It is appropriate when the source cohort was
-    randomized and the assignment probabilities in ``records`` are trustworthy.
+    response prediction as uplift. It is appropriate only when the source cohort
+    was randomized and the assignment probabilities in ``records`` are trusted.
     """
 
     if not 0 < selected_fraction <= 1:
@@ -193,8 +123,12 @@ class OpenBanditInteraction:
     categorical_context: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        if not self.timestamp:
+            raise ValueError("timestamp cannot be empty")
         if self.position < 0:
             raise ValueError("position must be non-negative")
+        if self.click not in {0.0, 1.0}:
+            raise ValueError("click must be binary")
         if not 0 < self.propensity_score <= 1:
             raise ValueError("propensity_score must be in (0, 1]")
 
@@ -219,10 +153,10 @@ def load_open_bandit(
 ) -> tuple[OpenBanditInteraction, ...]:
     """Load Open Bandit impressions while preserving logged propensities.
 
-    Current public files use ``propensity_score`` and contain categorical user
-    descriptors plus numeric user-item affinity features. Older official sample
-    files used ``action_prob`` for the same logged action probability. Both
-    schemas are accepted without coercing categorical user features to floats.
+    Current public files use ``propensity_score``. Older official sample files
+    used ``action_prob`` for the logged action probability. Categorical user
+    features are preserved as strings rather than coerced into arbitrary ordinal
+    numbers; item context is loaded separately by ``open_bandit_features``.
     """
 
     if max_rows is not None and max_rows <= 0:
@@ -252,7 +186,7 @@ def load_open_bandit(
                     timestamp=row["timestamp"],
                     item_id=_read_int(row, "item_id"),
                     position=_read_int(row, "position"),
-                    click=_read_float(row, "click"),
+                    click=_read_binary(row, "click"),
                     propensity_score=_read_float(row, propensity_column),
                     context=tuple(_read_float(row, name) for name in numeric_columns),
                     categorical_context=tuple(row[name] for name in categorical_columns),
@@ -261,37 +195,6 @@ def load_open_bandit(
     if not interactions:
         raise ValueError("Open Bandit file produced no rows")
     return tuple(interactions)
-
-
-BanditScalarModel = Callable[[OpenBanditInteraction], float]
-
-
-def open_bandit_to_ope(
-    interactions: Iterable[OpenBanditInteraction],
-    *,
-    target_action_probability: BanditScalarModel,
-    baseline_q: BanditScalarModel,
-    target_q: BanditScalarModel,
-) -> tuple[LoggedBanditRecord, ...]:
-    """Adapt real Open Bandit impressions to GrowthEvo's OPE estimator input."""
-
-    records: list[LoggedBanditRecord] = []
-    for row in interactions:
-        target_probability = float(target_action_probability(row))
-        if not 0 <= target_probability <= 1:
-            raise ValueError("target policy probability must be in [0, 1]")
-        records.append(
-            LoggedBanditRecord(
-                reward=row.click,
-                behavior_propensity=row.propensity_score,
-                target_action_probability=target_probability,
-                baseline_q=float(baseline_q(row)),
-                target_q=float(target_q(row)),
-            )
-        )
-    if not records:
-        raise ValueError("at least one Open Bandit interaction is required")
-    return tuple(records)
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,7 +216,26 @@ class KuaiRandInteraction:
     play_time_ms: float
     duration_ms: float
 
+    def __post_init__(self) -> None:
+        if self.user_id < 0 or self.video_id < 0 or self.time_ms < 0:
+            raise ValueError("user_id, video_id and time_ms must be non-negative")
+        for name, value in (
+            ("is_click", self.is_click),
+            ("is_like", self.is_like),
+            ("is_follow", self.is_follow),
+            ("is_comment", self.is_comment),
+            ("is_forward", self.is_forward),
+            ("is_hate", self.is_hate),
+            ("long_view", self.long_view),
+        ):
+            if value not in {0.0, 1.0}:
+                raise ValueError(f"{name} must be binary")
+        if self.play_time_ms < 0 or self.duration_ms < 0:
+            raise ValueError("play_time_ms and duration_ms must be non-negative")
 
+
+# Named reference profile for reproducible examples/tests only. Adapters never
+# select it implicitly; a research protocol must pass weights or a reward function.
 DEFAULT_KUAIRAND_REWARD_WEIGHTS: Mapping[str, float] = {
     "is_click": 1.0,
     "long_view": 0.35,
@@ -332,9 +254,9 @@ def load_kuairand(
 ) -> tuple[KuaiRandInteraction, ...]:
     """Load sequential KuaiRand recommendation logs.
 
-    ``is_rand`` is retained as an intervention marker only. It is not converted
-    into a propensity score because that would manufacture information that is
-    not present in the interaction row.
+    ``is_rand`` is retained as intervention provenance only. It is never
+    converted into an action propensity because the row does not identify that
+    probability or the full candidate action set.
     """
 
     if max_rows is not None and max_rows <= 0:
@@ -366,6 +288,7 @@ def load_kuairand(
         for index, row in enumerate(reader):
             if max_rows is not None and index >= max_rows:
                 break
+            is_random = _read_binary(row, "is_rand")
             rows.append(
                 KuaiRandInteraction(
                     user_id=_read_int(row, "user_id"),
@@ -374,14 +297,14 @@ def load_kuairand(
                     date=_read_int(row, "date"),
                     hourmin=_read_int(row, "hourmin"),
                     tab=_read_int(row, "tab"),
-                    is_random=bool(_read_int(row, "is_rand")),
-                    is_click=_read_float(row, "is_click"),
-                    is_like=_read_float(row, "is_like"),
-                    is_follow=_read_float(row, "is_follow"),
-                    is_comment=_read_float(row, "is_comment"),
-                    is_forward=_read_float(row, "is_forward"),
-                    is_hate=_read_float(row, "is_hate"),
-                    long_view=_read_float(row, "long_view"),
+                    is_random=bool(is_random),
+                    is_click=_read_binary(row, "is_click"),
+                    is_like=_read_binary(row, "is_like"),
+                    is_follow=_read_binary(row, "is_follow"),
+                    is_comment=_read_binary(row, "is_comment"),
+                    is_forward=_read_binary(row, "is_forward"),
+                    is_hate=_read_binary(row, "is_hate"),
+                    long_view=_read_binary(row, "long_view"),
                     play_time_ms=_read_float(row, "play_time_ms"),
                     duration_ms=_read_float(row, "duration_ms"),
                 )
@@ -394,10 +317,12 @@ def load_kuairand(
 def kuairand_reward(
     row: KuaiRandInteraction,
     *,
-    weights: Mapping[str, float] = DEFAULT_KUAIRAND_REWARD_WEIGHTS,
+    weights: Mapping[str, float],
 ) -> float:
-    """Compose an explicit multi-feedback reward for sequential experiments."""
+    """Scalarize multi-feedback only under an explicit experiment objective."""
 
+    if not weights:
+        raise ValueError("KuaiRand reward weights cannot be empty")
     signals = {
         "is_click": row.is_click,
         "long_view": row.long_view,
@@ -411,65 +336,3 @@ def kuairand_reward(
     if unknown:
         raise ValueError(f"unknown KuaiRand reward signals: {sorted(unknown)}")
     return fsum(float(weights[name]) * signals[name] for name in weights)
-
-
-def kuairand_to_planner_transitions(
-    interactions: Iterable[KuaiRandInteraction],
-    *,
-    max_steps_per_trajectory: int = 100,
-    reward_weights: Mapping[str, float] = DEFAULT_KUAIRAND_REWARD_WEIGHTS,
-) -> tuple[PlannerTransition, ...]:
-    """Create leakage-aware sequential training samples from KuaiRand logs.
-
-    Observation features are computed from information available before the
-    current feedback. Logged post-action feedback contributes only to reward and
-    to the next step's history statistics.
-    """
-
-    if max_steps_per_trajectory <= 0:
-        raise ValueError("max_steps_per_trajectory must be positive")
-    by_user: dict[int, list[KuaiRandInteraction]] = defaultdict(list)
-    for row in interactions:
-        by_user[row.user_id].append(row)
-    if not by_user:
-        raise ValueError("at least one KuaiRand interaction is required")
-
-    transitions: list[PlannerTransition] = []
-    for user_id in sorted(by_user):
-        rows = sorted(by_user[user_id], key=lambda row: (row.time_ms, row.video_id))
-        prior_reward_sum = 0.0
-        prior_click_sum = 0.0
-        prior_long_view_sum = 0.0
-        for offset, row in enumerate(rows):
-            chunk = offset // max_steps_per_trajectory
-            step_index = offset % max_steps_per_trajectory
-            history_count = offset
-            observation = {
-                "user_id": user_id,
-                "date": row.date,
-                "hourmin": row.hourmin,
-                "tab": row.tab,
-                "random_intervention": row.is_random,
-                "history_count": history_count,
-                "prior_mean_reward": prior_reward_sum / history_count if history_count else 0.0,
-                "prior_click_rate": prior_click_sum / history_count if history_count else 0.0,
-                "prior_long_view_rate": prior_long_view_sum / history_count if history_count else 0.0,
-            }
-            reward = kuairand_reward(row, weights=reward_weights)
-            done = step_index == max_steps_per_trajectory - 1 or offset == len(rows) - 1
-            transitions.append(
-                PlannerTransition(
-                    trajectory_id=f"kuairand-user-{user_id}-chunk-{chunk}",
-                    step_index=step_index,
-                    action=f"recommend_video:{row.video_id}",
-                    observation=observation,
-                    reward=reward,
-                    done=done,
-                    legal_action=True,
-                    tool_success=True,
-                )
-            )
-            prior_reward_sum += reward
-            prior_click_sum += row.is_click
-            prior_long_view_sum += row.long_view
-    return tuple(transitions)
