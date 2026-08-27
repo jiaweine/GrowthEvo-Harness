@@ -29,6 +29,29 @@ def _parse_fractions(value: str) -> tuple[float, ...]:
     return fractions
 
 
+def _parse_reward_weights(value: str) -> dict[str, float]:
+    weights: dict[str, float] = {}
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise argparse.ArgumentTypeError(
+                "reward weights must use signal=value pairs separated by commas"
+            )
+        signal, raw_weight = item.split("=", 1)
+        signal = signal.strip()
+        if not signal or signal in weights:
+            raise argparse.ArgumentTypeError("reward signal names must be non-empty and unique")
+        try:
+            weights[signal] = float(raw_weight)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(f"invalid reward weight for {signal!r}") from exc
+    if not weights:
+        raise argparse.ArgumentTypeError("at least one reward weight is required")
+    return weights
+
+
 def _timestamp(value: str) -> datetime:
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
@@ -138,16 +161,22 @@ def run_open_bandit(args: argparse.Namespace) -> None:
 
 
 def run_kuairand(args: argparse.Namespace) -> None:
+    if args.kuairand_reward_weights is None:
+        raise ValueError(
+            "KuaiRand requires --kuairand-reward-weights; reward scalarization is part of the experiment protocol"
+        )
     rows = load_kuairand(args.path, max_rows=args.max_rows)
     dataset = kuairand_to_offline_rl(
         rows,
+        reward_weights=args.kuairand_reward_weights,
         max_steps_per_segment=args.kuairand_max_steps_per_segment,
     )
     print(
         f"rows={len(rows)} transitions={len(dataset.transitions)} "
         f"trajectories={dataset.trajectory_count} actions={dataset.action_count} "
         f"random_intervention_rate={dataset.random_intervention_rate:.6f} "
-        f"truncation_rate={dataset.truncation_rate:.6f}"
+        f"truncation_rate={dataset.truncation_rate:.6f} "
+        f"candidate_set_coverage={dataset.candidate_set_coverage:.6f}"
     )
     print(dataset.to_jsonl().splitlines()[0])
 
@@ -172,6 +201,11 @@ def main() -> None:
     parser.add_argument("--open-bandit-cluster-by-date", action="store_true")
 
     parser.add_argument("--kuairand-max-steps-per-segment", type=int, default=100)
+    parser.add_argument(
+        "--kuairand-reward-weights",
+        type=_parse_reward_weights,
+        help="Explicit signal=value scalarization, e.g. is_click=1,long_view=0.2,is_hate=-0.5",
+    )
     args = parser.parse_args()
 
     if args.dataset == "criteo":
