@@ -22,7 +22,11 @@ from growthevo.rl.process_reward import (
     ProcessState,
     TrajectoryStepSignal,
 )
-from growthevo.verifier.counterfactual import CounterfactualVerifier, VerifierConfig
+from growthevo.verifier.counterfactual import (
+    CounterfactualVerifier,
+    ThresholdEvidenceGate,
+    VerifierConfig,
+)
 
 
 def _constraints(**overrides: object) -> GrowthConstraints:
@@ -37,6 +41,19 @@ def _constraints(**overrides: object) -> GrowthConstraints:
     }
     values.update(overrides)
     return GrowthConstraints(**values)  # type: ignore[arg-type]
+
+
+def _verifier() -> CounterfactualVerifier:
+    return CounterfactualVerifier(
+        VerifierConfig(z_score=1.96),
+        evidence_gate=ThresholdEvidenceGate(
+            min_sample_size=50,
+            min_effective_sample_size=20.0,
+            min_effective_sample_ratio=0.20,
+            min_support_coverage=0.95,
+            max_importance_weight=20.0,
+        ),
+    )
 
 
 def _belief() -> CausalBelief:
@@ -79,7 +96,6 @@ def _beta_fixture() -> list[LoggedBanditRecord]:
 
 def test_beta_diagnostic_is_not_silently_applied_on_evaluation_data() -> None:
     rows = _beta_fixture()
-
     estimate = evaluate_policy(rows)
 
     assert estimate.beta_star == pytest.approx(2.0)
@@ -192,6 +208,26 @@ def test_conformal_simultaneous_gate_is_stricter_than_marginal_calibration() -> 
     assert simultaneous.value_lower_margin > marginal.value_lower_margin
 
 
+def test_unconfigured_verifier_fails_closed() -> None:
+    evidence = PolicyEvidence(
+        candidate_value=1.3,
+        baseline_value=1.0,
+        standard_error=0.01,
+        sample_size=1000,
+        effective_sample_size=900,
+        roi=3.0,
+        spend=1.0,
+        fatigue=0.0,
+        churn_risk=0.0,
+    )
+
+    result = CounterfactualVerifier().verify(evidence, _constraints())
+
+    assert result.status is VerificationStatus.INSUFFICIENT_EVIDENCE
+    assert "statistical_gate_not_configured" in result.reasons
+    assert "evidence_quality_gate_not_configured" in result.reasons
+
+
 def test_conformal_gate_can_block_statistically_positive_candidate() -> None:
     calibration = ConformalPolicyCalibrator(alpha=0.05, min_calibration_size=30).fit(
         ConformalCalibrationRecord(
@@ -220,7 +256,7 @@ def test_conformal_gate_can_block_statistically_positive_candidate() -> None:
         churn_risk=0.20,
     )
     constraints = _constraints(max_budget=54.0, min_roi=1.8)
-    verifier = CounterfactualVerifier()
+    verifier = _verifier()
 
     assert verifier.verify(evidence, constraints).status is VerificationStatus.PASS
     calibrated = verifier.verify(evidence, constraints, conformal=calibration)
@@ -245,7 +281,7 @@ def test_verifier_abstains_when_logging_support_is_weak() -> None:
         max_importance_weight=5.0,
     )
 
-    result = CounterfactualVerifier().verify(evidence, _constraints())
+    result = _verifier().verify(evidence, _constraints())
 
     assert result.status is VerificationStatus.INSUFFICIENT_EVIDENCE
     assert "logging_support_below_gate" in result.reasons
@@ -265,14 +301,26 @@ def test_verifier_rejects_negative_standard_error() -> None:
     )
 
     with pytest.raises(ValueError, match="standard_error"):
-        CounterfactualVerifier().verify(evidence, _constraints())
+        _verifier().verify(evidence, _constraints())
 
 
-def test_verifier_config_rejects_invalid_probability_thresholds() -> None:
+def test_evidence_gate_rejects_invalid_probability_thresholds() -> None:
     with pytest.raises(ValueError, match="min_support_coverage"):
-        VerifierConfig(min_support_coverage=1.1)
+        ThresholdEvidenceGate(
+            min_sample_size=0,
+            min_effective_sample_size=0,
+            min_effective_sample_ratio=0,
+            min_support_coverage=1.1,
+            max_importance_weight=1,
+        )
     with pytest.raises(ValueError, match="min_effective_sample_ratio"):
-        VerifierConfig(min_effective_sample_ratio=-0.1)
+        ThresholdEvidenceGate(
+            min_sample_size=0,
+            min_effective_sample_size=0,
+            min_effective_sample_ratio=-0.1,
+            min_support_coverage=0,
+            max_importance_weight=1,
+        )
 
 
 def test_growth_prm_rewards_information_gain_without_rewarding_confidence() -> None:
