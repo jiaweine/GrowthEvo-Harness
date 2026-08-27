@@ -6,7 +6,11 @@ import pytest
 
 from growthevo.causal.dr_learner import CrossFittedDRLearner, LoggedTreatmentRecord
 from growthevo.models import CausalBelief, Channel, GrowthAction, GrowthConstraints, GrowthOption
-from growthevo.rl.model_based import RiskSensitiveMPC
+from growthevo.rl.model_based import (
+    LongHorizonGrowthWorld,
+    RiskSensitiveMPC,
+    RiskSensitiveMPCConfig,
+)
 from growthevo.rl.ope import LoggedBanditRecord, evaluate_policy
 
 
@@ -62,6 +66,23 @@ def _constraints() -> GrowthConstraints:
     )
 
 
+def _reference_mpc(*, rollouts: int, base_seed: int) -> RiskSensitiveMPC:
+    return RiskSensitiveMPC(
+        config=RiskSensitiveMPCConfig(
+            rollouts=rollouts,
+            cvar_alpha=0.20,
+            violation_penalty=2.0,
+            max_violation_rate=1.0,
+            monte_carlo_delta=0.05,
+            gamma=0.99,
+            base_seed=base_seed,
+        ),
+        # Synthetic reference world chosen explicitly by this test. Production
+        # planning must supply its own validated/stressed world factory.
+        world_factory=lambda seed: LongHorizonGrowthWorld(seed=seed),
+    )
+
+
 def test_mpc_uses_common_random_numbers_for_identical_candidates() -> None:
     action = GrowthAction(
         option=GrowthOption.ACTIVATE,
@@ -72,7 +93,7 @@ def test_mpc_uses_common_random_numbers_for_identical_candidates() -> None:
         uncertainty=0.01,
     )
     plan = (action, action, GrowthAction.no_treatment())
-    planner = RiskSensitiveMPC(rollouts=12, base_seed=500)
+    planner = _reference_mpc(rollouts=12, base_seed=500)
 
     scores = planner.evaluate(
         _belief(),
@@ -84,6 +105,9 @@ def test_mpc_uses_common_random_numbers_for_identical_candidates() -> None:
     assert by_id["left"].mean_return == pytest.approx(by_id["right"].mean_return)
     assert by_id["left"].cvar_return == pytest.approx(by_id["right"].cvar_return)
     assert by_id["left"].violation_rate == pytest.approx(by_id["right"].violation_rate)
+    assert by_id["left"].monte_carlo_violation_ucb == pytest.approx(
+        by_id["right"].monte_carlo_violation_ucb
+    )
 
 
 def test_mpc_candidate_order_does_not_change_scores() -> None:
@@ -96,7 +120,7 @@ def test_mpc_candidate_order_does_not_change_scores() -> None:
         uncertainty=0.01,
     )
     holdout = GrowthAction.no_treatment()
-    planner = RiskSensitiveMPC(rollouts=10, base_seed=700)
+    planner = _reference_mpc(rollouts=10, base_seed=700)
 
     first = planner.evaluate(
         _belief(),
@@ -118,6 +142,25 @@ def test_mpc_candidate_order_does_not_change_scores() -> None:
         assert first_by_id[candidate_id].cvar_return == pytest.approx(
             second_by_id[candidate_id].cvar_return
         )
+        assert first_by_id[candidate_id].monte_carlo_violation_ucb == pytest.approx(
+            second_by_id[candidate_id].monte_carlo_violation_ucb
+        )
+
+
+def test_zero_observed_world_model_violations_do_not_mean_zero_monte_carlo_risk() -> None:
+    planner = _reference_mpc(rollouts=8, base_seed=900)
+    holdout = GrowthAction.no_treatment()
+
+    score = planner.evaluate(
+        _belief(),
+        [("holdout", (holdout, holdout))],
+        _constraints(),
+    )[0]
+
+    assert score.violation_rate == pytest.approx(0.0)
+    assert score.monte_carlo_violation_ucb > 0.0
+    assert score.monte_carlo_delta == pytest.approx(0.05)
+    assert score.rollout_count == 8
 
 
 def test_ope_does_not_apply_untuned_robustness_constants() -> None:
