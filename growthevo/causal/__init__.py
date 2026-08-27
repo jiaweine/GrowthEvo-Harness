@@ -8,13 +8,29 @@ from .dr_learner import (
     RidgeRegressor,
 )
 from .serving import CausalUpliftServingBridge, UpliftServingPrediction
+from .support import (
+    CalibratedPairwisePropensity,
+    FittedPairwisePropensity,
+    PairwisePropensityEstimate,
+    PropensitySupportProtocol,
+    calibrate_pairwise_propensity_model,
+    fit_pairwise_propensity_model,
+    make_support_score_provider,
+)
 
 __all__ = [
     "CATEEstimate",
+    "CalibratedPairwisePropensity",
     "CausalUpliftServingBridge",
     "CrossFittedDRLearner",
+    "FittedPairwisePropensity",
     "FittedTreatmentEffect",
     "LoggedTreatmentRecord",
+    "PairwisePropensityEstimate",
+    "PropensitySupportProtocol",
     "RidgeRegressor",
     "UpliftServingPrediction",
+    "calibrate_pairwise_propensity_model",
+    "fit_pairwise_propensity_model",
+    "make_support_score_provider",
 ]
