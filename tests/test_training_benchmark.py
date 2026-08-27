@@ -53,7 +53,10 @@ def test_causal_serving_bridge_enriches_runtime_observation() -> None:
     email, _ = bench.fit_cate(treatment=Channel.EMAIL)
     bridge = CausalUpliftServingBridge(
         {Channel.PUSH: push, Channel.EMAIL: email},
-        support_score_provider=lambda channel, estimate: estimate.support_score,
+        # Synthetic-only reference: explicitly promote the model diagnostic so
+        # this smoke test can exercise downstream wiring. Production callers
+        # should use a calibrated local-support provider instead.
+        support_score_provider=lambda channel, estimate, features: estimate.support_score,
     )
     observation = UserObservation(
         user_id="serve-u1",
@@ -108,6 +111,7 @@ def _policy_estimates() -> list[ActionValueEstimate]:
             behavior_probability=0.30,
             expected_cost=0.05,
             cost_uncertainty=0.005,
+            support_eligible=True,
         ),
         ActionValueEstimate(
             action=Channel.EMAIL,
@@ -116,18 +120,23 @@ def _policy_estimates() -> list[ActionValueEstimate]:
             behavior_probability=0.20,
             expected_cost=0.02,
             cost_uncertainty=0.002,
+            support_eligible=True,
         ),
     ]
 
 
 def _reference_spi_config(**overrides: object) -> SafePolicyImprovementConfig:
-    values: dict[str, object] = {"bound_mode": "gaussian_reference"}
+    values: dict[str, object] = {
+        "max_total_variation": 0.20,
+        "bound_mode": "gaussian_reference",
+        "confidence_z": 1.96,
+    }
     values.update(overrides)
     return SafePolicyImprovementConfig(**values)  # type: ignore[arg-type]
 
 
-def test_safe_pi_default_requires_explicit_value_bounds() -> None:
-    with pytest.raises(ValueError, match="value_lower_bound"):
+def test_safe_pi_requires_explicit_policy_protocol() -> None:
+    with pytest.raises(ValueError, match="protocol is not configured"):
         SupportAnchoredPolicyImprover().improve(_policy_estimates())
 
 
@@ -150,10 +159,13 @@ def test_safe_pi_accepts_explicit_calibrated_bounds() -> None:
             behavior_probability=0.50,
             expected_cost=0.05,
             cost_upper_bound=0.06,
+            support_eligible=True,
         ),
     ]
 
-    result = SupportAnchoredPolicyImprover().improve(rows)
+    result = SupportAnchoredPolicyImprover(
+        SafePolicyImprovementConfig(max_total_variation=0.20)
+    ).improve(rows)
 
     assert result.changed
     assert result.selected_action is Channel.PUSH
@@ -176,27 +188,51 @@ def test_support_anchored_policy_improvement_respects_tv_cap() -> None:
     assert "gaussian_reference_bounds_used" in result.reasons
 
 
-def test_support_anchored_policy_freezes_low_support_action_mass() -> None:
+def test_support_classification_is_not_inferred_from_behavior_probability() -> None:
     rows = _policy_estimates()
     rows[-1] = ActionValueEstimate(
         action=Channel.EMAIL,
         value=10.0,
         value_uncertainty=0.0,
-        behavior_probability=0.001,
+        behavior_probability=0.20,
         expected_cost=0.0,
-    )
-    rows[0] = ActionValueEstimate(
-        action=Channel.NO_TREATMENT,
-        value=0.10,
-        value_uncertainty=0.01,
-        behavior_probability=0.699,
+        support_eligible=False,
     )
 
     result = SupportAnchoredPolicyImprover(_reference_spi_config()).improve(rows)
 
     assert result.selected_action is Channel.PUSH
-    assert result.probabilities[Channel.EMAIL] == pytest.approx(0.001)
-    assert "low_support_actions_anchored" in result.reasons
+    assert result.probabilities[Channel.EMAIL] == pytest.approx(0.20)
+    assert "unsupported_actions_anchored" in result.reasons
+
+
+def test_missing_action_support_fails_closed_to_behavior_mass() -> None:
+    rows = _policy_estimates()
+    rows[1] = ActionValueEstimate(
+        action=Channel.PUSH,
+        value=0.30,
+        value_uncertainty=0.02,
+        behavior_probability=0.30,
+        expected_cost=0.05,
+        cost_uncertainty=0.005,
+        support_eligible=None,
+    )
+    rows[2] = ActionValueEstimate(
+        action=Channel.EMAIL,
+        value=0.35,
+        value_uncertainty=0.08,
+        behavior_probability=0.20,
+        expected_cost=0.02,
+        cost_uncertainty=0.002,
+        support_eligible=None,
+    )
+
+    result = SupportAnchoredPolicyImprover(_reference_spi_config()).improve(rows)
+
+    assert result.changed is False
+    assert result.probabilities[Channel.PUSH] == pytest.approx(0.30)
+    assert result.probabilities[Channel.EMAIL] == pytest.approx(0.20)
+    assert "missing_action_support_treated_as_unsupported" in result.reasons
 
 
 def test_support_anchored_policy_accepts_external_learned_distribution() -> None:
@@ -219,20 +255,15 @@ def test_support_anchored_policy_accepts_external_learned_distribution() -> None
     assert result.pessimistic_candidate_value > result.pessimistic_baseline_value
 
 
-def test_low_support_external_proposal_is_bootstrapped_to_behavior() -> None:
+def test_unsupported_external_proposal_is_bootstrapped_to_behavior() -> None:
     rows = _policy_estimates()
     rows[-1] = ActionValueEstimate(
         action=Channel.EMAIL,
         value=5.0,
         value_uncertainty=0.0,
-        behavior_probability=0.001,
+        behavior_probability=0.20,
         expected_cost=0.0,
-    )
-    rows[0] = ActionValueEstimate(
-        action=Channel.NO_TREATMENT,
-        value=0.10,
-        value_uncertainty=0.01,
-        behavior_probability=0.699,
+        support_eligible=False,
     )
 
     result = SupportAnchoredPolicyImprover(
@@ -246,7 +277,7 @@ def test_low_support_external_proposal_is_bootstrapped_to_behavior() -> None:
         },
     )
 
-    assert result.probabilities[Channel.EMAIL] == pytest.approx(0.001)
+    assert result.probabilities[Channel.EMAIL] == pytest.approx(0.20)
     assert "proposal_support_constraint_active" in result.reasons
 
 
@@ -256,14 +287,9 @@ def test_no_increase_mode_can_remove_unsupported_behavior_mass() -> None:
         action=Channel.EMAIL,
         value=-1.0,
         value_uncertainty=0.0,
-        behavior_probability=0.001,
+        behavior_probability=0.20,
         expected_cost=0.0,
-    )
-    rows[0] = ActionValueEstimate(
-        action=Channel.NO_TREATMENT,
-        value=0.10,
-        value_uncertainty=0.01,
-        behavior_probability=0.699,
+        support_eligible=False,
     )
 
     result = SupportAnchoredPolicyImprover(
@@ -284,6 +310,18 @@ def test_no_increase_mode_can_remove_unsupported_behavior_mass() -> None:
     assert result.probabilities[Channel.EMAIL] == pytest.approx(0.0)
 
 
+def test_safe_pi_rejects_non_finite_external_distribution() -> None:
+    with pytest.raises(ValueError, match="probabilities must be finite"):
+        SupportAnchoredPolicyImprover(_reference_spi_config()).improve(
+            _policy_estimates(),
+            proposal_probabilities={
+                Channel.NO_TREATMENT: float("nan"),
+                Channel.PUSH: 0.80,
+                Channel.EMAIL: 0.20,
+            },
+        )
+
+
 def test_support_anchored_policy_uses_no_treatment_when_behavior_cost_is_unsafe() -> None:
     rows = [
         ActionValueEstimate(
@@ -299,6 +337,7 @@ def test_support_anchored_policy_uses_no_treatment_when_behavior_cost_is_unsafe(
             value_uncertainty=0.0,
             behavior_probability=0.90,
             expected_cost=2.0,
+            support_eligible=True,
         ),
     ]
 
