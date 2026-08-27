@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite
+from math import ceil, isfinite
 from typing import Iterable, Mapping, Sequence
 
 from growthevo.models import Channel
@@ -16,16 +16,27 @@ class PairwisePropensityEstimate:
     propensity: float
     raw_prediction: float
     clipped: bool
+    lower_bound: float | None = None
+    upper_bound: float | None = None
+    calibration_miscoverage: float | None = None
+    calibration_size: int = 0
+
+    @property
+    def calibrated(self) -> bool:
+        return self.lower_bound is not None and self.upper_bound is not None
 
 
 @dataclass(frozen=True, slots=True)
 class FittedPairwisePropensity:
     """Feature-local approximation of the declared logging policy.
 
-    The target is the pair-normalized logging probability already stored in the
-    log, not the realized treatment indicator. This model is therefore a serving
-    approximation to ``mu(a|x)`` rather than a replacement for a missing
-    propensity score.
+    The regression target is the pair-normalized logging probability already
+    stored in each row, not the realized treatment indicator. This is a serving
+    approximation to ``mu(a|x)`` for contexts where the logging probability is
+    unavailable at decision time; it does not manufacture a propensity score for
+    datasets that never logged one.
+
+    This fitted model is diagnostic only until calibrated on a disjoint cohort.
     """
 
     treatment: Channel
@@ -48,13 +59,62 @@ class FittedPairwisePropensity:
 
 
 @dataclass(frozen=True, slots=True)
+class CalibratedPairwisePropensity:
+    """Split-conformal interval around a fitted logging-propensity model.
+
+    ``error_radius`` is calibrated from absolute propensity residuals on a
+    separate calibration cohort. Under the usual split-conformal exchangeability
+    assumptions, the interval provides marginal finite-sample coverage for the
+    recorded pairwise propensity target. The class deliberately stores the
+    calibration size and requested miscoverage so downstream evidence can audit
+    how the support decision was produced.
+    """
+
+    fitted: FittedPairwisePropensity
+    error_radius: float
+    miscoverage: float
+    calibration_size: int
+
+    def __post_init__(self) -> None:
+        if self.error_radius < 0 or self.error_radius > 1:
+            raise ValueError("error_radius must be in [0, 1]")
+        if not 0 < self.miscoverage < 1:
+            raise ValueError("miscoverage must be in (0, 1)")
+        if self.calibration_size <= 0:
+            raise ValueError("calibration_size must be positive")
+
+    @property
+    def treatment(self) -> Channel:
+        return self.fitted.treatment
+
+    @property
+    def control(self) -> Channel:
+        return self.fitted.control
+
+    def predict(self, features: Sequence[float]) -> PairwisePropensityEstimate:
+        point = self.fitted.predict(features)
+        return PairwisePropensityEstimate(
+            treatment=point.treatment,
+            control=point.control,
+            propensity=point.propensity,
+            raw_prediction=point.raw_prediction,
+            clipped=point.clipped,
+            lower_bound=max(0.0, point.propensity - self.error_radius),
+            upper_bound=min(1.0, point.propensity + self.error_radius),
+            calibration_miscoverage=self.miscoverage,
+            calibration_size=self.calibration_size,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class PropensitySupportProtocol:
     """Explicit practical-overlap interval for deployment serving.
 
-    No universal interval is supplied by the library. The experiment/deployment
-    protocol must choose the minimum pairwise probability that it considers
-    usable. A binary score is intentional: it says whether the declared overlap
-    requirement is met, without inventing a calibrated confidence scale.
+    No universal overlap threshold is supplied by the library. The deployment or
+    benchmark protocol chooses ``min_pairwise_probability``. A context is marked
+    supported only if the *entire calibrated propensity interval* lies inside the
+    practical-overlap region. An uncalibrated point prediction is rejected rather
+    than silently promoted into deployment evidence.
     """
 
     min_pairwise_probability: float
@@ -64,12 +124,26 @@ class PropensitySupportProtocol:
             raise ValueError("min_pairwise_probability must be in (0, 0.5)")
 
     def score(self, estimate: PairwisePropensityEstimate) -> float:
-        e = estimate.propensity
+        if estimate.lower_bound is None or estimate.upper_bound is None:
+            raise ValueError("deployment support requires a calibrated propensity interval")
         return float(
-            self.min_pairwise_probability
-            <= e
-            <= 1.0 - self.min_pairwise_probability
+            estimate.lower_bound >= self.min_pairwise_probability
+            and estimate.upper_bound <= 1.0 - self.min_pairwise_probability
         )
+
+
+def _pairwise_target(
+    row: LoggedTreatmentRecord,
+    *,
+    treatment: Channel,
+    control: Channel,
+) -> float | None:
+    p1 = float(row.action_propensities.get(treatment, 0.0))
+    p0 = float(row.action_propensities.get(control, 0.0))
+    pair_mass = p1 + p0
+    if pair_mass <= 0.0:
+        return None
+    return p1 / pair_mass
 
 
 def fit_pairwise_propensity_model(
@@ -80,43 +154,89 @@ def fit_pairwise_propensity_model(
     model_factory: RegressorFactory | None = None,
     ridge: float = 1e-3,
 ) -> FittedPairwisePropensity:
-    """Fit a local logging-propensity serving model from recorded probabilities."""
+    """Fit ``mu(treatment | x, treatment-or-control)`` from logged probabilities.
+
+    All contexts with positive treatment/control probability mass are usable,
+    regardless of which action happened to be realized. This avoids discarding
+    valid logging-policy supervision in multi-action logs.
+    """
 
     if treatment is control:
         raise ValueError("treatment and control must differ")
     if ridge <= 0:
         raise ValueError("ridge must be positive")
-    rows = [row for row in records if row.action in {treatment, control}]
-    if not rows:
-        raise ValueError("no treatment/control rows available")
 
-    targets: list[float] = []
-    for row in rows:
-        p1 = float(row.action_propensities.get(treatment, 0.0))
-        p0 = float(row.action_propensities.get(control, 0.0))
-        pair_mass = p1 + p0
-        if pair_mass <= 0.0:
-            raise ValueError("treatment/control propensity mass must be positive")
-        targets.append(p1 / pair_mass)
+    usable: list[tuple[LoggedTreatmentRecord, float]] = []
+    for row in records:
+        target = _pairwise_target(row, treatment=treatment, control=control)
+        if target is not None:
+            usable.append((row, target))
+    if not usable:
+        raise ValueError("no rows have positive treatment/control propensity mass")
 
     factory = model_factory or (lambda: RidgeRegressor(ridge))
-    model = factory().fit((row.features for row in rows), targets)
+    model = factory().fit(
+        (row.features for row, _ in usable),
+        (target for _, target in usable),
+    )
     return FittedPairwisePropensity(
         treatment=treatment,
         control=control,
         model=model,
-        sample_size=len(rows),
+        sample_size=len(usable),
+    )
+
+
+def calibrate_pairwise_propensity_model(
+    fitted: FittedPairwisePropensity,
+    records: Iterable[LoggedTreatmentRecord],
+    *,
+    miscoverage: float,
+) -> CalibratedPairwisePropensity:
+    """Calibrate a split-conformal absolute-residual propensity interval.
+
+    ``records`` must come from a calibration cohort that was not used to fit the
+    propensity model or to tune its hyperparameters. The function cannot infer
+    cohort provenance, so that split remains an explicit experiment contract.
+    """
+
+    if not 0 < miscoverage < 1:
+        raise ValueError("miscoverage must be in (0, 1)")
+
+    residuals: list[float] = []
+    for row in records:
+        target = _pairwise_target(
+            row,
+            treatment=fitted.treatment,
+            control=fitted.control,
+        )
+        if target is None:
+            continue
+        prediction = fitted.predict(row.features).propensity
+        residuals.append(abs(target - prediction))
+    if not residuals:
+        raise ValueError("calibration cohort has no positive treatment/control propensity mass")
+
+    residuals.sort()
+    rank = ceil((len(residuals) + 1) * (1.0 - miscoverage))
+    rank = min(len(residuals), max(1, rank))
+    radius = residuals[rank - 1]
+    return CalibratedPairwisePropensity(
+        fitted=fitted,
+        error_radius=radius,
+        miscoverage=miscoverage,
+        calibration_size=len(residuals),
     )
 
 
 def make_support_score_provider(
-    models: Mapping[Channel, FittedPairwisePropensity],
+    models: Mapping[Channel, CalibratedPairwisePropensity],
     protocols: Mapping[Channel, PropensitySupportProtocol],
 ):
-    """Create a feature-aware serving provider from explicit local-overlap rules."""
+    """Create a feature-local, calibrated serving-support provider."""
 
     if not models:
-        raise ValueError("at least one pairwise propensity model is required")
+        raise ValueError("at least one calibrated propensity model is required")
     if set(models) != set(protocols):
         raise ValueError("propensity models and support protocols must cover the same channels")
 
