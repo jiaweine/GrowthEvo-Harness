@@ -167,9 +167,9 @@ class FittedTreatmentEffect:
     residual_scale: float
     sample_size: int
     overlap_coverage: float
-    practical_overlap_coverage: float | None
-    propensity_clip_fraction: float
     feature_bounds: tuple[tuple[float, float], ...]
+    practical_overlap_coverage: float | None = None
+    propensity_clip_fraction: float = 0.0
 
     def predict(self, features: Sequence[float]) -> CATEEstimate:
         row = _validate_features(features, len(self.feature_bounds))
@@ -282,20 +282,36 @@ class CrossFittedDRLearner:
         group_to_fold: dict[str, int] = {}
         target_share = 1.0 / self.n_folds
 
-        for key in ordered_groups:
+        def global_imbalance(candidate_fold: int, counts: Mapping[Channel, int], size: int) -> tuple[float, float]:
+            class_deviation = 0.0
+            size_deviation = 0.0
+            for fold in range(self.n_folds):
+                fold_size = fold_sizes[fold] + (size if fold == candidate_fold else 0)
+                size_deviation += (fold_size / len(rows) - target_share) ** 2
+                for action in actions:
+                    count = fold_counts[fold][action] + (
+                        counts[action] if fold == candidate_fold else 0
+                    )
+                    class_deviation += (
+                        count / action_totals[action] - target_share
+                    ) ** 2
+            return class_deviation, size_deviation
+
+        for position, key in enumerate(ordered_groups):
             counts = group_counts[key]
             size = len(groups[key])
+            empty_folds = [fold for fold, fold_size in enumerate(fold_sizes) if fold_size == 0]
+            remaining_groups = len(ordered_groups) - position
+            if empty_folds and remaining_groups <= len(empty_folds):
+                eligible_folds = empty_folds
+            elif position < self.n_folds:
+                eligible_folds = empty_folds
+            else:
+                eligible_folds = list(range(self.n_folds))
+
             candidates: list[tuple[float, float, int, int]] = []
-            for fold in range(self.n_folds):
-                class_deviation = fsum(
-                    (
-                        (fold_counts[fold][action] + counts[action]) / action_totals[action]
-                        - target_share
-                    )
-                    ** 2
-                    for action in actions
-                )
-                size_deviation = ((fold_sizes[fold] + size) / len(rows) - target_share) ** 2
+            for fold in eligible_folds:
+                class_deviation, size_deviation = global_imbalance(fold, counts, size)
                 candidates.append((class_deviation, size_deviation, fold_sizes[fold], fold))
             _, _, _, selected_fold = min(candidates)
             group_to_fold[key] = selected_fold
@@ -307,7 +323,7 @@ class CrossFittedDRLearner:
         for fold in range(self.n_folds):
             held_indices = [index for index, assigned in enumerate(assignments) if assigned == fold]
             if not held_indices:
-                raise ValueError("group-aware fold assignment produced an empty holdout fold")
+                raise RuntimeError("group-aware fold assignment produced an empty holdout fold")
             train_actions = {
                 row.action for index, row in enumerate(rows) if assignments[index] != fold
             }
