@@ -11,6 +11,12 @@ from growthevo.models import Channel
 class ActionValueEstimate:
     """Inputs for one discrete action plus optional calibrated bounds.
 
+    ``behavior_probability`` defines the baseline policy distribution; it is not
+    used as a proxy for statistical support. ``support_eligible`` is supplied by
+    the upstream evidence protocol and may reflect local overlap, sample counts,
+    effective sample size, confidence sets, or another defensible criterion.
+    Missing treatment support fails closed and is treated as unsupported.
+
     ``value_uncertainty`` and ``cost_uncertainty`` remain model diagnostics. They
     are converted to Gaussian-style bounds only when the experiment explicitly
     opts into ``gaussian_reference`` mode. The default safety path consumes
@@ -26,6 +32,7 @@ class ActionValueEstimate:
     cost_uncertainty: float = 0.0
     value_lower_bound: float | None = None
     cost_upper_bound: float | None = None
+    support_eligible: bool | None = None
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -62,22 +69,39 @@ class ActionValueEstimate:
 
 @dataclass(frozen=True, slots=True)
 class SafePolicyImprovementConfig:
-    confidence_z: float = 1.96
-    support_floor: float = 0.02
-    max_total_variation: float = 0.20
+    """Explicit trust-region and bound semantics for policy improvement.
+
+    ``max_total_variation`` is intentionally required: the library does not
+    choose how far a learned policy may move from the logging policy. Statistical
+    support is not configured here because it belongs to the upstream evidence
+    protocol and arrives per action through ``support_eligible``.
+    """
+
+    max_total_variation: float
     min_pessimistic_improvement: float = 0.0
     unsupported_action_mode: Literal["freeze", "no_increase"] = "freeze"
     bound_mode: Literal["provided", "gaussian_reference"] = "provided"
+    confidence_z: float | None = None
 
     def __post_init__(self) -> None:
-        if self.confidence_z < 0 or not isfinite(self.confidence_z):
-            raise ValueError("confidence_z must be a non-negative finite value")
-        if not 0 < self.support_floor <= 1:
-            raise ValueError("support_floor must be in (0, 1]")
-        if not 0 <= self.max_total_variation <= 1:
-            raise ValueError("max_total_variation must be in [0, 1]")
-        if self.min_pessimistic_improvement < 0:
-            raise ValueError("min_pessimistic_improvement must be non-negative")
+        if not isfinite(self.max_total_variation) or not 0 <= self.max_total_variation <= 1:
+            raise ValueError("max_total_variation must be a finite value in [0, 1]")
+        if (
+            not isfinite(self.min_pessimistic_improvement)
+            or self.min_pessimistic_improvement < 0
+        ):
+            raise ValueError("min_pessimistic_improvement must be non-negative and finite")
+        if self.unsupported_action_mode not in {"freeze", "no_increase"}:
+            raise ValueError("unsupported_action_mode must be freeze or no_increase")
+        if self.bound_mode not in {"provided", "gaussian_reference"}:
+            raise ValueError("bound_mode must be provided or gaussian_reference")
+        if self.bound_mode == "gaussian_reference":
+            if self.confidence_z is None:
+                raise ValueError("gaussian_reference mode requires an explicit confidence_z")
+            if self.confidence_z < 0 or not isfinite(self.confidence_z):
+                raise ValueError("confidence_z must be a non-negative finite value")
+        elif self.confidence_z is not None:
+            raise ValueError("confidence_z is only used in gaussian_reference mode")
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,10 +126,22 @@ class SupportAnchoredPolicyImprover:
     optional ``gaussian_reference`` mode exists for controlled experiments but
     must be selected explicitly because model uncertainty is not automatically a
     calibrated confidence interval.
+
+    The constructor accepts ``None`` only so wiring code can instantiate the
+    component before a deployment protocol is available. ``improve`` then fails
+    closed until an explicit ``SafePolicyImprovementConfig`` is supplied.
     """
 
     def __init__(self, config: SafePolicyImprovementConfig | None = None) -> None:
-        self.config = config or SafePolicyImprovementConfig()
+        self.config = config
+
+    def _require_config(self) -> SafePolicyImprovementConfig:
+        if self.config is None:
+            raise ValueError(
+                "safe policy improvement protocol is not configured; "
+                "provide an explicit max_total_variation and bound semantics"
+            )
+        return self.config
 
     @staticmethod
     def _validate_distribution(
@@ -116,17 +152,26 @@ class SupportAnchoredPolicyImprover:
     ) -> dict[Channel, float]:
         unknown = set(probabilities).difference(actions)
         if unknown:
-            raise ValueError(f"{name} contains unknown actions: {sorted(action.value for action in unknown)}")
+            raise ValueError(
+                f"{name} contains unknown actions: "
+                f"{sorted(action.value for action in unknown)}"
+            )
         result = {action: float(probabilities.get(action, 0.0)) for action in actions}
+        if any(not isfinite(probability) for probability in result.values()):
+            raise ValueError(f"{name} probabilities must be finite")
         if any(probability < 0.0 or probability > 1.0 for probability in result.values()):
             raise ValueError(f"{name} probabilities must be in [0, 1]")
         if abs(fsum(result.values()) - 1.0) > 1e-6:
             raise ValueError(f"{name} probabilities must sum to 1")
         return result
 
-    def _value_bounds(self, rows: list[ActionValueEstimate]) -> dict[Channel, float]:
-        cfg = self.config
+    def _value_bounds(
+        self,
+        rows: list[ActionValueEstimate],
+        cfg: SafePolicyImprovementConfig,
+    ) -> dict[Channel, float]:
         if cfg.bound_mode == "gaussian_reference":
+            assert cfg.confidence_z is not None
             return {
                 row.action: row.value - cfg.confidence_z * row.value_uncertainty
                 for row in rows
@@ -147,10 +192,11 @@ class SupportAnchoredPolicyImprover:
         self,
         rows: list[ActionValueEstimate],
         *,
+        cfg: SafePolicyImprovementConfig,
         require_bound: bool,
     ) -> dict[Channel, float]:
-        cfg = self.config
         if cfg.bound_mode == "gaussian_reference":
+            assert cfg.confidence_z is not None
             return {
                 row.action: row.expected_cost + cfg.confidence_z * row.cost_uncertainty
                 for row in rows
@@ -171,9 +217,10 @@ class SupportAnchoredPolicyImprover:
             for row in rows
         }
 
+    @staticmethod
     def _anchor_proposal(
-        self,
         *,
+        cfg: SafePolicyImprovementConfig,
         proposal: Mapping[Channel, float],
         behavior: Mapping[Channel, float],
         supported: set[Channel],
@@ -181,7 +228,6 @@ class SupportAnchoredPolicyImprover:
         """Apply a SPIBB-style support constraint before interpolation."""
 
         actions = tuple(behavior)
-        cfg = self.config
         anchored: dict[Channel, float] = {}
         constrained = False
         fixed_mass = 0.0
@@ -251,17 +297,23 @@ class SupportAnchoredPolicyImprover:
         actions = tuple(row.action for row in rows)
         if Channel.NO_TREATMENT not in actions:
             raise ValueError("NO_TREATMENT estimate is required as a safe fallback")
-        if max_expected_cost is not None and max_expected_cost < 0:
-            raise ValueError("max_expected_cost must be non-negative")
+        if max_expected_cost is not None and (
+            not isfinite(max_expected_cost) or max_expected_cost < 0
+        ):
+            raise ValueError("max_expected_cost must be finite and non-negative")
 
-        cfg = self.config
+        cfg = self._require_config()
         behavior = self._validate_distribution(
             {row.action: row.behavior_probability for row in rows},
             actions,
             name="behavior",
         )
-        value_lcb = self._value_bounds(rows)
-        cost_ucb = self._cost_bounds(rows, require_bound=max_expected_cost is not None)
+        value_lcb = self._value_bounds(rows, cfg)
+        cost_ucb = self._cost_bounds(
+            rows,
+            cfg=cfg,
+            require_bound=max_expected_cost is not None,
+        )
         baseline_value = self._policy_value(behavior, value_lcb)
         baseline_cost = self._policy_value(behavior, cost_ucb)
 
@@ -283,10 +335,13 @@ class SupportAnchoredPolicyImprover:
         supported = {
             row.action
             for row in rows
-            if row.action is Channel.NO_TREATMENT
-            or row.behavior_probability >= cfg.support_floor
+            if row.action is Channel.NO_TREATMENT or row.support_eligible is True
         }
         unsupported_count = len(rows) - len(supported)
+        unknown_support_count = sum(
+            row.action is not Channel.NO_TREATMENT and row.support_eligible is None
+            for row in rows
+        )
 
         if proposal_probabilities is None:
             selected = max(
@@ -305,6 +360,7 @@ class SupportAnchoredPolicyImprover:
             used_reference_proposal = False
 
         anchored, support_constrained = self._anchor_proposal(
+            cfg=cfg,
             proposal=proposal,
             behavior=behavior,
             supported=supported,
@@ -316,7 +372,9 @@ class SupportAnchoredPolicyImprover:
         if used_reference_proposal:
             reasons.append("reference_pessimistic_proposal_used")
         if unsupported_count:
-            reasons.append("low_support_actions_anchored")
+            reasons.append("unsupported_actions_anchored")
+        if unknown_support_count:
+            reasons.append("missing_action_support_treated_as_unsupported")
         if support_constrained:
             reasons.append("proposal_support_constraint_active")
         if cfg.bound_mode == "gaussian_reference":
@@ -338,7 +396,10 @@ class SupportAnchoredPolicyImprover:
 
         proposal_gain = proposal_value - baseline_value
         if proposal_gain <= 0.0:
-            selected_action = max(actions, key=lambda action: (anchored[action] - behavior[action], action.value))
+            selected_action = max(
+                actions,
+                key=lambda action: (anchored[action] - behavior[action], action.value),
+            )
             return PolicyImprovementResult(
                 probabilities=behavior,
                 selected_action=selected_action,
@@ -362,7 +423,10 @@ class SupportAnchoredPolicyImprover:
                 reasons.append("expected_cost_cap_active")
 
         if mixture <= 1e-12:
-            selected_action = max(actions, key=lambda action: (anchored[action] - behavior[action], action.value))
+            selected_action = max(
+                actions,
+                key=lambda action: (anchored[action] - behavior[action], action.value),
+            )
             return PolicyImprovementResult(
                 probabilities=behavior,
                 selected_action=selected_action,
@@ -383,7 +447,10 @@ class SupportAnchoredPolicyImprover:
         total_variation = self._total_variation(behavior, candidate)
 
         if candidate_value - baseline_value + 1e-12 < cfg.min_pessimistic_improvement:
-            selected_action = max(actions, key=lambda action: (candidate[action] - behavior[action], action.value))
+            selected_action = max(
+                actions,
+                key=lambda action: (candidate[action] - behavior[action], action.value),
+            )
             return PolicyImprovementResult(
                 probabilities=behavior,
                 selected_action=selected_action,
@@ -397,7 +464,11 @@ class SupportAnchoredPolicyImprover:
 
         selected_action = max(
             actions,
-            key=lambda action: (candidate[action] - behavior[action], candidate[action], action.value),
+            key=lambda action: (
+                candidate[action] - behavior[action],
+                candidate[action],
+                action.value,
+            ),
         )
         reasons.append("safe_behavior_anchored_update")
         return PolicyImprovementResult(
