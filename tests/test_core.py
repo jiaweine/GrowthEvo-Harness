@@ -20,7 +20,11 @@ from growthevo.runtime.engine import GrowthEvoRuntime
 from growthevo.runtime.event_store import EventStore
 from growthevo.runtime.legal_action import LegalActionGate
 from growthevo.runtime.planner import GrowthHypothesis
-from growthevo.verifier.counterfactual import CounterfactualVerifier
+from growthevo.verifier.counterfactual import (
+    CounterfactualVerifier,
+    ThresholdEvidenceGate,
+    VerifierConfig,
+)
 
 
 def _observation(**overrides: object) -> UserObservation:
@@ -55,6 +59,19 @@ def _constraints(**overrides: object) -> GrowthConstraints:
     }
     values.update(overrides)
     return GrowthConstraints(**values)  # type: ignore[arg-type]
+
+
+def _verifier() -> CounterfactualVerifier:
+    return CounterfactualVerifier(
+        VerifierConfig(z_score=1.96),
+        evidence_gate=ThresholdEvidenceGate(
+            min_sample_size=50,
+            min_effective_sample_size=20.0,
+            min_effective_sample_ratio=0.20,
+            min_support_coverage=0.95,
+            max_importance_weight=20.0,
+        ),
+    )
 
 
 def test_low_incremental_value_abstains_even_when_natural_conversion_is_high() -> None:
@@ -141,7 +158,6 @@ def test_doubly_robust_ope_and_effective_sample_size() -> None:
 
 
 def test_verifier_separates_insufficient_evidence_from_failure() -> None:
-    verifier = CounterfactualVerifier()
     evidence = PolicyEvidence(
         candidate_value=1.2,
         baseline_value=1.0,
@@ -154,13 +170,13 @@ def test_verifier_separates_insufficient_evidence_from_failure() -> None:
         churn_risk=0.1,
     )
 
-    result = verifier.verify(evidence, _constraints())
+    result = _verifier().verify(evidence, _constraints())
 
     assert result.status is VerificationStatus.INSUFFICIENT_EVIDENCE
 
 
 def test_verifier_requires_value_lcb_and_constraints() -> None:
-    verifier = CounterfactualVerifier()
+    verifier = _verifier()
     passing = PolicyEvidence(
         candidate_value=1.3,
         baseline_value=1.0,
