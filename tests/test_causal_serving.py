@@ -19,6 +19,8 @@ def _fitted(effect: float) -> FittedTreatmentEffect:
         residual_scale=0.02,
         sample_size=3,
         overlap_coverage=1.0,
+        practical_overlap_coverage=None,
+        propensity_clip_fraction=0.0,
         feature_bounds=((0.0, 2.0),),
     )
 
