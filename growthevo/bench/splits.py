@@ -28,13 +28,23 @@ class DatasetSplit(Generic[T]):
         return len(self.train) + len(self.validation) + len(self.test)
 
 
-Identity = Callable[[T], str]
-Stratum = Callable[[T], str]
-
-
-def _stable_order_key(identity: str, seed: int) -> bytes:
-    payload = f"{seed}\0{identity}".encode("utf-8")
+def _stable_order_key(identity: str, seed: int, namespace: str = "") -> bytes:
+    payload = f"{seed}\0{namespace}\0{identity}".encode("utf-8")
     return blake2b(payload, digest_size=16).digest()
+
+
+def _validate_fractions(
+    train_fraction: float,
+    validation_fraction: float,
+) -> tuple[float, float, float]:
+    if not 0 < train_fraction < 1:
+        raise ValueError("train_fraction must be in (0, 1)")
+    if not 0 <= validation_fraction < 1:
+        raise ValueError("validation_fraction must be in [0, 1)")
+    test_fraction = 1.0 - train_fraction - validation_fraction
+    if test_fraction <= 0:
+        raise ValueError("train_fraction + validation_fraction must be < 1")
+    return train_fraction, validation_fraction, test_fraction
 
 
 def _partition_counts(
@@ -56,11 +66,7 @@ def _partition_counts(
     positive = [index for index, fraction in enumerate(fractions) if fraction > 0]
     if ensure_stratum_coverage and size >= len(positive):
         for missing in [index for index in positive if counts[index] == 0]:
-            donors = [
-                index
-                for index in positive
-                if counts[index] > 1
-            ]
+            donors = [index for index in positive if counts[index] > 1]
             if not donors:
                 break
             donor = max(
@@ -75,8 +81,8 @@ def _partition_counts(
 def deterministic_stratified_split(
     items: Iterable[T],
     *,
-    identity: Identity[T],
-    stratum: Stratum[T],
+    identity: Callable[[T], str],
+    stratum: Callable[[T], str],
     train_fraction: float,
     validation_fraction: float,
     seed: int,
@@ -90,14 +96,7 @@ def deterministic_stratified_split(
     remainder after train and validation.
     """
 
-    if not 0 < train_fraction < 1:
-        raise ValueError("train_fraction must be in (0, 1)")
-    if not 0 <= validation_fraction < 1:
-        raise ValueError("validation_fraction must be in [0, 1)")
-    test_fraction = 1.0 - train_fraction - validation_fraction
-    if test_fraction <= 0:
-        raise ValueError("train_fraction + validation_fraction must be < 1")
-
+    fractions = _validate_fractions(train_fraction, validation_fraction)
     rows = list(items)
     if not rows:
         raise ValueError("at least one item is required")
@@ -113,28 +112,79 @@ def deterministic_stratified_split(
         key = stratum(row)
         by_stratum.setdefault(key, []).append((row_identity, row))
 
-    train: list[T] = []
-    validation: list[T] = []
-    test: list[T] = []
-    fractions = (train_fraction, validation_fraction, test_fraction)
+    train_pairs: list[tuple[str, T]] = []
+    validation_pairs: list[tuple[str, T]] = []
+    test_pairs: list[tuple[str, T]] = []
     for key in sorted(by_stratum):
         members = sorted(
             by_stratum[key],
-            key=lambda pair: (_stable_order_key(pair[0], seed), pair[0]),
+            key=lambda pair: (_stable_order_key(pair[0], seed, key), pair[0]),
         )
         train_n, validation_n, _ = _partition_counts(
             len(members),
             fractions,
             ensure_stratum_coverage=ensure_stratum_coverage,
         )
-        train.extend(row for _, row in members[:train_n])
-        validation.extend(
-            row for _, row in members[train_n : train_n + validation_n]
+        train_pairs.extend(members[:train_n])
+        validation_pairs.extend(members[train_n : train_n + validation_n])
+        test_pairs.extend(members[train_n + validation_n :])
+
+    def finalize(pairs: list[tuple[str, T]], namespace: str) -> tuple[T, ...]:
+        ordered = sorted(
+            pairs,
+            key=lambda pair: (
+                _stable_order_key(pair[0], seed, f"partition:{namespace}"),
+                pair[0],
+            ),
         )
-        test.extend(row for _, row in members[train_n + validation_n :])
+        return tuple(row for _, row in ordered)
 
     return DatasetSplit(
-        train=tuple(train),
-        validation=tuple(validation),
-        test=tuple(test),
+        train=finalize(train_pairs, "train"),
+        validation=finalize(validation_pairs, "validation"),
+        test=finalize(test_pairs, "test"),
+    )
+
+
+def ordered_split(
+    items: Iterable[T],
+    *,
+    order_key: Callable[[T], object],
+    identity: Callable[[T], str],
+    train_fraction: float,
+    validation_fraction: float,
+) -> DatasetSplit[T]:
+    """Chronological or otherwise order-preserving benchmark split.
+
+    The algorithm knows nothing about timestamps. The experiment protocol owns
+    the ordering key, so this can represent event time, cohort time, campaign
+    order, or another pre-declared anti-leakage boundary without dataset-specific
+    constants in the splitting utility.
+    """
+
+    fractions = _validate_fractions(train_fraction, validation_fraction)
+    rows = list(items)
+    if not rows:
+        raise ValueError("at least one item is required")
+    identities = [identity(row) for row in rows]
+    if any(not value for value in identities):
+        raise ValueError("split identities cannot be empty")
+    if len(set(identities)) != len(identities):
+        raise ValueError("split identities must be unique")
+
+    ordered = sorted(
+        zip(identities, rows, strict=True),
+        key=lambda pair: (order_key(pair[1]), pair[0]),
+    )
+    train_n, validation_n, _ = _partition_counts(
+        len(ordered),
+        fractions,
+        ensure_stratum_coverage=True,
+    )
+    return DatasetSplit(
+        train=tuple(row for _, row in ordered[:train_n]),
+        validation=tuple(
+            row for _, row in ordered[train_n : train_n + validation_n]
+        ),
+        test=tuple(row for _, row in ordered[train_n + validation_n :]),
     )
