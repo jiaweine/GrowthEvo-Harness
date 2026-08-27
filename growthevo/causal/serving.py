@@ -14,7 +14,7 @@ def _clip_probability_effect(value: float) -> float:
 
 
 EffectLowerBoundProvider = Callable[[Channel, CATEEstimate], float]
-SupportScoreProvider = Callable[[Channel, CATEEstimate], float]
+SupportScoreProvider = Callable[[Channel, CATEEstimate, Sequence[float]], float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,10 +47,15 @@ class CausalUpliftServingBridge:
     not deployment guarantees. A caller must explicitly inject:
 
     * ``effect_lower_bound_provider`` to expose inferential/calibrated effect LCBs;
-    * ``support_score_provider`` to expose deployment support for each channel.
+    * ``support_score_provider`` to expose feature-local deployment support.
+
+    The support provider receives the current feature vector in addition to the
+    CATE diagnostic. This lets a separate logging-policy model evaluate support
+    at the actual serving context instead of promoting a cohort-wide overlap
+    statistic into a user-level claim.
 
     Without a support provider, ``channel_support`` remains empty. Because the
-    Runtime treats unknown treatment support as zero, a missing local/support
+    Runtime treats unknown treatment support as zero, a missing local-support
     protocol cannot silently become full support. ``model_support_diagnostics``
     remains available for analysis without being promoted into the policy gate.
     """
@@ -76,8 +81,9 @@ class CausalUpliftServingBridge:
         self.support_score_provider = support_score_provider
 
     def predict(self, features: Sequence[float]) -> UpliftServingPrediction:
+        feature_row = tuple(float(value) for value in features)
         predictions: dict[Channel, CATEEstimate] = {
-            channel: model.predict(features) for channel, model in self.models.items()
+            channel: model.predict(feature_row) for channel, model in self.models.items()
         }
         raw_effects = {
             channel: prediction.effect for channel, prediction in predictions.items()
@@ -92,7 +98,9 @@ class CausalUpliftServingBridge:
         supports: dict[Channel, float] = {}
         if self.support_score_provider is not None:
             for channel, prediction in predictions.items():
-                support = float(self.support_score_provider(channel, prediction))
+                support = float(
+                    self.support_score_provider(channel, prediction, feature_row)
+                )
                 if not isfinite(support) or not 0.0 <= support <= 1.0:
                     raise ValueError("support-score provider must return a finite value in [0, 1]")
                 supports[channel] = support
