@@ -201,6 +201,11 @@ class CrossFittedDRLearner:
     This keeps the orthogonalization/cross-fitting contract stable while allowing
     production experiments to plug in forests, boosting, neural estimators, or
     other regressors without editing causal logic.
+
+    Repeated-user data use group-aware fold assignment. Groups are assigned by a
+    deterministic greedy stratification objective that balances treatment/control
+    counts before total row count. This keeps groups intact without accepting the
+    potentially extreme class imbalance of a raw hash modulo fold assignment.
     """
 
     def __init__(
@@ -228,6 +233,91 @@ class CrossFittedDRLearner:
     def _stable_key(value: str) -> bytes:
         return blake2b(value.encode("utf-8"), digest_size=16).digest()
 
+    def _group_fold_assignments(
+        self,
+        rows: list[LoggedTreatmentRecord],
+        treatment: Channel,
+        control: Channel,
+    ) -> list[int]:
+        groups: dict[str, list[int]] = {}
+        for index, row in enumerate(rows):
+            key = row.group_id or row.unit_id
+            groups.setdefault(key, []).append(index)
+        if len(groups) < self.n_folds:
+            raise ValueError(
+                f"need at least {self.n_folds} distinct groups for group-aware cross-fitting; "
+                f"got {len(groups)}"
+            )
+
+        actions = (treatment, control)
+        action_totals = {
+            action: sum(row.action is action for row in rows)
+            for action in actions
+        }
+        if any(total == 0 for total in action_totals.values()):
+            raise ValueError("group-aware cross-fitting requires treatment and control rows")
+
+        group_counts: dict[str, dict[Channel, int]] = {}
+        for key, indices in groups.items():
+            group_counts[key] = {
+                action: sum(rows[index].action is action for index in indices)
+                for action in actions
+            }
+
+        ordered_groups = sorted(
+            groups,
+            key=lambda key: (
+                -len(groups[key]),
+                -max(group_counts[key].values()),
+                self._stable_key(key),
+            ),
+        )
+        fold_counts = [dict.fromkeys(actions, 0) for _ in range(self.n_folds)]
+        fold_sizes = [0 for _ in range(self.n_folds)]
+        group_to_fold: dict[str, int] = {}
+        target_share = 1.0 / self.n_folds
+
+        for key in ordered_groups:
+            counts = group_counts[key]
+            size = len(groups[key])
+            candidates: list[tuple[float, float, int, int]] = []
+            for fold in range(self.n_folds):
+                class_deviation = fsum(
+                    (
+                        (fold_counts[fold][action] + counts[action]) / action_totals[action]
+                        - target_share
+                    )
+                    ** 2
+                    for action in actions
+                )
+                size_deviation = (
+                    (fold_sizes[fold] + size) / len(rows) - target_share
+                ) ** 2
+                candidates.append((class_deviation, size_deviation, fold_sizes[fold], fold))
+            _, _, _, selected_fold = min(candidates)
+            group_to_fold[key] = selected_fold
+            fold_sizes[selected_fold] += size
+            for action in actions:
+                fold_counts[selected_fold][action] += counts[action]
+
+        assignments = [
+            group_to_fold[row.group_id or row.unit_id]
+            for row in rows
+        ]
+        for fold in range(self.n_folds):
+            held_indices = [index for index, assigned in enumerate(assignments) if assigned == fold]
+            if not held_indices:
+                raise ValueError("group-aware fold assignment produced an empty holdout fold")
+            train_actions = {
+                row.action for index, row in enumerate(rows) if assignments[index] != fold
+            }
+            if treatment not in train_actions or control not in train_actions:
+                raise ValueError(
+                    "group-aware folds leave a training split without treatment/control rows; "
+                    "reduce n_folds or provide more groups"
+                )
+        return assignments
+
     def _fold_assignments(
         self,
         rows: list[LoggedTreatmentRecord],
@@ -235,20 +325,7 @@ class CrossFittedDRLearner:
         control: Channel,
     ) -> list[int]:
         if any(row.group_id is not None for row in rows):
-            assignments = [
-                int.from_bytes(self._stable_key(row.group_id or row.unit_id), "big") % self.n_folds
-                for row in rows
-            ]
-            for fold in range(self.n_folds):
-                train_actions = {
-                    row.action for index, row in enumerate(rows) if assignments[index] != fold
-                }
-                if treatment not in train_actions or control not in train_actions:
-                    raise ValueError(
-                        "group-aware folds leave a training split without treatment/control rows; "
-                        "reduce n_folds or provide more groups"
-                    )
-            return assignments
+            return self._group_fold_assignments(rows, treatment, control)
 
         assignments = [-1] * len(rows)
         for action in (treatment, control):
