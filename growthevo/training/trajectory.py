@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from json import dumps
 from math import fsum, sqrt
 from typing import Any, Iterable, Mapping
@@ -10,10 +10,15 @@ from typing import Any, Iterable, Mapping
 class PlannerTransition:
     """One planner/tool transition prepared for external Agent-RL trainers.
 
-    ``done`` means a true environment terminal. ``credit_boundary`` only stops
-    multi-step advantage propagation across a dynamics or attribution boundary;
-    it does not by itself erase the value of the observed next state. Keeping
-    those semantics separate avoids treating a bookkeeping boundary as terminal.
+    ``done`` means a true environment terminal. ``truncated`` means the exported
+    sequence ended for a bookkeeping reason such as a maximum window length while
+    the underlying process can continue. ``credit_boundary`` stops multi-step
+    advantage propagation across an attribution/dynamics boundary without
+    erasing the critic value of an observed next state.
+
+    ``metadata`` carries provenance that should remain auditable but must not be
+    silently exposed as policy observation features, for example a historical
+    logging-mechanism indicator or raw user identifier.
     """
 
     trajectory_id: str
@@ -24,9 +29,11 @@ class PlannerTransition:
     value_estimate: float = 0.0
     next_value_estimate: float = 0.0
     done: bool = False
+    truncated: bool = False
     credit_boundary: bool = False
     legal_action: bool = True
     tool_success: bool = True
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.trajectory_id:
@@ -47,9 +54,12 @@ class PlannerTrainingSample:
     raw_advantage: float
     advantage: float
     return_target: float
+    done: bool
+    truncated: bool
     legal_action: bool
     tool_success: bool
     credit_boundary: bool
+    metadata: Mapping[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,9 +83,12 @@ class PlannerTrainingBatch:
                 "raw_advantage": sample.raw_advantage,
                 "advantage": sample.advantage,
                 "return_target": sample.return_target,
+                "done": sample.done,
+                "truncated": sample.truncated,
                 "legal_action": sample.legal_action,
                 "tool_success": sample.tool_success,
                 "credit_boundary": sample.credit_boundary,
+                "metadata": dict(sample.metadata),
             }
             for sample in self.samples
         )
@@ -87,11 +100,11 @@ class PlannerTrainingBatch:
 class TrajectoryTrainerAdapter:
     """Compile event-derived planner transitions into GAE training samples.
 
-    A true terminal controls value bootstrapping. A credit boundary controls only
-    eligibility-trace propagation. This distinction is important for rollback,
-    attribution, or regime boundaries where the next state is still observed and
-    should retain its critic value even though later rewards should not be blamed
-    on the preceding planner step.
+    A true terminal controls value bootstrapping. A credit boundary or artificial
+    truncation controls eligibility-trace propagation. Truncation therefore keeps
+    the next-state value bootstrap but does not propagate later rewards through a
+    sequence boundary. This follows the standard distinction between termination
+    and time-limit/data-window truncation.
     """
 
     def __init__(
@@ -138,7 +151,9 @@ class TrajectoryTrainerAdapter:
             reverse: list[tuple[PlannerTransition, float, float]] = []
             for row in reversed(trajectory):
                 value_bootstrap = 0.0 if row.done else 1.0
-                trace_continuation = 0.0 if row.done or row.credit_boundary else 1.0
+                trace_continuation = (
+                    0.0 if row.done or row.truncated or row.credit_boundary else 1.0
+                )
                 delta = (
                     row.reward
                     + self.gamma * value_bootstrap * row.next_value_estimate
@@ -179,9 +194,12 @@ class TrajectoryTrainerAdapter:
                     raw_advantage=raw_advantage,
                     advantage=advantage,
                     return_target=return_target,
+                    done=row.done,
+                    truncated=row.truncated,
                     legal_action=row.legal_action,
                     tool_success=row.tool_success,
                     credit_boundary=row.credit_boundary,
+                    metadata=row.metadata,
                 )
             )
 
