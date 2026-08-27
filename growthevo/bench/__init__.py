@@ -8,6 +8,11 @@ from .offline_rl import (
     default_kuairand_state_builder,
     kuairand_to_offline_rl,
 )
+from .planner_sequences import (
+    KuaiRandHistory,
+    default_planner_observation,
+    kuairand_to_planner_transitions,
+)
 from .real_world import (
     CriteoUpliftData,
     DEFAULT_KUAIRAND_REWARD_WEIGHTS,
@@ -16,7 +21,6 @@ from .real_world import (
     RandomizedTargetingResult,
     evaluate_randomized_targeting,
     kuairand_reward,
-    kuairand_to_planner_transitions,
     load_criteo_uplift,
     load_kuairand,
     load_open_bandit,
@@ -38,6 +42,7 @@ __all__ = [
     "DEFAULT_KUAIRAND_REWARD_WEIGHTS",
     "GrowthAgentBench",
     "HistorySummary",
+    "KuaiRandHistory",
     "KuaiRandInteraction",
     "OfflineRLDataset",
     "OfflineRLTransition",
@@ -48,6 +53,7 @@ __all__ = [
     "TargetingBootstrapResult",
     "bootstrap_randomized_targeting",
     "default_kuairand_state_builder",
+    "default_planner_observation",
     "evaluate_cate",
     "evaluate_randomized_targeting",
     "kuairand_reward",
