@@ -32,8 +32,14 @@ def main() -> None:
     )
     enriched, uplift = bridge.enrich_observation(observation, (0.20, -0.10))
 
+    # Synthetic training smoke test only: explicitly opt into the Gaussian
+    # reference conversion from model uncertainty to pessimistic bounds. Real
+    # promotion should provide calibrated/inferential bounds instead.
     improver = SupportAnchoredPolicyImprover(
-        SafePolicyImprovementConfig(max_total_variation=0.15)
+        SafePolicyImprovementConfig(
+            max_total_variation=0.15,
+            bound_mode="gaussian_reference",
+        )
     )
     policy = improver.improve(
         [
