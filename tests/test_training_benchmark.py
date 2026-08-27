@@ -415,7 +415,11 @@ def test_dynamics_boundary_stops_gae_credit_leakage() -> None:
 
 
 def test_training_adapter_exports_stable_jsonl() -> None:
-    batch = TrajectoryTrainerAdapter(normalize_advantages=False).build(
+    batch = TrajectoryTrainerAdapter(
+        gamma=1.0,
+        gae_lambda=1.0,
+        normalize_advantages=False,
+    ).build(
         [
             PlannerTransition(
                 trajectory_id="traj-1",
@@ -423,6 +427,8 @@ def test_training_adapter_exports_stable_jsonl() -> None:
                 action="query_uplift",
                 observation={"support": 0.98},
                 reward=0.3,
+                value_estimate=0.10,
+                next_value_estimate=0.0,
                 done=True,
                 legal_action=True,
                 tool_success=True,
@@ -435,3 +441,5 @@ def test_training_adapter_exports_stable_jsonl() -> None:
     assert '"trajectory_id": "traj-1"' in payload
     assert '"legal_action": true' in payload
     assert '"support": 0.98' in payload
+    assert '"value_estimate": 0.1' in payload
+    assert '"next_value_estimate": 0.0' in payload
