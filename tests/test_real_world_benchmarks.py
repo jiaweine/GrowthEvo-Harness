@@ -160,7 +160,9 @@ def test_behavior_policy_recovery_matches_ips_and_self_normalized_ips() -> None:
     assert estimate.effective_sample_ratio == pytest.approx(1.0)
 
 
-def test_kuairand_sequence_state_does_not_include_current_feedback(tmp_path: Path) -> None:
+def test_kuairand_sequence_state_does_not_include_current_feedback_or_logging_provenance(
+    tmp_path: Path,
+) -> None:
     path = _write(
         tmp_path / "kuairand.csv",
         "\n".join(
@@ -173,14 +175,46 @@ def test_kuairand_sequence_state_does_not_include_current_feedback(tmp_path: Pat
     )
 
     rows = load_kuairand(path)
-    transitions = kuairand_to_planner_transitions(rows, max_steps_per_trajectory=10)
+    transitions = kuairand_to_planner_transitions(rows)
 
     assert transitions[0].observation["prior_click_rate"] == pytest.approx(0.0)
     assert transitions[0].observation["prior_long_view_rate"] == pytest.approx(0.0)
     assert transitions[1].observation["prior_click_rate"] == pytest.approx(1.0)
     assert transitions[1].observation["prior_long_view_rate"] == pytest.approx(1.0)
-    assert transitions[1].observation["random_intervention"] is True
+    assert "random_intervention" not in transitions[1].observation
+    assert "user_id" not in transitions[1].observation
+    assert transitions[1].metadata["random_intervention"] is True
+    assert transitions[1].metadata["user_id"] == 1
+    assert transitions[0].done is False
+    assert transitions[1].done is True
     assert transitions[0].reward > transitions[1].reward
+
+
+def test_kuairand_explicit_window_is_truncation_not_terminal(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path / "kuairand.csv",
+        "\n".join(
+            [
+                "user_id,video_id,time_ms,date,hourmin,tab,is_rand,is_click,is_like,is_follow,is_comment,is_forward,is_hate,long_view,play_time_ms,duration_ms",
+                "1,10,1000,20220422,900,1,0,1,0,0,0,0,0,1,8000,9000",
+                "1,11,2000,20220422,901,1,0,0,0,0,0,0,0,0,2000,9000",
+                "1,12,3000,20220422,902,1,0,1,0,0,0,0,0,1,8000,9000",
+            ]
+        ),
+    )
+
+    transitions = kuairand_to_planner_transitions(
+        load_kuairand(path),
+        max_steps_per_trajectory=2,
+    )
+
+    first_window_end = transitions[1]
+    final = transitions[2]
+    assert first_window_end.done is False
+    assert first_window_end.truncated is True
+    assert first_window_end.credit_boundary is True
+    assert final.done is True
+    assert final.truncated is False
 
 
 def test_switch_and_shrinkage_limit_extreme_importance_residuals() -> None:
