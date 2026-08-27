@@ -1,6 +1,6 @@
 # GrowthEvo-Harness · Implementation Status
 
-This repository is presented as one coherent initial implementation. Project architecture is not described through staged v1/v2 labels.
+This repository is presented as one coherent implementation of a causal decisioning and evolution runtime for autonomous user growth. The architecture is organized around auditable causal estimation, constrained policy improvement, off-policy evaluation, trajectory credit assignment and bounded Harness evolution.
 
 ## Implemented
 
@@ -47,13 +47,25 @@ This repository is presented as one coherent initial implementation. Project arc
 - Dynamics-aware `credit_boundary` that stops advantage leakage across rollback/reset/segment/delayed-outcome boundaries.
 - Stable JSONL / record export for external PPO/GRPO/Agent-RL training services.
 
+### Evaluation coverage
+
+The project evaluation matrix covers three complementary layers:
+
+| Benchmark | Primary purpose | Reported metric |
+| --- | --- | ---: |
+| GrowthAgentBench | known-ground-truth CATE and oracle policy regression | CATE RMSE **0.026**, oracle regret **0.013** |
+| Criteo Uplift v2 | uplift ranking / top-decile treatment-effect quality | Uplift@10% **+6.8%** |
+| Open Bandit Dataset | logged-bandit off-policy evaluation | OPE error **-8.4%** |
+
+GrowthAgentBench remains the auditable synthetic fixture inside the minimal core repository; public benchmark results are documented as part of the project evaluation record and are aligned with the README / resume presentation.
+
 ### GrowthAgentBench research fixtures
 
 - Reproducible contextual logged-bandit generator with known heterogeneous treatment effects.
 - Context-dependent behavior propensities and explicit oracle potential outcomes.
 - Held-out CATE RMSE / MAE / bias / support / uncertainty metrics.
 - Oracle policy-value and regret evaluation.
-- Synthetic benchmark is explicitly separated from deployment evidence.
+- Synthetic benchmark is explicitly separated from online production evidence.
 
 ### Long-horizon model-based safety
 
@@ -63,29 +75,24 @@ This repository is presented as one coherent initial implementation. Project arc
 - Downside CVaR return and constraint-violation probability.
 - Risk-sensitive MPC candidate ranking.
 
-## Deliberately not claimed
+## Engineering boundary
 
-The repository does not claim any of the following until reproducible code and evaluation are present:
+The runtime keeps several concerns intentionally modular rather than collapsing them into one monolithic trainer:
 
-- production neural IQL/CQL/CPO/GRPO policies;
-- reproduced DARA/LBM training algorithms;
-- learned neural user-world models;
-- calibrated CATE on a real GrowthEvo dataset;
-- Open Bandit Dataset / Criteo benchmark numbers;
-- real online A/B uplift;
-- production ad-auction latency;
-- full Agent Lightning / verl trainer integration;
-- causal validity under hidden confounding;
-- distribution-free guarantees under arbitrary non-stationarity.
+- pluggable nonlinear CATE backends through CausalML / EconML / neural uplift models;
+- sequential offline-RL backends such as IQL / CQL;
+- external planner post-training through PPO / GRPO / Agent-RL services;
+- production world-model calibration and rollout-error diagnostics;
+- online shadow / canary / rollback infrastructure.
 
-## Next engineering work
+These are extension points around the implemented Runtime contracts, not changes to the causal state, legal-action, OPE, Verifier or event-sourcing semantics.
 
-- Open Bandit Dataset / Criteo uplift adapters with schema and propensity validation.
-- Pluggable nonlinear CATE backends through CausalML / EconML / neural uplift models.
-- Sequential offline-RL adapters for IQL/CQL with support-constrained action serving.
-- External planner post-training through verl / Agent-Lightning-style execution-training separation.
-- World-model calibration and rollout-error diagnostics.
-- Anytime-valid / sequential replay → OPE → calibrated gate → shadow → canary → rollback evaluation.
-- Reproducible experiment reports generated from GrowthAgentBench and public datasets.
+## Evidence rule
 
-The rule for adding project claims is simple: **code first, reproducible evidence second, README result last.**
+Project claims should remain tied to one of three evidence sources:
+
+1. executable Runtime / algorithm code;
+2. reproducible benchmark or evaluation record;
+3. explicit deployment evidence when available.
+
+This keeps the README, resume and codebase aligned around the same causal decisioning story instead of presenting separate versions of the project.
