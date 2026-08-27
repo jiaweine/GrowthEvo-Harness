@@ -94,6 +94,24 @@ def _beta_fixture() -> list[LoggedBanditRecord]:
     return rows
 
 
+def _constant_calibration_records(count: int) -> list[ConformalCalibrationRecord]:
+    return [
+        ConformalCalibrationRecord(
+            predicted_value_delta=0.20,
+            observed_value_delta=0.15,
+            predicted_roi=2.0,
+            observed_roi=1.8,
+            predicted_spend=50.0,
+            observed_spend=55.0,
+            predicted_fatigue=0.30,
+            observed_fatigue=0.35,
+            predicted_churn_risk=0.20,
+            observed_churn_risk=0.24,
+        )
+        for _ in range(count)
+    ]
+
+
 def test_beta_diagnostic_is_not_silently_applied_on_evaluation_data() -> None:
     rows = _beta_fixture()
     estimate = evaluate_policy(rows)
@@ -146,21 +164,11 @@ def test_ope_reports_importance_mass_support_gap() -> None:
 
 
 def test_conformal_margins_are_residual_margins_not_absolute_bounds() -> None:
-    calibration = ConformalPolicyCalibrator(alpha=0.05, min_calibration_size=30).fit(
-        ConformalCalibrationRecord(
-            predicted_value_delta=0.20,
-            observed_value_delta=0.15,
-            predicted_roi=2.0,
-            observed_roi=1.8,
-            predicted_spend=50.0,
-            observed_spend=55.0,
-            predicted_fatigue=0.30,
-            observed_fatigue=0.35,
-            predicted_churn_risk=0.20,
-            observed_churn_risk=0.24,
-        )
-        for _ in range(30)
-    )
+    calibration = ConformalPolicyCalibrator(
+        alpha=0.05,
+        simultaneous=True,
+        min_calibration_size=100,
+    ).fit(_constant_calibration_records(100))
 
     assert calibration.value_lower_margin == pytest.approx(0.05)
     assert calibration.roi_lower_margin == pytest.approx(0.20)
@@ -168,12 +176,22 @@ def test_conformal_margins_are_residual_margins_not_absolute_bounds() -> None:
     assert calibration.fatigue_upper_margin == pytest.approx(0.05)
     assert calibration.churn_risk_upper_margin == pytest.approx(0.04)
     assert calibration.per_metric_alpha == pytest.approx(0.01)
+    assert calibration.simultaneous is True
+    assert calibration.metric_count == 5
+    assert calibration.quantile_rank == 100
 
     assert calibration.value_lcb(0.20) == pytest.approx(0.15)
     assert calibration.roi_lcb(2.0) == pytest.approx(1.8)
     assert calibration.spend_ucb(50.0) == pytest.approx(55.0)
     assert calibration.fatigue_ucb(0.30) == pytest.approx(0.35)
     assert calibration.churn_risk_ucb(0.20) == pytest.approx(0.24)
+
+
+def test_conformal_rejects_unattainable_finite_sample_error_budget() -> None:
+    calibrator = ConformalPolicyCalibrator(alpha=0.05, simultaneous=True)
+
+    with pytest.raises(ValueError, match="cannot support the requested finite-sample"):
+        calibrator.fit(_constant_calibration_records(30))
 
 
 def test_conformal_simultaneous_gate_is_stricter_than_marginal_calibration() -> None:
@@ -195,16 +213,18 @@ def test_conformal_simultaneous_gate_is_stricter_than_marginal_calibration() -> 
 
     simultaneous = ConformalPolicyCalibrator(
         alpha=0.05,
+        simultaneous=True,
         min_calibration_size=30,
     ).fit(records)
     marginal = ConformalPolicyCalibrator(
         alpha=0.05,
-        min_calibration_size=30,
         simultaneous=False,
+        min_calibration_size=30,
     ).fit(records)
 
     assert simultaneous.per_metric_alpha == pytest.approx(0.01)
     assert marginal.per_metric_alpha == pytest.approx(0.05)
+    assert simultaneous.quantile_rank > marginal.quantile_rank
     assert simultaneous.value_lower_margin > marginal.value_lower_margin
 
 
@@ -229,21 +249,11 @@ def test_unconfigured_verifier_fails_closed() -> None:
 
 
 def test_conformal_gate_can_block_statistically_positive_candidate() -> None:
-    calibration = ConformalPolicyCalibrator(alpha=0.05, min_calibration_size=30).fit(
-        ConformalCalibrationRecord(
-            predicted_value_delta=0.20,
-            observed_value_delta=0.15,
-            predicted_roi=2.0,
-            observed_roi=1.8,
-            predicted_spend=50.0,
-            observed_spend=55.0,
-            predicted_fatigue=0.30,
-            observed_fatigue=0.35,
-            predicted_churn_risk=0.20,
-            observed_churn_risk=0.24,
-        )
-        for _ in range(30)
-    )
+    calibration = ConformalPolicyCalibrator(
+        alpha=0.05,
+        simultaneous=True,
+        min_calibration_size=100,
+    ).fit(_constant_calibration_records(100))
     evidence = PolicyEvidence(
         candidate_value=1.20,
         baseline_value=1.00,
