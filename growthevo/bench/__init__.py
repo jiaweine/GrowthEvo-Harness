@@ -1,5 +1,6 @@
 """Benchmark fixtures and real-world dataset adapters for growth-policy research."""
 
+from .criteo import CriteoUpliftData, load_criteo_uplift
 from .kuairand_features import load_kuairand_user_features, load_kuairand_video_features
 from .offline_rl import (
     HistorySummary,
@@ -16,14 +17,12 @@ from .planner_sequences import (
     kuairand_to_planner_transitions,
 )
 from .real_world import (
-    CriteoUpliftData,
     DEFAULT_KUAIRAND_REWARD_WEIGHTS,
     KuaiRandInteraction,
     OpenBanditInteraction,
     RandomizedTargetingResult,
     evaluate_randomized_targeting,
     kuairand_reward,
-    load_criteo_uplift,
     load_kuairand,
     load_open_bandit,
 )
