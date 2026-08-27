@@ -32,13 +32,15 @@ def main() -> None:
     )
     enriched, uplift = bridge.enrich_observation(observation, (0.20, -0.10))
 
-    # Synthetic training smoke test only: explicitly opt into the Gaussian
-    # reference conversion from model uncertainty to pessimistic bounds. Real
-    # promotion should provide calibrated/inferential bounds instead.
+    # Synthetic training smoke test only: the trust region, Gaussian reference
+    # rule, and action-support classification are all declared explicitly. Real
+    # promotion should supply calibrated value/cost bounds and support decisions
+    # from its evaluation protocol instead.
     improver = SupportAnchoredPolicyImprover(
         SafePolicyImprovementConfig(
             max_total_variation=0.15,
             bound_mode="gaussian_reference",
+            confidence_z=1.96,
         )
     )
     policy = improver.improve(
@@ -57,6 +59,7 @@ def main() -> None:
                 behavior_probability=0.30,
                 expected_cost=0.04,
                 cost_uncertainty=0.005,
+                support_eligible=True,
             ),
             ActionValueEstimate(
                 action=Channel.EMAIL,
@@ -65,6 +68,7 @@ def main() -> None:
                 behavior_probability=0.25,
                 expected_cost=0.02,
                 cost_uncertainty=0.003,
+                support_eligible=True,
             ),
         ],
         max_expected_cost=0.05,
