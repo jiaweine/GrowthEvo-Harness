@@ -16,7 +16,7 @@ from growthevo.rl.conformal import (
     ConformalPolicyCalibrator,
 )
 from growthevo.rl.model_based import RiskSensitiveMPC
-from growthevo.rl.ope import LoggedBanditRecord, evaluate_policy
+from growthevo.rl.ope import LoggedBanditRecord, estimate_beta_coefficient, evaluate_policy
 from growthevo.rl.process_reward import (
     GrowthProcessRewardModel,
     ProcessState,
@@ -57,7 +57,7 @@ def _belief() -> CausalBelief:
     )
 
 
-def test_beta_star_ips_removes_linear_weight_variance() -> None:
+def _beta_fixture() -> list[LoggedBanditRecord]:
     rows = []
     for target_probability, reward in (
         (0.25, 0.0),
@@ -74,10 +74,29 @@ def test_beta_star_ips_removes_linear_weight_variance() -> None:
                 target_q=0.0,
             )
         )
+    return rows
+
+
+def test_beta_diagnostic_is_not_silently_applied_on_evaluation_data() -> None:
+    rows = _beta_fixture()
 
     estimate = evaluate_policy(rows)
 
     assert estimate.beta_star == pytest.approx(2.0)
+    assert estimate.beta_coefficient is None
+    assert estimate.beta_ips == pytest.approx(estimate.ips)
+    assert estimate.beta_ips_standard_error == pytest.approx(estimate.ips_standard_error)
+
+
+def test_beta_tuned_on_external_cohort_can_reduce_variance() -> None:
+    validation_rows = _beta_fixture()
+    evaluation_rows = _beta_fixture()
+    coefficient = estimate_beta_coefficient(validation_rows)
+
+    estimate = evaluate_policy(evaluation_rows, beta_coefficient=coefficient)
+
+    assert coefficient == pytest.approx(2.0)
+    assert estimate.beta_coefficient == pytest.approx(2.0)
     assert estimate.beta_ips == pytest.approx(1.0)
     assert estimate.beta_ips_standard_error == pytest.approx(0.0, abs=1e-12)
     assert estimate.ips_standard_error > estimate.beta_ips_standard_error
