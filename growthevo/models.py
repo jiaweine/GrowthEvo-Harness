@@ -102,6 +102,7 @@ def _validate_channel_diagnostics(
     channel_uplift: Mapping[Channel, float],
     channel_uncertainty: Mapping[Channel, float],
     channel_support: Mapping[Channel, float],
+    channel_effect_lower_bound: Mapping[Channel, float],
 ) -> None:
     for channel, uplift in channel_uplift.items():
         if channel is Channel.NO_TREATMENT:
@@ -117,6 +118,15 @@ def _validate_channel_diagnostics(
                 raise ValueError(f"NO_TREATMENT cannot appear in {name}")
             if not 0 <= value <= 1:
                 raise ValueError(f"{name} values must be in [0, 1]")
+    for channel, lower_bound in channel_effect_lower_bound.items():
+        if channel is Channel.NO_TREATMENT:
+            raise ValueError("NO_TREATMENT cannot have an effect lower bound")
+        if channel not in channel_uplift:
+            raise ValueError("effect lower bound requires a corresponding channel uplift")
+        if not -1 <= lower_bound <= 1:
+            raise ValueError("channel effect lower bounds must be in [-1, 1]")
+        if lower_bound > float(channel_uplift[channel]) + 1e-12:
+            raise ValueError("effect lower bound cannot exceed the point uplift estimate")
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +138,7 @@ class UserObservation:
     ltv: float
     channel_uncertainty: Mapping[Channel, float] = field(default_factory=dict)
     channel_support: Mapping[Channel, float] = field(default_factory=dict)
+    channel_effect_lower_bound: Mapping[Channel, float] = field(default_factory=dict)
     fatigue: float = 0.0
     churn_risk: float = 0.0
     touches_24h: int = 0
@@ -160,6 +171,7 @@ class UserObservation:
             channel_uplift=self.channel_uplift,
             channel_uncertainty=self.channel_uncertainty,
             channel_support=self.channel_support,
+            channel_effect_lower_bound=self.channel_effect_lower_bound,
         )
 
 
@@ -180,6 +192,7 @@ class CausalBelief:
     consented_channels: frozenset[Channel]
     channel_uncertainty: Mapping[Channel, float] = field(default_factory=dict)
     channel_support: Mapping[Channel, float] = field(default_factory=dict)
+    channel_effect_lower_bound: Mapping[Channel, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.user_id:
@@ -190,6 +203,7 @@ class CausalBelief:
             channel_uplift=self.channel_uplift,
             channel_uncertainty=self.channel_uncertainty,
             channel_support=self.channel_support,
+            channel_effect_lower_bound=self.channel_effect_lower_bound,
         )
 
     def uplift_for(self, channel: Channel) -> float:
@@ -206,6 +220,12 @@ class CausalBelief:
         if channel is Channel.NO_TREATMENT:
             return 1.0
         return float(self.channel_support.get(channel, 1.0))
+
+    def effect_lower_bound_for(self, channel: Channel) -> float | None:
+        if channel is Channel.NO_TREATMENT:
+            return 0.0
+        value = self.channel_effect_lower_bound.get(channel)
+        return None if value is None else float(value)
 
 
 @dataclass(frozen=True, slots=True)
