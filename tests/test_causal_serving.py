@@ -62,7 +62,7 @@ def test_serving_bridge_only_exposes_support_when_provider_is_injected() -> None
     fitted = _fitted(0.20)
     bridge = CausalUpliftServingBridge(
         {Channel.PUSH: fitted},
-        support_score_provider=lambda channel, estimate: 0.75,
+        support_score_provider=lambda channel, estimate, features: 0.75,
     )
     observation = UserObservation(
         user_id="u",
@@ -78,6 +78,23 @@ def test_serving_bridge_only_exposes_support_when_provider_is_injected() -> None
     assert prediction.channel_support[Channel.PUSH] == pytest.approx(0.75)
     assert prediction.minimum_support == pytest.approx(0.75)
     assert enriched.channel_support[Channel.PUSH] == pytest.approx(0.75)
+
+
+def test_serving_support_provider_receives_current_feature_context() -> None:
+    fitted = _fitted(0.20)
+    bridge = CausalUpliftServingBridge(
+        {Channel.PUSH: fitted},
+        support_score_provider=lambda channel, estimate, features: float(features[0] < 1.0),
+    )
+
+    supported = bridge.predict((0.25,))
+    unsupported = bridge.predict((1.75,))
+
+    assert supported.channel_effects[Channel.PUSH] == pytest.approx(
+        unsupported.channel_effects[Channel.PUSH], abs=1e-3
+    )
+    assert supported.channel_support[Channel.PUSH] == pytest.approx(1.0)
+    assert unsupported.channel_support[Channel.PUSH] == pytest.approx(0.0)
 
 
 def test_serving_bridge_only_exposes_effect_bound_when_provider_is_injected() -> None:
@@ -106,7 +123,7 @@ def test_serving_bridge_rejects_invalid_support_score() -> None:
     fitted = _fitted(0.20)
     bridge = CausalUpliftServingBridge(
         {Channel.PUSH: fitted},
-        support_score_provider=lambda channel, estimate: 1.1,
+        support_score_provider=lambda channel, estimate, features: 1.1,
     )
 
     with pytest.raises(ValueError, match="support-score provider"):
