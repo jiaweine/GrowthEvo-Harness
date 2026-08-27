@@ -8,6 +8,7 @@ from .offline_rl import (
     default_kuairand_state_builder,
     kuairand_to_offline_rl,
 )
+from .open_bandit_ope import open_bandit_to_ope
 from .planner_sequences import (
     KuaiRandHistory,
     default_planner_observation,
@@ -24,7 +25,6 @@ from .real_world import (
     load_criteo_uplift,
     load_kuairand,
     load_open_bandit,
-    open_bandit_to_ope,
 )
 from .runner import GrowthAgentBench, PolicyBenchmarkResult
 from .statistics import TargetingBootstrapResult, bootstrap_randomized_targeting
