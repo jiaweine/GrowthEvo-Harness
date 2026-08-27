@@ -8,6 +8,7 @@ from .offline_rl import (
     default_kuairand_state_builder,
     kuairand_to_offline_rl,
 )
+from .open_bandit_features import load_open_bandit_item_context
 from .open_bandit_ope import open_bandit_to_ope
 from .planner_sequences import (
     KuaiRandHistory,
@@ -64,6 +65,7 @@ __all__ = [
     "load_kuairand_user_features",
     "load_kuairand_video_features",
     "load_open_bandit",
+    "load_open_bandit_item_context",
     "make_synthetic_growth_bandit",
     "open_bandit_to_ope",
     "oracle_policy_value",
