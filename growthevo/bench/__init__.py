@@ -27,6 +27,7 @@ from .real_world import (
     load_open_bandit,
 )
 from .runner import GrowthAgentBench, PolicyBenchmarkResult
+from .splits import DatasetSplit, deterministic_stratified_split, ordered_split
 from .statistics import TargetingBootstrapResult, bootstrap_randomized_targeting
 from .synthetic import (
     CATEBenchmarkResult,
@@ -40,6 +41,7 @@ __all__ = [
     "CATEBenchmarkResult",
     "CriteoUpliftData",
     "DEFAULT_KUAIRAND_REWARD_WEIGHTS",
+    "DatasetSplit",
     "GrowthAgentBench",
     "HistorySummary",
     "KuaiRandHistory",
@@ -54,6 +56,7 @@ __all__ = [
     "bootstrap_randomized_targeting",
     "default_kuairand_state_builder",
     "default_planner_observation",
+    "deterministic_stratified_split",
     "evaluate_cate",
     "evaluate_randomized_targeting",
     "kuairand_reward",
@@ -68,4 +71,5 @@ __all__ = [
     "make_synthetic_growth_bandit",
     "open_bandit_to_ope",
     "oracle_policy_value",
+    "ordered_split",
 ]
