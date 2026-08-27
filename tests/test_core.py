@@ -33,6 +33,7 @@ def _observation(**overrides: object) -> UserObservation:
         "natural_conversion": 0.20,
         "channel_uplift": {Channel.PUSH: 0.08, Channel.EMAIL: 0.04},
         "uplift_uncertainty": 0.05,
+        "channel_support": {Channel.PUSH: 0.90, Channel.EMAIL: 0.80},
         "ltv": 100.0,
         "fatigue": 0.10,
         "churn_risk": 0.10,
@@ -79,6 +80,7 @@ def test_low_incremental_value_abstains_even_when_natural_conversion_is_high() -
         _observation(
             natural_conversion=0.95,
             channel_uplift={Channel.PUSH: 0.001},
+            channel_support={Channel.PUSH: 0.90},
             ltv=10.0,
             days_since_last_active=0,
             lifecycle_stage="active",
