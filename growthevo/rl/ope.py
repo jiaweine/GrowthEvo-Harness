@@ -38,21 +38,12 @@ class LoggedBanditRecord:
 class OPEEstimate:
     """Counterfactual policy-value estimates plus overlap diagnostics.
 
-    Robustness and control-variate coefficients are never silently tuned on the
-    evaluation cohort. ``switch_threshold``, ``dr_os_lambda``, and
-    ``beta_coefficient`` must be selected on validation data and passed in.
-    Missing SWITCH/shrinkage parameters reduce to ordinary DR; a missing beta
-    coefficient reduces beta-IPS to ordinary IPS.
-
-    ``beta_star`` is retained only as an evaluation-cohort diagnostic showing
-    the variance-minimising empirical coefficient one *would* obtain on this
-    cohort. It is deliberately not applied to ``beta_ips`` unless the caller
-    explicitly passes a coefficient.
-
-    Standard errors are i.i.d. by default. If every record supplies a
-    ``cluster_id``, cluster-robust standard errors are computed from cluster-level
-    influence sums. The clustering unit is deliberately supplied by the data
-    protocol rather than hard-coded into the estimator.
+    Robustness/control-variate parameters and practical support thresholds are
+    experiment-protocol choices. Missing SWITCH/shrinkage parameters reduce to
+    ordinary DR, a missing beta coefficient reduces beta-IPS to IPS, and a
+    missing practical propensity floor means no practical-support claim has been
+    made. Such an estimate can be inspected but cannot be compiled into promotion
+    evidence until a support protocol is supplied.
     """
 
     direct_method: float
@@ -75,6 +66,7 @@ class OPEEstimate:
     cluster_count: int | None
     switch_threshold: float | None
     dr_os_lambda: float | None
+    support_propensity_floor: float | None
     effective_sample_size: float
     effective_sample_ratio: float
     support_coverage: float
@@ -158,20 +150,19 @@ def estimate_beta_coefficient(records: Iterable[LoggedBanditRecord]) -> float:
 def evaluate_policy(
     records: Iterable[LoggedBanditRecord],
     *,
-    support_propensity_floor: float = 1e-3,
+    support_propensity_floor: float | None = None,
     switch_threshold: float | None = None,
     dr_os_lambda: float | None = None,
     beta_coefficient: float | None = None,
 ) -> OPEEstimate:
     """Evaluate a target policy from logged contextual-bandit feedback.
 
-    The estimator never guesses an independence unit. Leave ``cluster_id`` empty
-    for conventional i.i.d. standard errors, or provide it on every record to
-    obtain cluster-robust uncertainty under a protocol-defined grouping.
+    The estimator never guesses an independence unit or practical support floor.
+    ``cluster_id`` and ``support_propensity_floor`` are both protocol inputs.
     """
 
-    if not 0 < support_propensity_floor <= 1:
-        raise ValueError("support_propensity_floor must be in (0, 1]")
+    if support_propensity_floor is not None and not 0 < support_propensity_floor <= 1:
+        raise ValueError("support_propensity_floor must be in (0, 1] when provided")
     if switch_threshold is not None and (
         not isfinite(switch_threshold) or switch_threshold <= 0
     ):
@@ -266,11 +257,14 @@ def evaluate_policy(
     weight_std = sqrt(max(0.0, _sample_variance(weights))) if n > 1 else 0.0
     weight_cv = weight_std / mean_weight if abs(mean_weight) > 1e-15 else float("inf")
 
-    support_mask = [
-        row.target_action_probability == 0.0
-        or row.behavior_propensity >= support_propensity_floor
-        for row in rows
-    ]
+    if support_propensity_floor is None:
+        support_mask = [True for _ in rows]
+    else:
+        support_mask = [
+            row.target_action_probability == 0.0
+            or row.behavior_propensity >= support_propensity_floor
+            for row in rows
+        ]
     supported_records = sum(support_mask)
     supported_importance_mass = fsum(
         weight
@@ -302,6 +296,7 @@ def evaluate_policy(
         cluster_count=cluster_count,
         switch_threshold=switch_threshold,
         dr_os_lambda=dr_os_lambda,
+        support_propensity_floor=support_propensity_floor,
         effective_sample_size=ess,
         effective_sample_ratio=ess / n,
         support_coverage=max(0.0, min(1.0, support_coverage)),
@@ -332,7 +327,12 @@ def policy_evidence_from_ope(
         "beta_ips",
     ] = "doubly_robust",
 ) -> PolicyEvidence:
-    """Compile OPE output into the verifier's evidence contract."""
+    """Compile OPE output into verifier evidence only after support is declared."""
+
+    if estimate.support_propensity_floor is None:
+        raise ValueError(
+            "policy evidence requires an explicit practical support propensity floor"
+        )
 
     if estimator == "direct_method":
         value = estimate.direct_method
