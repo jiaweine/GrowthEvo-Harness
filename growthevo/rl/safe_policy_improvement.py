@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import fsum
+from math import fsum, isfinite
 from typing import Iterable, Literal, Mapping
 
 from growthevo.models import Channel
@@ -9,11 +9,13 @@ from growthevo.models import Channel
 
 @dataclass(frozen=True, slots=True)
 class ActionValueEstimate:
-    """Pessimistic inputs for one discrete growth action.
+    """Inputs for one discrete action plus optional calibrated bounds.
 
-    ``value_uncertainty`` and ``cost_uncertainty`` are diagnostics supplied by
-    the caller. They become lower/upper bounds inside the policy improver; the
-    caller remains responsible for upstream calibration.
+    ``value_uncertainty`` and ``cost_uncertainty`` remain model diagnostics. They
+    are converted to Gaussian-style bounds only when the experiment explicitly
+    opts into ``gaussian_reference`` mode. The default safety path consumes
+    caller-provided lower/upper bounds instead of inventing statistical meaning
+    for an arbitrary uncertainty score.
     """
 
     action: Channel
@@ -22,16 +24,40 @@ class ActionValueEstimate:
     behavior_probability: float
     expected_cost: float = 0.0
     cost_uncertainty: float = 0.0
+    value_lower_bound: float | None = None
+    cost_upper_bound: float | None = None
 
     def __post_init__(self) -> None:
+        for name, value in (
+            ("value", self.value),
+            ("value_uncertainty", self.value_uncertainty),
+            ("behavior_probability", self.behavior_probability),
+            ("expected_cost", self.expected_cost),
+            ("cost_uncertainty", self.cost_uncertainty),
+        ):
+            if not isfinite(value):
+                raise ValueError(f"{name} must be finite")
         if self.value_uncertainty < 0 or self.cost_uncertainty < 0:
             raise ValueError("uncertainty values must be non-negative")
         if not 0 <= self.behavior_probability <= 1:
             raise ValueError("behavior_probability must be in [0, 1]")
         if self.expected_cost < 0:
             raise ValueError("expected_cost must be non-negative")
-        if self.action is Channel.NO_TREATMENT and self.expected_cost != 0.0:
-            raise ValueError("NO_TREATMENT expected_cost must be zero")
+        if self.value_lower_bound is not None:
+            if not isfinite(self.value_lower_bound):
+                raise ValueError("value_lower_bound must be finite")
+            if self.value_lower_bound > self.value + 1e-12:
+                raise ValueError("value_lower_bound cannot exceed the point estimate")
+        if self.cost_upper_bound is not None:
+            if not isfinite(self.cost_upper_bound) or self.cost_upper_bound < 0:
+                raise ValueError("cost_upper_bound must be finite and non-negative")
+            if self.cost_upper_bound + 1e-12 < self.expected_cost:
+                raise ValueError("cost_upper_bound cannot be below the point estimate")
+        if self.action is Channel.NO_TREATMENT:
+            if self.expected_cost != 0.0:
+                raise ValueError("NO_TREATMENT expected_cost must be zero")
+            if self.cost_upper_bound not in {None, 0.0}:
+                raise ValueError("NO_TREATMENT cost_upper_bound must be zero when provided")
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,10 +67,11 @@ class SafePolicyImprovementConfig:
     max_total_variation: float = 0.20
     min_pessimistic_improvement: float = 0.0
     unsupported_action_mode: Literal["freeze", "no_increase"] = "freeze"
+    bound_mode: Literal["provided", "gaussian_reference"] = "provided"
 
     def __post_init__(self) -> None:
-        if self.confidence_z < 0:
-            raise ValueError("confidence_z must be non-negative")
+        if self.confidence_z < 0 or not isfinite(self.confidence_z):
+            raise ValueError("confidence_z must be a non-negative finite value")
         if not 0 < self.support_floor <= 1:
             raise ValueError("support_floor must be in (0, 1]")
         if not 0 <= self.max_total_variation <= 1:
@@ -69,19 +96,12 @@ class PolicyImprovementResult:
 class SupportAnchoredPolicyImprover:
     """Contract an arbitrary learned proposal toward the logging policy.
 
-    Policy learning and safety anchoring are deliberately separated. A caller
-    may provide a proposal from a contextual bandit, neural policy, planner, or
-    any other optimizer. The safety kernel then:
-
-    * bootstraps low-support actions to the behavior policy;
-    * limits the total-variation move away from behavior;
-    * enforces a pessimistic expected-cost upper bound;
-    * refuses updates whose post-constraint lower-bound gain is too small.
-
-    If no proposal is supplied, a pessimistic greedy proposal is constructed as
-    a small reference behavior. Real experiments should normally pass the policy
-    actually learned by the upstream algorithm rather than relying on that
-    fallback proposal.
+    This is a support-anchoring kernel, not a theorem generator. In default
+    ``provided`` mode, upstream evaluation must supply action-value lower bounds
+    and, when a hard expected-cost cap is requested, cost upper bounds. The
+    optional ``gaussian_reference`` mode exists for controlled experiments but
+    must be selected explicitly because model uncertainty is not automatically a
+    calibrated confidence interval.
     """
 
     def __init__(self, config: SafePolicyImprovementConfig | None = None) -> None:
@@ -103,6 +123,53 @@ class SupportAnchoredPolicyImprover:
         if abs(fsum(result.values()) - 1.0) > 1e-6:
             raise ValueError(f"{name} probabilities must sum to 1")
         return result
+
+    def _value_bounds(self, rows: list[ActionValueEstimate]) -> dict[Channel, float]:
+        cfg = self.config
+        if cfg.bound_mode == "gaussian_reference":
+            return {
+                row.action: row.value - cfg.confidence_z * row.value_uncertainty
+                for row in rows
+            }
+        missing = [row.action.value for row in rows if row.value_lower_bound is None]
+        if missing:
+            raise ValueError(
+                "provided bound mode requires value_lower_bound for every action; "
+                f"missing={sorted(missing)}"
+            )
+        return {
+            row.action: float(row.value_lower_bound)
+            for row in rows
+            if row.value_lower_bound is not None
+        }
+
+    def _cost_bounds(
+        self,
+        rows: list[ActionValueEstimate],
+        *,
+        require_bound: bool,
+    ) -> dict[Channel, float]:
+        cfg = self.config
+        if cfg.bound_mode == "gaussian_reference":
+            return {
+                row.action: row.expected_cost + cfg.confidence_z * row.cost_uncertainty
+                for row in rows
+            }
+        if require_bound:
+            missing = [row.action.value for row in rows if row.cost_upper_bound is None]
+            if missing:
+                raise ValueError(
+                    "hard expected-cost constraints require cost_upper_bound for every action; "
+                    f"missing={sorted(missing)}"
+                )
+        return {
+            row.action: (
+                float(row.cost_upper_bound)
+                if row.cost_upper_bound is not None
+                else row.expected_cost
+            )
+            for row in rows
+        }
 
     def _anchor_proposal(
         self,
@@ -138,7 +205,7 @@ class SupportAnchoredPolicyImprover:
             }
         else:
             behavior_mass = fsum(behavior[action] for action in supported)
-            if behavior_mass <= 1e-15:  # NO_TREATMENT makes this defensive only.
+            if behavior_mass <= 1e-15:
                 raise ValueError("supported action mass must be positive")
             supported_reference = {
                 action: behavior[action] / behavior_mass for action in supported
@@ -193,13 +260,8 @@ class SupportAnchoredPolicyImprover:
             actions,
             name="behavior",
         )
-        value_lcb = {
-            row.action: row.value - cfg.confidence_z * row.value_uncertainty for row in rows
-        }
-        cost_ucb = {
-            row.action: row.expected_cost + cfg.confidence_z * row.cost_uncertainty
-            for row in rows
-        }
+        value_lcb = self._value_bounds(rows)
+        cost_ucb = self._cost_bounds(rows, require_bound=max_expected_cost is not None)
         baseline_value = self._policy_value(behavior, value_lcb)
         baseline_cost = self._policy_value(behavior, cost_ucb)
 
@@ -257,6 +319,8 @@ class SupportAnchoredPolicyImprover:
             reasons.append("low_support_actions_anchored")
         if support_constrained:
             reasons.append("proposal_support_constraint_active")
+        if cfg.bound_mode == "gaussian_reference":
+            reasons.append("gaussian_reference_bounds_used")
 
         direction_tv = self._total_variation(behavior, anchored)
         if direction_tv <= 1e-15:
