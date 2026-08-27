@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from growthevo.bench import kuairand_to_offline_rl, load_kuairand
+from growthevo.bench import (
+    DEFAULT_KUAIRAND_REWARD_WEIGHTS,
+    kuairand_to_offline_rl,
+    load_kuairand,
+)
 
 
 def _fixture(tmp_path: Path) -> Path:
@@ -23,9 +27,24 @@ def _fixture(tmp_path: Path) -> Path:
     return path
 
 
+def _dataset(rows, **kwargs):
+    return kuairand_to_offline_rl(
+        rows,
+        reward_weights=DEFAULT_KUAIRAND_REWARD_WEIGHTS,
+        **kwargs,
+    )
+
+
+def test_offline_rl_requires_explicit_reward_definition(tmp_path: Path) -> None:
+    rows = load_kuairand(_fixture(tmp_path))
+
+    with pytest.raises(ValueError, match="exactly one"):
+        kuairand_to_offline_rl(rows)
+
+
 def test_offline_rl_state_excludes_logging_mechanism_and_raw_identifier(tmp_path: Path) -> None:
     rows = load_kuairand(_fixture(tmp_path))
-    dataset = kuairand_to_offline_rl(rows, max_steps_per_segment=10)
+    dataset = _dataset(rows, max_steps_per_segment=10)
 
     first, second, third = dataset.transitions
     assert "random_intervention" not in first.state
@@ -46,7 +65,7 @@ def test_offline_rl_state_excludes_logging_mechanism_and_raw_identifier(tmp_path
 
 def test_offline_rl_segment_boundary_bootstraps_instead_of_faking_terminal(tmp_path: Path) -> None:
     rows = load_kuairand(_fixture(tmp_path))
-    dataset = kuairand_to_offline_rl(rows, max_steps_per_segment=2)
+    dataset = _dataset(rows, max_steps_per_segment=2)
 
     boundary = dataset.transitions[1]
     next_segment = dataset.transitions[2]
@@ -67,7 +86,7 @@ def test_offline_rl_segment_boundary_bootstraps_instead_of_faking_terminal(tmp_p
 
 def test_offline_rl_export_keeps_multi_feedback_for_analysis(tmp_path: Path) -> None:
     rows = load_kuairand(_fixture(tmp_path))
-    dataset = kuairand_to_offline_rl(rows)
+    dataset = _dataset(rows)
 
     first = dataset.transitions[0]
     assert first.feedback["is_click"] == pytest.approx(1.0)
@@ -77,11 +96,12 @@ def test_offline_rl_export_keeps_multi_feedback_for_analysis(tmp_path: Path) -> 
     assert '"action_id": 10' in payload
     assert '"terminated": false' in payload
     assert '"bootstrap_allowed": true' in payload
+    assert '"candidate_action_ids": []' in payload
 
 
 def test_offline_rl_export_accepts_representation_features(tmp_path: Path) -> None:
     rows = load_kuairand(_fixture(tmp_path))
-    dataset = kuairand_to_offline_rl(
+    dataset = _dataset(
         rows,
         user_feature_lookup={1: {"activity": "high", "followers": 12}},
         action_feature_lookup={
@@ -107,7 +127,7 @@ def test_offline_rl_state_builder_is_injectable(tmp_path: Path) -> None:
             "profile": user_features.get("profile", "unknown"),
         }
 
-    dataset = kuairand_to_offline_rl(
+    dataset = _dataset(
         rows,
         user_feature_lookup={1: {"profile": "frequent"}},
         state_builder=build_state,
@@ -119,3 +139,22 @@ def test_offline_rl_state_builder_is_injectable(tmp_path: Path) -> None:
         "profile": "frequent",
     }
     assert dataset.transitions[1].state["history"] == 1
+
+
+def test_offline_rl_candidate_set_is_protocol_defined_and_contains_logged_action(tmp_path: Path) -> None:
+    rows = load_kuairand(_fixture(tmp_path))
+    dataset = _dataset(
+        rows,
+        candidate_provider=lambda row, history: (row.video_id, 100 + history.count),
+    )
+
+    assert dataset.transitions[0].candidate_action_ids == (10, 100)
+    assert dataset.transitions[1].candidate_action_ids == (11, 101)
+    assert dataset.candidate_set_coverage == pytest.approx(1.0)
+
+
+def test_offline_rl_rejects_candidate_set_missing_logged_action(tmp_path: Path) -> None:
+    rows = load_kuairand(_fixture(tmp_path))
+
+    with pytest.raises(ValueError, match="contain the logged action"):
+        _dataset(rows, candidate_provider=lambda row, history: (999,))
