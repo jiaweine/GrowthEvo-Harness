@@ -36,6 +36,50 @@ def test_serving_bridge_clips_probability_uplift_and_preserves_raw_effect() -> N
     assert prediction.channel_effect_lower_bound == {}
 
 
+def test_model_overlap_diagnostic_is_not_promoted_to_runtime_support_by_default() -> None:
+    fitted = _fitted(0.20)
+    observation = UserObservation(
+        user_id="u",
+        natural_conversion=0.1,
+        channel_uplift={Channel.PUSH: 0.0},
+        uplift_uncertainty=1.0,
+        ltv=100.0,
+        consented_channels=frozenset({Channel.PUSH}),
+    )
+
+    enriched, prediction = CausalUpliftServingBridge({Channel.PUSH: fitted}).enrich_observation(
+        observation,
+        (1.0,),
+    )
+
+    assert prediction.model_support_diagnostics[Channel.PUSH] == pytest.approx(1.0)
+    assert prediction.channel_support == {}
+    assert enriched.channel_support == {}
+    assert enriched.channel_uplift[Channel.PUSH] > 0
+
+
+def test_serving_bridge_only_exposes_support_when_provider_is_injected() -> None:
+    fitted = _fitted(0.20)
+    bridge = CausalUpliftServingBridge(
+        {Channel.PUSH: fitted},
+        support_score_provider=lambda channel, estimate: 0.75,
+    )
+    observation = UserObservation(
+        user_id="u",
+        natural_conversion=0.1,
+        channel_uplift={Channel.PUSH: 0.0},
+        uplift_uncertainty=1.0,
+        ltv=100.0,
+        consented_channels=frozenset({Channel.PUSH}),
+    )
+
+    enriched, prediction = bridge.enrich_observation(observation, (1.0,))
+
+    assert prediction.channel_support[Channel.PUSH] == pytest.approx(0.75)
+    assert prediction.minimum_support == pytest.approx(0.75)
+    assert enriched.channel_support[Channel.PUSH] == pytest.approx(0.75)
+
+
 def test_serving_bridge_only_exposes_effect_bound_when_provider_is_injected() -> None:
     fitted = _fitted(0.20)
     bridge = CausalUpliftServingBridge(
@@ -56,6 +100,17 @@ def test_serving_bridge_only_exposes_effect_bound_when_provider_is_injected() ->
     assert prediction.channel_effects[Channel.PUSH] == pytest.approx(0.20, abs=1e-3)
     assert prediction.channel_effect_lower_bound[Channel.PUSH] == pytest.approx(0.15, abs=1e-3)
     assert enriched.channel_effect_lower_bound[Channel.PUSH] == pytest.approx(0.15, abs=1e-3)
+
+
+def test_serving_bridge_rejects_invalid_support_score() -> None:
+    fitted = _fitted(0.20)
+    bridge = CausalUpliftServingBridge(
+        {Channel.PUSH: fitted},
+        support_score_provider=lambda channel, estimate: 1.1,
+    )
+
+    with pytest.raises(ValueError, match="support-score provider"):
+        bridge.predict((1.0,))
 
 
 def test_serving_bridge_rejects_invalid_lower_bound_above_point_estimate() -> None:
