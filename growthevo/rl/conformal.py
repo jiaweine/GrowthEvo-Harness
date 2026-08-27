@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil
+from math import ceil, isfinite
 from typing import Iterable
 
 
@@ -27,25 +27,44 @@ class ConformalCalibrationRecord:
     predicted_churn_risk: float
     observed_churn_risk: float
 
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("predicted_value_delta", self.predicted_value_delta),
+            ("observed_value_delta", self.observed_value_delta),
+            ("predicted_roi", self.predicted_roi),
+            ("observed_roi", self.observed_roi),
+            ("predicted_spend", self.predicted_spend),
+            ("observed_spend", self.observed_spend),
+            ("predicted_fatigue", self.predicted_fatigue),
+            ("observed_fatigue", self.observed_fatigue),
+            ("predicted_churn_risk", self.predicted_churn_risk),
+            ("observed_churn_risk", self.observed_churn_risk),
+        ):
+            if not isfinite(value):
+                raise ValueError(f"{name} must be finite")
+
 
 @dataclass(frozen=True, slots=True)
 class ConformalMargins:
     """One-sided non-negative error margins, not absolute metric bounds.
 
     ``alpha`` is the requested gate-level error budget. ``per_metric_alpha`` is
-    the marginal level used when simultaneous calibration is enabled. The number
-    of calibrated metrics is derived from the actual residual collection rather
-    than duplicated as a separate constant.
+    the marginal level actually used by the calibration rule. ``quantile_rank``
+    records the finite-sample order statistic used for every metric so a
+    verifier/audit artifact can reconstruct the calibration decision.
     """
 
     alpha: float
     calibration_size: int
+    simultaneous: bool
+    metric_count: int
+    per_metric_alpha: float
+    quantile_rank: int
     value_lower_margin: float
     roi_lower_margin: float
     spend_upper_margin: float
     fatigue_upper_margin: float
     churn_risk_upper_margin: float
-    per_metric_alpha: float | None = None
 
     def value_lcb(self, predicted_delta: float) -> float:
         return predicted_delta - self.value_lower_margin
@@ -63,45 +82,71 @@ class ConformalMargins:
         return predicted_churn_risk + self.churn_risk_upper_margin
 
 
-def _conservative_quantile(residuals: list[float], alpha: float) -> float:
-    """Finite-sample split-conformal one-sided quantile."""
+def _conformal_rank(calibration_size: int, alpha: float) -> int:
+    if calibration_size <= 0:
+        raise ValueError("calibration_size must be positive")
+    if not 0 < alpha < 1:
+        raise ValueError("alpha must be in (0, 1)")
+    return ceil((calibration_size + 1) * (1.0 - alpha))
+
+
+def _conservative_quantile(
+    residuals: list[float],
+    *,
+    alpha: float,
+    rank: int,
+) -> float:
+    """Finite-sample split-conformal one-sided quantile without rank clipping."""
 
     if not residuals:
         raise ValueError("at least one calibration residual is required")
+    if rank > len(residuals):
+        raise ValueError(
+            "calibration cohort is too small for the requested conformal "
+            f"miscoverage: rank={rank}, calibration_size={len(residuals)}, alpha={alpha}"
+        )
     ordered = sorted(residuals)
-    rank = min(len(ordered), ceil((len(ordered) + 1) * (1.0 - alpha)))
     return max(0.0, ordered[rank - 1])
 
 
 class ConformalPolicyCalibrator:
-    """Calibrate simultaneous promotion bounds from matured policy cohorts.
+    """Calibrate promotion margins from matured policy cohorts.
 
-    Promotion checks several metrics at once. Reusing the full marginal error
-    budget independently for every metric does not preserve a gate-level error
-    budget, so simultaneous calibration is enabled by default. The Bonferroni
-    allocation is computed from the actual calibrated metric set.
+    Both the gate-level error budget and whether it should be allocated jointly
+    across metrics are experiment/deployment protocol choices and therefore have
+    no package defaults. ``min_calibration_size`` is an optional additional
+    operational evidence gate supplied by the caller; finite-sample conformal
+    feasibility is checked independently from the exact order-statistic rank.
+
+    With ``simultaneous=True`` this reference implementation uses Bonferroni
+    allocation over the actual calibrated metric set. This controls the family
+    error budget conservatively under the usual split-conformal exchangeability
+    assumptions without assuming independence between metrics.
     """
 
     def __init__(
         self,
-        alpha: float = 0.05,
-        min_calibration_size: int = 30,
         *,
-        simultaneous: bool = True,
+        alpha: float,
+        simultaneous: bool,
+        min_calibration_size: int | None = None,
     ) -> None:
-        if not 0 < alpha < 1:
-            raise ValueError("alpha must be in (0, 1)")
-        if min_calibration_size <= 0:
-            raise ValueError("min_calibration_size must be positive")
+        if not isfinite(alpha) or not 0 < alpha < 1:
+            raise ValueError("alpha must be a finite value in (0, 1)")
+        if min_calibration_size is not None and min_calibration_size <= 0:
+            raise ValueError("min_calibration_size must be positive when provided")
         self.alpha = alpha
         self.min_calibration_size = min_calibration_size
-        self.simultaneous = simultaneous
+        self.simultaneous = bool(simultaneous)
 
     def fit(self, records: Iterable[ConformalCalibrationRecord]) -> ConformalMargins:
         rows = list(records)
-        if len(rows) < self.min_calibration_size:
+        if not rows:
+            raise ValueError("at least one calibration cohort is required")
+        if self.min_calibration_size is not None and len(rows) < self.min_calibration_size:
             raise ValueError(
-                f"need at least {self.min_calibration_size} calibration cohorts, got {len(rows)}"
+                f"need at least {self.min_calibration_size} calibration cohorts by protocol, "
+                f"got {len(rows)}"
             )
 
         residuals = {
@@ -117,14 +162,33 @@ class ConformalPolicyCalibrator:
         if metric_count <= 0:  # pragma: no cover - defensive for future refactors.
             raise RuntimeError("no conformal metrics configured")
         per_metric_alpha = self.alpha / metric_count if self.simultaneous else self.alpha
+        rank = _conformal_rank(len(rows), per_metric_alpha)
+        if rank > len(rows):
+            raise ValueError(
+                "calibration cohort cannot support the requested finite-sample "
+                f"conformal error budget: gate_alpha={self.alpha}, "
+                f"per_metric_alpha={per_metric_alpha}, calibration_size={len(rows)}, "
+                f"required_rank={rank}. Increase calibration data or choose a different "
+                "pre-declared error allocation."
+            )
+
+        def margin(name: str) -> float:
+            return _conservative_quantile(
+                residuals[name],
+                alpha=per_metric_alpha,
+                rank=rank,
+            )
 
         return ConformalMargins(
             alpha=self.alpha,
             calibration_size=len(rows),
-            value_lower_margin=_conservative_quantile(residuals["value"], per_metric_alpha),
-            roi_lower_margin=_conservative_quantile(residuals["roi"], per_metric_alpha),
-            spend_upper_margin=_conservative_quantile(residuals["spend"], per_metric_alpha),
-            fatigue_upper_margin=_conservative_quantile(residuals["fatigue"], per_metric_alpha),
-            churn_risk_upper_margin=_conservative_quantile(residuals["churn"], per_metric_alpha),
+            simultaneous=self.simultaneous,
+            metric_count=metric_count,
             per_metric_alpha=per_metric_alpha,
+            quantile_rank=rank,
+            value_lower_margin=margin("value"),
+            roi_lower_margin=margin("roi"),
+            spend_upper_margin=margin("spend"),
+            fatigue_upper_margin=margin("fatigue"),
+            churn_risk_upper_margin=margin("churn"),
         )
