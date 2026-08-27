@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from json import dumps
-from math import fsum, sqrt
+from math import fsum, isfinite, sqrt
 from typing import Any, Iterable, Mapping
 
 
@@ -42,6 +42,15 @@ class PlannerTransition:
             raise ValueError("step_index must be non-negative")
         if not self.action:
             raise ValueError("action cannot be empty")
+        for name, value in (
+            ("reward", self.reward),
+            ("value_estimate", self.value_estimate),
+            ("next_value_estimate", self.next_value_estimate),
+        ):
+            if not isfinite(value):
+                raise ValueError(f"{name} must be finite")
+        if self.done and self.truncated:
+            raise ValueError("a transition cannot be both terminal and truncated")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +60,8 @@ class PlannerTrainingSample:
     action: str
     observation: Mapping[str, Any]
     reward: float
+    value_estimate: float
+    next_value_estimate: float
     raw_advantage: float
     advantage: float
     return_target: float
@@ -69,6 +80,8 @@ class PlannerTrainingBatch:
     advantage_std: float
     gamma: float
     gae_lambda: float
+    normalize_advantages: bool
+    require_contiguous_steps: bool
 
     def to_records(self) -> tuple[dict[str, Any], ...]:
         """Return backend-neutral dictionaries suitable for trainer adapters."""
@@ -80,6 +93,8 @@ class PlannerTrainingBatch:
                 "action": sample.action,
                 "observation": dict(sample.observation),
                 "reward": sample.reward,
+                "value_estimate": sample.value_estimate,
+                "next_value_estimate": sample.next_value_estimate,
                 "raw_advantage": sample.raw_advantage,
                 "advantage": sample.advantage,
                 "return_target": sample.return_target,
@@ -105,24 +120,28 @@ class TrajectoryTrainerAdapter:
     the next-state value bootstrap but does not propagate later rewards through a
     sequence boundary. This follows the standard distinction between termination
     and time-limit/data-window truncation.
+
+    ``gamma``, ``gae_lambda``, and advantage-normalization semantics are required
+    arguments. They belong to the training protocol and are not repository-wide
+    constants.
     """
 
     def __init__(
         self,
         *,
-        gamma: float = 0.99,
-        gae_lambda: float = 0.95,
-        normalize_advantages: bool = True,
+        gamma: float,
+        gae_lambda: float,
+        normalize_advantages: bool,
         require_contiguous_steps: bool = True,
     ) -> None:
-        if not 0 < gamma <= 1:
-            raise ValueError("gamma must be in (0, 1]")
-        if not 0 <= gae_lambda <= 1:
-            raise ValueError("gae_lambda must be in [0, 1]")
+        if not isfinite(gamma) or not 0 < gamma <= 1:
+            raise ValueError("gamma must be a finite value in (0, 1]")
+        if not isfinite(gae_lambda) or not 0 <= gae_lambda <= 1:
+            raise ValueError("gae_lambda must be a finite value in [0, 1]")
         self.gamma = gamma
         self.gae_lambda = gae_lambda
-        self.normalize_advantages = normalize_advantages
-        self.require_contiguous_steps = require_contiguous_steps
+        self.normalize_advantages = bool(normalize_advantages)
+        self.require_contiguous_steps = bool(require_contiguous_steps)
 
     def build(self, transitions: Iterable[PlannerTransition]) -> PlannerTrainingBatch:
         rows = list(transitions)
@@ -191,6 +210,8 @@ class TrajectoryTrainerAdapter:
                     action=row.action,
                     observation=row.observation,
                     reward=row.reward,
+                    value_estimate=row.value_estimate,
+                    next_value_estimate=row.next_value_estimate,
                     raw_advantage=raw_advantage,
                     advantage=advantage,
                     return_target=return_target,
@@ -210,4 +231,6 @@ class TrajectoryTrainerAdapter:
             advantage_std=std,
             gamma=self.gamma,
             gae_lambda=self.gae_lambda,
+            normalize_advantages=self.normalize_advantages,
+            require_contiguous_steps=self.require_contiguous_steps,
         )
