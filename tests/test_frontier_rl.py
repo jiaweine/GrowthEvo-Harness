@@ -15,7 +15,11 @@ from growthevo.rl.conformal import (
     ConformalCalibrationRecord,
     ConformalPolicyCalibrator,
 )
-from growthevo.rl.model_based import RiskSensitiveMPC
+from growthevo.rl.model_based import (
+    LongHorizonGrowthWorld,
+    RiskSensitiveMPC,
+    RiskSensitiveMPCConfig,
+)
 from growthevo.rl.ope import LoggedBanditRecord, estimate_beta_coefficient, evaluate_policy
 from growthevo.rl.process_reward import (
     GrowthProcessRewardModel,
@@ -411,7 +415,18 @@ def test_risk_sensitive_mpc_prefers_safe_holdout_to_budget_violating_plan() -> N
         uncertainty=0.01,
     )
     holdout = GrowthAction.no_treatment()
-    planner = RiskSensitiveMPC(rollouts=8, cvar_alpha=0.25, violation_penalty=2.0)
+    planner = RiskSensitiveMPC(
+        config=RiskSensitiveMPCConfig(
+            rollouts=8,
+            cvar_alpha=0.25,
+            violation_penalty=2.0,
+            max_violation_rate=0.50,
+            monte_carlo_delta=0.05,
+            gamma=0.99,
+            base_seed=101,
+        ),
+        world_factory=lambda seed: LongHorizonGrowthWorld(seed=seed),
+    )
 
     scores = planner.evaluate(
         _belief(),
@@ -424,5 +439,9 @@ def test_risk_sensitive_mpc_prefers_safe_holdout_to_budget_violating_plan() -> N
 
     by_id = {score.candidate_id: score for score in scores}
     assert by_id["aggressive"].violation_rate == pytest.approx(1.0)
+    assert by_id["aggressive"].monte_carlo_violation_ucb == pytest.approx(1.0)
+    assert by_id["aggressive"].feasible is False
     assert by_id["holdout"].violation_rate == pytest.approx(0.0)
+    assert 0.0 < by_id["holdout"].monte_carlo_violation_ucb < 0.50
+    assert by_id["holdout"].feasible is True
     assert scores[0].candidate_id == "holdout"
