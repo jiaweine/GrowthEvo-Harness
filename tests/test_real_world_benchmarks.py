@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from growthevo.bench import (
+    DEFAULT_KUAIRAND_REWARD_WEIGHTS,
     evaluate_randomized_targeting,
     kuairand_to_planner_transitions,
     load_criteo_uplift,
@@ -175,7 +176,10 @@ def test_kuairand_sequence_state_does_not_include_current_feedback_or_logging_pr
     )
 
     rows = load_kuairand(path)
-    transitions = kuairand_to_planner_transitions(rows)
+    transitions = kuairand_to_planner_transitions(
+        rows,
+        reward_weights=DEFAULT_KUAIRAND_REWARD_WEIGHTS,
+    )
 
     assert transitions[0].observation["prior_click_rate"] == pytest.approx(0.0)
     assert transitions[0].observation["prior_long_view_rate"] == pytest.approx(0.0)
@@ -205,6 +209,7 @@ def test_kuairand_explicit_window_is_truncation_not_terminal(tmp_path: Path) -> 
 
     transitions = kuairand_to_planner_transitions(
         load_kuairand(path),
+        reward_weights=DEFAULT_KUAIRAND_REWARD_WEIGHTS,
         max_steps_per_trajectory=2,
     )
 
