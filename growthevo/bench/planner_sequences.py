@@ -2,15 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any, Callable, Iterable, Mapping
 
 from growthevo.training.trajectory import PlannerTransition
 
-from .real_world import (
-    DEFAULT_KUAIRAND_REWARD_WEIGHTS,
-    KuaiRandInteraction,
-    kuairand_reward,
-)
+from .real_world import KuaiRandInteraction, kuairand_reward
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +27,8 @@ class KuaiRandHistory:
 
 
 PlannerObservationBuilder = Callable[[KuaiRandInteraction, KuaiRandHistory], Mapping[str, Any]]
+RewardFunction = Callable[[KuaiRandInteraction], float]
+CandidateSetProvider = Callable[[KuaiRandInteraction, KuaiRandHistory], Iterable[int]]
 
 
 def default_planner_observation(
@@ -50,27 +49,63 @@ def default_planner_observation(
     }
 
 
+def _resolve_reward(
+    row: KuaiRandInteraction,
+    *,
+    reward_function: RewardFunction | None,
+    reward_weights: Mapping[str, float] | None,
+) -> float:
+    if (reward_function is None) == (reward_weights is None):
+        raise ValueError("provide exactly one of reward_function or reward_weights")
+    reward = (
+        float(reward_function(row))
+        if reward_function is not None
+        else kuairand_reward(row, weights=reward_weights or {})
+    )
+    if not isfinite(reward):
+        raise ValueError("reward function must return a finite value")
+    return reward
+
+
+def _candidate_actions(
+    row: KuaiRandInteraction,
+    history: KuaiRandHistory,
+    provider: CandidateSetProvider | None,
+) -> tuple[int, ...]:
+    if provider is None:
+        return ()
+    candidates = tuple(int(action_id) for action_id in provider(row, history))
+    if not candidates:
+        raise ValueError("candidate provider returned an empty decision set")
+    if len(set(candidates)) != len(candidates):
+        raise ValueError("candidate provider returned duplicate action ids")
+    if row.video_id not in candidates:
+        raise ValueError("candidate set must contain the logged action")
+    return candidates
+
+
 def kuairand_to_planner_transitions(
     interactions: Iterable[KuaiRandInteraction],
     *,
+    reward_function: RewardFunction | None = None,
+    reward_weights: Mapping[str, float] | None = None,
     max_steps_per_trajectory: int | None = None,
-    reward_weights: Mapping[str, float] = DEFAULT_KUAIRAND_REWARD_WEIGHTS,
     observation_builder: PlannerObservationBuilder = default_planner_observation,
+    candidate_provider: CandidateSetProvider | None = None,
 ) -> tuple[PlannerTransition, ...]:
     """Create leakage-aware planner trajectories from KuaiRand logs.
 
-    Full user trajectories are preserved by default. When an explicit maximum
-    sequence length is supplied, artificial window endings are marked
-    ``truncated=True`` and ``credit_boundary=True`` rather than ``done=True``.
-    The raw user id and random-intervention indicator remain in metadata, not the
-    policy observation.
-
-    The observation builder is injected so research backends can use learned or
-    richer state representations without editing dataset-specific control flow.
+    Full user trajectories are preserved by default. Artificial windows are
+    truncations/credit boundaries, not terminals. Reward scalarization and the
+    candidate action universe are protocol inputs rather than dataset-adapter
+    defaults, so planner/DT experiments cannot silently optimize a different
+    objective or action set from CQL/IQL experiments.
     """
 
     if max_steps_per_trajectory is not None and max_steps_per_trajectory <= 0:
         raise ValueError("max_steps_per_trajectory must be positive when provided")
+    if (reward_function is None) == (reward_weights is None):
+        raise ValueError("provide exactly one of reward_function or reward_weights")
 
     by_user: dict[int, list[KuaiRandInteraction]] = defaultdict(list)
     for row in interactions:
@@ -95,7 +130,12 @@ def kuairand_to_planner_transitions(
                 chunk_terminal = step_index == max_steps_per_trajectory - 1
                 trajectory_id = f"kuairand-user-{user_id}-chunk-{chunk}"
 
-            reward = kuairand_reward(row, weights=reward_weights)
+            reward = _resolve_reward(
+                row,
+                reward_function=reward_function,
+                reward_weights=reward_weights,
+            )
+            candidates = _candidate_actions(row, history, candidate_provider)
             true_terminal = offset == len(rows) - 1
             truncated = bool(chunk_terminal and not true_terminal)
             observation = dict(observation_builder(row, history))
@@ -116,6 +156,7 @@ def kuairand_to_planner_transitions(
                         "user_id": user_id,
                         "random_intervention": row.is_random,
                         "video_id": row.video_id,
+                        "candidate_action_ids": list(candidates),
                     },
                 )
             )
