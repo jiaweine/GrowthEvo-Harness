@@ -49,11 +49,13 @@ def bootstrap_randomized_targeting(
 
     Treatment and control observations are resampled separately so each
     replicate preserves the experimental-arm structure instead of allowing a
-    small bootstrap sample to accidentally erase one arm.
+    small bootstrap sample to accidentally erase one arm. The number of
+    replicates is an experiment-protocol choice; the implementation only requires
+    the two replicates needed to define a sample variance.
     """
 
-    if replicates < 20:
-        raise ValueError("replicates must be at least 20")
+    if replicates < 2:
+        raise ValueError("replicates must be at least 2")
     if not 0 < confidence_level < 1:
         raise ValueError("confidence_level must be in (0, 1)")
 
