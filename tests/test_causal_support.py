@@ -90,7 +90,7 @@ def test_split_conformal_interval_makes_overlap_decision_conservative() -> None:
         calibration,
         miscoverage=0.20,
     )
-    protocol = PropensitySupportProtocol(min_pairwise_probability=0.20)
+    protocol = PropensitySupportProtocol(min_pairwise_probability=0.21)
 
     central = calibrated.predict((0.0,))
     edge = calibrated.predict((2.0,))
@@ -101,9 +101,9 @@ def test_split_conformal_interval_makes_overlap_decision_conservative() -> None:
     assert central.upper_bound is not None
     assert central.lower_bound < central.propensity < central.upper_bound
     assert protocol.score(central) == pytest.approx(1.0)
-    # The point estimate is above the floor, but its calibrated interval reaches
-    # below the declared practical-overlap floor and therefore fails closed.
-    assert edge.propensity > 0.20
+    # The edge point estimate is itself inside the practical-overlap region, but
+    # its calibrated interval extends below the declared floor and fails closed.
+    assert edge.propensity > 0.21
     assert protocol.score(edge) == pytest.approx(0.0)
 
 
@@ -129,7 +129,7 @@ def test_feature_local_support_provider_changes_with_serving_context() -> None:
     )
     provider = make_support_score_provider(
         {Channel.PUSH: calibrated},
-        {Channel.PUSH: PropensitySupportProtocol(min_pairwise_probability=0.20)},
+        {Channel.PUSH: PropensitySupportProtocol(min_pairwise_probability=0.21)},
     )
 
     assert provider(Channel.PUSH, None, (0.0,)) == pytest.approx(1.0)
