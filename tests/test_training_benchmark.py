@@ -117,9 +117,49 @@ def _policy_estimates() -> list[ActionValueEstimate]:
     ]
 
 
+def _reference_spi_config(**overrides: object) -> SafePolicyImprovementConfig:
+    values: dict[str, object] = {"bound_mode": "gaussian_reference"}
+    values.update(overrides)
+    return SafePolicyImprovementConfig(**values)  # type: ignore[arg-type]
+
+
+def test_safe_pi_default_requires_explicit_value_bounds() -> None:
+    with pytest.raises(ValueError, match="value_lower_bound"):
+        SupportAnchoredPolicyImprover().improve(_policy_estimates())
+
+
+def test_safe_pi_accepts_explicit_calibrated_bounds() -> None:
+    rows = [
+        ActionValueEstimate(
+            action=Channel.NO_TREATMENT,
+            value=0.10,
+            value_uncertainty=0.50,
+            value_lower_bound=0.08,
+            behavior_probability=0.50,
+            expected_cost=0.0,
+            cost_upper_bound=0.0,
+        ),
+        ActionValueEstimate(
+            action=Channel.PUSH,
+            value=0.30,
+            value_uncertainty=0.50,
+            value_lower_bound=0.25,
+            behavior_probability=0.50,
+            expected_cost=0.05,
+            cost_upper_bound=0.06,
+        ),
+    ]
+
+    result = SupportAnchoredPolicyImprover().improve(rows)
+
+    assert result.changed
+    assert result.selected_action is Channel.PUSH
+    assert "gaussian_reference_bounds_used" not in result.reasons
+
+
 def test_support_anchored_policy_improvement_respects_tv_cap() -> None:
     improver = SupportAnchoredPolicyImprover(
-        SafePolicyImprovementConfig(max_total_variation=0.10)
+        _reference_spi_config(max_total_variation=0.10)
     )
 
     result = improver.improve(_policy_estimates())
@@ -130,6 +170,7 @@ def test_support_anchored_policy_improvement_respects_tv_cap() -> None:
     assert sum(result.probabilities.values()) == pytest.approx(1.0)
     assert result.pessimistic_candidate_value > result.pessimistic_baseline_value
     assert "reference_pessimistic_proposal_used" in result.reasons
+    assert "gaussian_reference_bounds_used" in result.reasons
 
 
 def test_support_anchored_policy_freezes_low_support_action_mass() -> None:
@@ -148,7 +189,7 @@ def test_support_anchored_policy_freezes_low_support_action_mass() -> None:
         behavior_probability=0.699,
     )
 
-    result = SupportAnchoredPolicyImprover().improve(rows)
+    result = SupportAnchoredPolicyImprover(_reference_spi_config()).improve(rows)
 
     assert result.selected_action is Channel.PUSH
     assert result.probabilities[Channel.EMAIL] == pytest.approx(0.001)
@@ -158,7 +199,7 @@ def test_support_anchored_policy_freezes_low_support_action_mass() -> None:
 def test_support_anchored_policy_accepts_external_learned_distribution() -> None:
     rows = _policy_estimates()
     result = SupportAnchoredPolicyImprover(
-        SafePolicyImprovementConfig(max_total_variation=0.50)
+        _reference_spi_config(max_total_variation=0.50)
     ).improve(
         rows,
         proposal_probabilities={
@@ -192,7 +233,7 @@ def test_low_support_external_proposal_is_bootstrapped_to_behavior() -> None:
     )
 
     result = SupportAnchoredPolicyImprover(
-        SafePolicyImprovementConfig(max_total_variation=1.0)
+        _reference_spi_config(max_total_variation=1.0)
     ).improve(
         rows,
         proposal_probabilities={
@@ -223,7 +264,7 @@ def test_no_increase_mode_can_remove_unsupported_behavior_mass() -> None:
     )
 
     result = SupportAnchoredPolicyImprover(
-        SafePolicyImprovementConfig(
+        _reference_spi_config(
             max_total_variation=1.0,
             unsupported_action_mode="no_increase",
         )
@@ -258,7 +299,10 @@ def test_support_anchored_policy_uses_no_treatment_when_behavior_cost_is_unsafe(
         ),
     ]
 
-    result = SupportAnchoredPolicyImprover().improve(rows, max_expected_cost=1.0)
+    result = SupportAnchoredPolicyImprover(_reference_spi_config()).improve(
+        rows,
+        max_expected_cost=1.0,
+    )
 
     assert result.safe_fallback
     assert result.selected_action is Channel.NO_TREATMENT
@@ -267,7 +311,7 @@ def test_support_anchored_policy_uses_no_treatment_when_behavior_cost_is_unsafe(
 
 def test_minimum_pessimistic_gain_is_enforced_after_tv_contraction() -> None:
     result = SupportAnchoredPolicyImprover(
-        SafePolicyImprovementConfig(
+        _reference_spi_config(
             max_total_variation=0.01,
             min_pessimistic_improvement=0.01,
         )
