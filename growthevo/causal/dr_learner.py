@@ -112,12 +112,7 @@ class RidgeRegressor:
 
 @dataclass(frozen=True, slots=True)
 class LoggedTreatmentRecord:
-    """One logged decision with the full behavior-policy probability vector.
-
-    ``group_id`` is optional but important for repeated-user or clustered data.
-    When supplied, all rows from the same group are kept in one nuisance fold so
-    cross-fitting cannot leak a user's outcome history across train and holdout.
-    """
+    """One logged decision with the full behavior-policy probability vector."""
 
     unit_id: str
     features: FeatureVector
@@ -155,11 +150,15 @@ class CATEEstimate:
 
 @dataclass(frozen=True, slots=True)
 class FittedTreatmentEffect:
-    """Fitted one-vs-control DR learner with explicit support diagnostics.
+    """Fitted one-vs-control DR learner with explicit overlap diagnostics.
 
-    ``uncertainty`` uses second-stage out-of-fold residual scale plus feature
-    extrapolation. It remains a model diagnostic, not a causal confidence
-    interval; deployment evidence still belongs to randomized/logged evaluation.
+    ``overlap_coverage`` records strict positivity (both pairwise propensities
+    positive). ``practical_overlap_coverage`` is populated only when a caller
+    explicitly selects a practical overlap threshold. ``propensity_clip_fraction``
+    is non-zero only when clipping was explicitly requested.
+
+    ``uncertainty`` remains a second-stage OOF residual/extrapolation diagnostic,
+    not a calibrated causal confidence interval.
     """
 
     treatment: Channel
@@ -168,6 +167,8 @@ class FittedTreatmentEffect:
     residual_scale: float
     sample_size: int
     overlap_coverage: float
+    practical_overlap_coverage: float | None
+    propensity_clip_fraction: float
     feature_bounds: tuple[tuple[float, float], ...]
 
     def predict(self, features: Sequence[float]) -> CATEEstimate:
@@ -183,7 +184,12 @@ class FittedTreatmentEffect:
                 distances.append(0.0)
         extrapolation = fsum(distances) / len(distances)
         uncertainty = self.residual_scale * (1.0 + extrapolation)
-        support_score = self.overlap_coverage / (1.0 + extrapolation)
+        base_support = (
+            self.practical_overlap_coverage
+            if self.practical_overlap_coverage is not None
+            else self.overlap_coverage
+        )
+        support_score = base_support / (1.0 + extrapolation)
         return CATEEstimate(
             treatment=self.treatment,
             control=self.control,
@@ -197,15 +203,11 @@ class FittedTreatmentEffect:
 class CrossFittedDRLearner:
     """Cross-fitted one-vs-control doubly robust treatment-effect learner.
 
-    Outcome and effect regressors are factories rather than fixed model classes.
-    This keeps the orthogonalization/cross-fitting contract stable while allowing
-    production experiments to plug in forests, boosting, neural estimators, or
-    other regressors without editing causal logic.
-
-    Repeated-user data use group-aware fold assignment. Groups are assigned by a
-    deterministic greedy stratification objective that balances treatment/control
-    counts before total row count. This keeps groups intact without accepting the
-    potentially extreme class imbalance of a raw hash modulo fold assignment.
+    No propensity clipping is applied by default. Exact positivity violations are
+    rejected because the pairwise treatment effect is not identified there.
+    Optional practical-overlap diagnostics and optional propensity clipping are
+    separate explicit choices so a numerical stabilizer cannot masquerade as a
+    support definition.
     """
 
     def __init__(
@@ -213,7 +215,8 @@ class CrossFittedDRLearner:
         *,
         n_folds: int = 5,
         ridge: float = 1e-3,
-        propensity_floor: float = 0.02,
+        practical_overlap_floor: float | None = None,
+        propensity_clip_floor: float | None = None,
         outcome_model_factory: RegressorFactory | None = None,
         effect_model_factory: RegressorFactory | None = None,
     ) -> None:
@@ -221,11 +224,16 @@ class CrossFittedDRLearner:
             raise ValueError("n_folds must be at least 2")
         if ridge <= 0:
             raise ValueError("ridge must be positive")
-        if not 0 < propensity_floor < 0.5:
-            raise ValueError("propensity_floor must be in (0, 0.5)")
+        for name, value in (
+            ("practical_overlap_floor", practical_overlap_floor),
+            ("propensity_clip_floor", propensity_clip_floor),
+        ):
+            if value is not None and not 0 < value < 0.5:
+                raise ValueError(f"{name} must be in (0, 0.5) when provided")
         self.n_folds = n_folds
         self.ridge = ridge
-        self.propensity_floor = propensity_floor
+        self.practical_overlap_floor = practical_overlap_floor
+        self.propensity_clip_floor = propensity_clip_floor
         self.outcome_model_factory = outcome_model_factory or (lambda: RidgeRegressor(self.ridge))
         self.effect_model_factory = effect_model_factory or (lambda: RidgeRegressor(self.ridge))
 
@@ -250,10 +258,7 @@ class CrossFittedDRLearner:
             )
 
         actions = (treatment, control)
-        action_totals = {
-            action: sum(row.action is action for row in rows)
-            for action in actions
-        }
+        action_totals = {action: sum(row.action is action for row in rows) for action in actions}
         if any(total == 0 for total in action_totals.values()):
             raise ValueError("group-aware cross-fitting requires treatment and control rows")
 
@@ -290,9 +295,7 @@ class CrossFittedDRLearner:
                     ** 2
                     for action in actions
                 )
-                size_deviation = (
-                    (fold_sizes[fold] + size) / len(rows) - target_share
-                ) ** 2
+                size_deviation = ((fold_sizes[fold] + size) / len(rows) - target_share) ** 2
                 candidates.append((class_deviation, size_deviation, fold_sizes[fold], fold))
             _, _, _, selected_fold = min(candidates)
             group_to_fold[key] = selected_fold
@@ -300,10 +303,7 @@ class CrossFittedDRLearner:
             for action in actions:
                 fold_counts[selected_fold][action] += counts[action]
 
-        assignments = [
-            group_to_fold[row.group_id or row.unit_id]
-            for row in rows
-        ]
+        assignments = [group_to_fold[row.group_id or row.unit_id] for row in rows]
         for fold in range(self.n_folds):
             held_indices = [index for index, assigned in enumerate(assignments) if assigned == fold]
             if not held_indices:
@@ -337,7 +337,7 @@ class CrossFittedDRLearner:
                 )
             for position, index in enumerate(indices):
                 assignments[index] = position % self.n_folds
-        if any(fold < 0 for fold in assignments):  # pragma: no cover - defensive.
+        if any(fold < 0 for fold in assignments):
             raise RuntimeError("failed to assign every treatment/control row to a fold")
         return assignments
 
@@ -365,7 +365,9 @@ class CrossFittedDRLearner:
 
         folds = self._fold_assignments(rows, treatment, control)
         pseudo_outcomes = [0.0] * len(rows)
-        supported = 0
+        strict_supported = 0
+        practical_supported = 0
+        clipped = 0
 
         for fold in range(self.n_folds):
             train = [row for index, row in enumerate(rows) if folds[index] != fold]
@@ -394,9 +396,29 @@ class CrossFittedDRLearner:
                 if pair_probability <= 0.0:
                     raise ValueError("treatment/control propensity mass must be positive")
                 raw_e = p1 / pair_probability
-                if self.propensity_floor <= raw_e <= 1.0 - self.propensity_floor:
-                    supported += 1
-                e = max(self.propensity_floor, min(1.0 - self.propensity_floor, raw_e))
+                if not 0.0 < raw_e < 1.0:
+                    raise ValueError(
+                        "pairwise positivity violated: treatment and control must both have "
+                        "positive logging probability for every fitted record"
+                    )
+                strict_supported += 1
+
+                if self.practical_overlap_floor is not None and (
+                    self.practical_overlap_floor
+                    <= raw_e
+                    <= 1.0 - self.practical_overlap_floor
+                ):
+                    practical_supported += 1
+
+                e = raw_e
+                if self.propensity_clip_floor is not None:
+                    clipped_e = max(
+                        self.propensity_clip_floor,
+                        min(1.0 - self.propensity_clip_floor, raw_e),
+                    )
+                    if abs(clipped_e - raw_e) > 1e-15:
+                        clipped += 1
+                    e = clipped_e
 
                 if row.action is treatment:
                     pseudo = m1 - m0 + (row.outcome - m1) / e
@@ -442,12 +464,19 @@ class CrossFittedDRLearner:
             )
             for index in range(feature_dim)
         )
+        practical_coverage = (
+            practical_supported / len(rows)
+            if self.practical_overlap_floor is not None
+            else None
+        )
         return FittedTreatmentEffect(
             treatment=treatment,
             control=control,
             model=effect_model,
             residual_scale=residual_scale,
             sample_size=len(rows),
-            overlap_coverage=supported / len(rows),
+            overlap_coverage=strict_supported / len(rows),
+            practical_overlap_coverage=practical_coverage,
+            propensity_clip_fraction=clipped / len(rows),
             feature_bounds=bounds,
         )
