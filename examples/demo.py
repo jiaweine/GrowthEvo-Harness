@@ -121,7 +121,15 @@ def main() -> None:
         churn_risk=0.20,
     )
 
-    conformal = ConformalPolicyCalibrator(min_calibration_size=30).fit(
+    # Five simultaneous calibrated gate metrics at gate alpha=0.05 imply a
+    # Bonferroni per-metric alpha of 0.01. A 100-cohort fixture is used so the
+    # finite-sample conformal order statistic actually exists; the calibrator no
+    # longer clips an unattainable rank to the largest observed residual.
+    conformal = ConformalPolicyCalibrator(
+        alpha=0.05,
+        simultaneous=True,
+        min_calibration_size=100,
+    ).fit(
         ConformalCalibrationRecord(
             predicted_value_delta=0.20,
             observed_value_delta=0.19,
@@ -134,7 +142,7 @@ def main() -> None:
             predicted_churn_risk=0.20,
             observed_churn_risk=0.21,
         )
-        for _ in range(30)
+        for _ in range(100)
     )
     verification = runtime.verify_candidate(evidence, constraints, conformal=conformal)
 
