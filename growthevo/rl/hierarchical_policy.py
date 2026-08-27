@@ -113,10 +113,13 @@ class ReferenceActionParameterizer:
 class HierarchicalGrowthPolicy:
     """Option-conditioned conservative channel policy.
 
-    The policy chooses *which causal action* is worth considering. Offer value,
-    creative, schedule, and auction/campaign costs belong to an injected action
-    parameterizer. This prevents business heuristics from becoming hidden parts
-    of the learning algorithm.
+    A calibrated/inferential effect lower bound is used directly when supplied.
+    Otherwise the lightweight reference policy falls back to a residual-based
+    uncertainty penalty, which remains only a model diagnostic heuristic.
+
+    Exploration bonus affects candidate ranking only. It never increases the
+    conservative effect used for ROI or deployment-safety checks, so epistemic
+    uncertainty cannot manufacture evidence of profitability.
     """
 
     def __init__(
@@ -128,6 +131,18 @@ class HierarchicalGrowthPolicy:
         self.config = config or PolicyConfig()
         self.action_parameterizer = action_parameterizer or ReferenceActionParameterizer()
 
+    def _safety_uplift(
+        self,
+        belief: CausalBelief,
+        channel: Channel,
+        uplift: float,
+        uncertainty: float,
+    ) -> float:
+        lower_bound = belief.effect_lower_bound_for(channel)
+        if lower_bound is not None:
+            return lower_bound
+        return uplift - self.config.uncertainty_penalty * uncertainty
+
     def select_action(
         self,
         belief: CausalBelief,
@@ -138,18 +153,20 @@ class HierarchicalGrowthPolicy:
             return GrowthAction.no_treatment(hypothesis.option)
 
         cfg = self.config
-        candidates: list[tuple[float, float, Channel, float, float]] = []
+        candidates: list[tuple[float, float, Channel, float, float, float]] = []
         for channel in belief.consented_channels:
             support = belief.support_for(channel)
             if support < cfg.min_channel_support:
                 continue
             uplift = belief.uplift_for(channel)
             uncertainty = belief.uncertainty_for(channel)
-            conservative_uplift = uplift - cfg.uncertainty_penalty * uncertainty
-            if hypothesis.option is GrowthOption.EXPLORE:
-                conservative_uplift += cfg.exploration_uncertainty_weight * uncertainty * support
-            if conservative_uplift <= 0:
+            safety_uplift = self._safety_uplift(belief, channel, uplift, uncertainty)
+            if safety_uplift <= 0:
                 continue
+
+            exploration_bonus = 0.0
+            if hypothesis.option is GrowthOption.EXPLORE:
+                exploration_bonus = cfg.exploration_uncertainty_weight * uncertainty * support
 
             expected_cost = self.action_parameterizer.expected_cost(
                 belief,
@@ -159,15 +176,16 @@ class HierarchicalGrowthPolicy:
             )
             if expected_cost < 0:
                 raise ValueError("action parameterizer returned negative expected cost")
-            conservative_value = conservative_uplift * belief.ltv - expected_cost
+
+            ranking_value = (safety_uplift + exploration_bonus) * belief.ltv - expected_cost
             candidates.append(
-                (conservative_value, support, channel, uplift, uncertainty)
+                (ranking_value, support, channel, uplift, uncertainty, safety_uplift)
             )
 
         if not candidates:
             return GrowthAction.no_treatment(GrowthOption.HOLDOUT)
 
-        score, _, channel, uplift, uncertainty = max(
+        score, _, channel, uplift, uncertainty, safety_uplift = max(
             candidates,
             key=lambda item: (item[0], item[1], item[2].value),
         )
@@ -189,10 +207,7 @@ class HierarchicalGrowthPolicy:
         if action.option is not hypothesis.option:
             raise ValueError("action parameterizer changed the selected growth option")
 
-        conservative_uplift = uplift - cfg.uncertainty_penalty * uncertainty
-        if hypothesis.option is GrowthOption.EXPLORE:
-            conservative_uplift += cfg.exploration_uncertainty_weight * uncertainty * belief.support_for(channel)
-        conservative_revenue = max(0.0, conservative_uplift) * belief.ltv
+        conservative_revenue = safety_uplift * belief.ltv
         if action.budget <= 0:
             return GrowthAction.no_treatment(GrowthOption.HOLDOUT)
         estimated_roi = conservative_revenue / action.budget
