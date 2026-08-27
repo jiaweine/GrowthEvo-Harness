@@ -40,6 +40,11 @@ def main() -> None:
             Channel.IN_APP: 0.02,
         },
         uplift_uncertainty=0.05,
+        channel_support={
+            Channel.PUSH: 0.90,
+            Channel.EMAIL: 0.85,
+            Channel.IN_APP: 0.80,
+        },
         ltv=120.0,
         fatigue=0.12,
         churn_risk=0.18,
