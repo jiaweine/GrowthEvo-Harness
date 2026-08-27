@@ -11,6 +11,11 @@ from growthevo.rl.conformal import ConformalCalibrationRecord, ConformalPolicyCa
 from growthevo.rl.ope import LoggedBanditRecord, evaluate_policy, policy_evidence_from_ope
 from growthevo.rl.process_reward import ProcessState, TrajectoryStepSignal
 from growthevo.runtime.engine import GrowthEvoRuntime
+from growthevo.verifier.counterfactual import (
+    CounterfactualVerifier,
+    ThresholdEvidenceGate,
+    VerifierConfig,
+)
 
 
 def main() -> None:
@@ -46,15 +51,26 @@ def main() -> None:
         consented_channels=frozenset({Channel.PUSH, Channel.EMAIL, Channel.IN_APP}),
     )
 
-    runtime = GrowthEvoRuntime()
+    # The demo chooses one explicit reference promotion protocol. These values are
+    # not defaults in the Runtime/Verifier and must not be treated as universal
+    # deployment thresholds.
+    verifier = CounterfactualVerifier(
+        VerifierConfig(z_score=1.96),
+        evidence_gate=ThresholdEvidenceGate(
+            min_sample_size=50,
+            min_effective_sample_size=40.0,
+            min_effective_sample_ratio=0.50,
+            min_support_coverage=0.95,
+            max_importance_weight=5.0,
+        ),
+    )
+    runtime = GrowthEvoRuntime(verifier=verifier)
     result = runtime.run(goal, observation)
 
     print("=== Runtime decision ===")
     print(to_primitive(result))
     print("event_chain_valid:", runtime.event_store.verify())
 
-    # GrowthPRM demonstrates planner/tool step credit grounded in verifier-readable
-    # progress and the observation produced by the environment.
     trajectory_reward = runtime.score_planner_trajectory(
         [
             TrajectoryStepSignal(
@@ -77,8 +93,6 @@ def main() -> None:
         terminal_outcome=0.20,
     )
 
-    # Logged-bandit evaluation uses beta*-IPS diagnostics and compiles overlap
-    # information into the promotion evidence contract.
     records = [
         LoggedBanditRecord(
             reward=1.0 if index % 3 == 0 else 0.0,
@@ -89,7 +103,10 @@ def main() -> None:
         )
         for index in range(80)
     ]
-    ope = evaluate_policy(records)
+    # Practical support is also part of the declared demo protocol. OPE can be
+    # inspected without it, but promotion evidence cannot be compiled without an
+    # explicit support definition.
+    ope = evaluate_policy(records, support_propensity_floor=0.05)
     evidence = policy_evidence_from_ope(
         ope,
         baseline_value=0.15,
@@ -99,8 +116,6 @@ def main() -> None:
         churn_risk=0.20,
     )
 
-    # Matured shadow cohorts calibrate one-sided value and risk margins. This
-    # example uses small deterministic residuals for a readable smoke test.
     conformal = ConformalPolicyCalibrator(min_calibration_size=30).fit(
         ConformalCalibrationRecord(
             predicted_value_delta=0.20,
