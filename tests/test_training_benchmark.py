@@ -51,7 +51,10 @@ def test_causal_serving_bridge_enriches_runtime_observation() -> None:
     bench = GrowthAgentBench.synthetic(900, seed=23, outcome_noise=0.01)
     push, _ = bench.fit_cate(treatment=Channel.PUSH)
     email, _ = bench.fit_cate(treatment=Channel.EMAIL)
-    bridge = CausalUpliftServingBridge({Channel.PUSH: push, Channel.EMAIL: email})
+    bridge = CausalUpliftServingBridge(
+        {Channel.PUSH: push, Channel.EMAIL: email},
+        support_score_provider=lambda channel, estimate: estimate.support_score,
+    )
     observation = UserObservation(
         user_id="serve-u1",
         natural_conversion=0.2,
