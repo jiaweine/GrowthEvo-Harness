@@ -217,9 +217,11 @@ class CausalBelief:
         return float(self.channel_uncertainty.get(channel, self.uplift_uncertainty))
 
     def support_for(self, channel: Channel) -> float:
+        """Return declared logging support; unknown treatment support fails closed."""
+
         if channel is Channel.NO_TREATMENT:
             return 1.0
-        return float(self.channel_support.get(channel, 1.0))
+        return float(self.channel_support.get(channel, 0.0))
 
     def effect_lower_bound_for(self, channel: Channel) -> float | None:
         if channel is Channel.NO_TREATMENT:
