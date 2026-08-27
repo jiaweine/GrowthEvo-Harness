@@ -7,9 +7,10 @@ def build_causal_belief(observation: UserObservation) -> CausalBelief:
     """Reduce observed growth features into the immutable policy belief state.
 
     This boundary deliberately separates observed natural conversion from
-    treatment uplift. Channel-level uncertainty and support are preserved rather
-    than collapsed into one scalar, so a poorly identified channel cannot make
-    every other channel appear equally uncertain.
+    treatment uplift. Channel-level uncertainty, support, and any externally
+    calibrated effect lower bounds are preserved rather than collapsed into one
+    scalar. A model diagnostic is therefore not silently promoted into a causal
+    confidence bound.
     """
 
     return CausalBelief(
@@ -28,4 +29,5 @@ def build_causal_belief(observation: UserObservation) -> CausalBelief:
         consented_channels=frozenset(observation.consented_channels),
         channel_uncertainty=dict(observation.channel_uncertainty),
         channel_support=dict(observation.channel_support),
+        channel_effect_lower_bound=dict(observation.channel_effect_lower_bound),
     )
