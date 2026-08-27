@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from math import isfinite
+from typing import Callable, Mapping, Sequence
 
 from growthevo.models import Channel, UserObservation
 
@@ -12,12 +13,16 @@ def _clip_probability_effect(value: float) -> float:
     return max(-1.0, min(1.0, value))
 
 
+EffectLowerBoundProvider = Callable[[Channel, CATEEstimate], float]
+
+
 @dataclass(frozen=True, slots=True)
 class UpliftServingPrediction:
     raw_channel_effects: Mapping[Channel, float]
     channel_effects: Mapping[Channel, float]
     channel_uncertainty: Mapping[Channel, float]
     channel_support: Mapping[Channel, float]
+    channel_effect_lower_bound: Mapping[Channel, float] = field(default_factory=dict)
     clipped_channels: tuple[Channel, ...] = ()
 
     @property
@@ -34,15 +39,21 @@ class UpliftServingPrediction:
 
 
 class CausalUpliftServingBridge:
-    """Expose fitted treatment-effect models through the Runtime observation contract.
+    """Expose fitted treatment-effect models through the Runtime contract.
 
-    The bridge preserves channel-specific effect, uncertainty, and support. The
-    aggregate uncertainty remains available for legacy consumers, but policies
-    can make channel-specific conservative decisions instead of inheriting the
-    worst uncertainty from an unrelated action.
+    Model residual/extrapolation uncertainty is preserved as a diagnostic. It is
+    not labelled as a causal confidence interval. A research stack that has a
+    defensible calibrated or inferential lower bound can inject an
+    ``effect_lower_bound_provider``; only then is an explicit lower bound exposed
+    to the policy. This keeps uncertainty semantics honest across backends.
     """
 
-    def __init__(self, models: Mapping[Channel, FittedTreatmentEffect]) -> None:
+    def __init__(
+        self,
+        models: Mapping[Channel, FittedTreatmentEffect],
+        *,
+        effect_lower_bound_provider: EffectLowerBoundProvider | None = None,
+    ) -> None:
         if not models:
             raise ValueError("at least one treatment-effect model is required")
         if Channel.NO_TREATMENT in models:
@@ -53,6 +64,7 @@ class CausalUpliftServingBridge:
             if model.control is not Channel.NO_TREATMENT:
                 raise ValueError("runtime uplift models must use NO_TREATMENT as control")
         self.models = dict(models)
+        self.effect_lower_bound_provider = effect_lower_bound_provider
 
     def predict(self, features: Sequence[float]) -> UpliftServingPrediction:
         predictions: dict[Channel, CATEEstimate] = {
@@ -80,6 +92,20 @@ class CausalUpliftServingBridge:
             )
             for channel, prediction in predictions.items()
         }
+
+        lower_bounds: dict[Channel, float] = {}
+        if self.effect_lower_bound_provider is not None:
+            for channel, prediction in predictions.items():
+                raw_lower = float(self.effect_lower_bound_provider(channel, prediction))
+                if not isfinite(raw_lower):
+                    raise ValueError("effect lower-bound provider returned a non-finite value")
+                lower = _clip_probability_effect(raw_lower)
+                if lower > effects[channel] + 1e-12:
+                    raise ValueError(
+                        "effect lower-bound provider returned a bound above the point estimate"
+                    )
+                lower_bounds[channel] = lower
+
         clipped = tuple(
             sorted(
                 (
@@ -95,6 +121,7 @@ class CausalUpliftServingBridge:
             channel_effects=effects,
             channel_uncertainty=uncertainties,
             channel_support=supports,
+            channel_effect_lower_bound=lower_bounds,
             clipped_channels=clipped,
         )
 
@@ -110,5 +137,6 @@ class CausalUpliftServingBridge:
             uplift_uncertainty=prediction.aggregate_uncertainty,
             channel_uncertainty=prediction.channel_uncertainty,
             channel_support=prediction.channel_support,
+            channel_effect_lower_bound=prediction.channel_effect_lower_bound,
         )
         return enriched, prediction
