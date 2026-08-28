@@ -6,6 +6,7 @@ import pytest
 
 from growthevo.causal.dr_learner import CrossFittedDRLearner, LoggedTreatmentRecord
 from growthevo.models import CausalBelief, Channel, GrowthAction, GrowthConstraints, GrowthOption
+from growthevo.rl.causal_reward import CausalRewardModel, RewardWeights
 from growthevo.rl.model_based import (
     LongHorizonGrowthWorld,
     RiskSensitiveMPC,
@@ -66,6 +67,21 @@ def _constraints() -> GrowthConstraints:
     )
 
 
+def _net_value_reward_model() -> CausalRewardModel:
+    """Reference utility selected explicitly by these simulator tests."""
+
+    return CausalRewardModel(
+        RewardWeights(
+            conversion=0.0,
+            ltv=1.0,
+            retention=0.0,
+            cost=1.0,
+            fatigue=0.0,
+            risk=0.0,
+        )
+    )
+
+
 def _reference_mpc(*, rollouts: int, base_seed: int) -> RiskSensitiveMPC:
     return RiskSensitiveMPC(
         config=RiskSensitiveMPCConfig(
@@ -77,9 +93,13 @@ def _reference_mpc(*, rollouts: int, base_seed: int) -> RiskSensitiveMPC:
             gamma=0.99,
             base_seed=base_seed,
         ),
-        # Synthetic reference world chosen explicitly by this test. Production
-        # planning must supply its own validated/stressed world factory.
-        world_factory=lambda seed: LongHorizonGrowthWorld(seed=seed),
+        # Synthetic reference world and utility are chosen explicitly by this
+        # test. Production planning must supply its own validated/stressed world
+        # factory and business scalarization.
+        world_factory=lambda seed: LongHorizonGrowthWorld(
+            seed=seed,
+            reward_model=_net_value_reward_model(),
+        ),
     )
 
 
