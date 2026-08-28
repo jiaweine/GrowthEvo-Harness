@@ -7,12 +7,10 @@
 **Optimize what an action changes — not merely what a model predicts.**
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![CI](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-0.1.0-555555)
 ![Causal RL](https://img.shields.io/badge/Causal-RL-8A2BE2)
 ![OPE](https://img.shields.io/badge/OPE-IPS%20%7C%20DR%20%7C%20β*-IPS-0A7EA4)
 
-`Cross-Fitted DR` · `Support-Anchored Safe PI` · `IPS / DR / β*-IPS` · `Conformal Calibration` · `Dynamics-Aware GAE` · `Risk-Sensitive MPC`
+`Cross-Fitted DR` · `Feasible Support-Anchored Safe PI` · `IPS / DR / β*-IPS` · `Conformal Calibration` · `Dynamics-Aware GAE` · `Risk-Sensitive MPC`
 
 </div>
 
@@ -28,7 +26,7 @@ GrowthEvo 研究的是更严格的决策问题：
 
 > **对状态 `x` 采取动作 `a`，相比 `NO_TREATMENT`，究竟产生了多少可归因的增量价值？**
 
-因此优化目标不是 raw conversion probability，而是 conditional treatment effect：
+优化目标不是 raw conversion probability，而是 conditional treatment effect：
 
 $$
 \tau(x,a)
@@ -37,20 +35,18 @@ $$
 \qquad a_0=\mathrm{NO\_TREATMENT}.
 $$
 
-`NO_TREATMENT` 是一级动作，而不是异常分支。若证据不足或约束不允许主动干预，策略应保留不干预概率，而不是强制选择某个 treatment。
+`NO_TREATMENT` 是一级动作。没有足够证据支持主动 treatment 时，策略保留不干预概率，而不是强制选择某个动作。
 
 ---
 
 ## Method
-
-GrowthEvo 将问题拆成六个相互约束的算法层：
 
 ```text
 logged causal data
       ↓
 Cross-Fitted Doubly Robust CATE
       ↓
-pessimistic action values + support
+OOF uncertainty + distributional support
       ↓
 Feasible Support-Anchored Safe PI
       ↓
@@ -58,20 +54,21 @@ IPS / DR / β*-IPS OPE + overlap diagnostics
       ↓
 one-sided conformal calibration
       ↓
-long-horizon risk + dynamics-aware credit
+risk-sensitive return + dynamics-aware credit
 ```
 
-核心原则只有三个：
+核心原则：
 
 1. **Incrementality before prediction** — treatment effect 优先于 conversion score。
-2. **Support before optimization** — 没有 logging support 的高估值不能驱动策略更新。
-3. **Evidence before improvement** — point estimate 高但不确定性 / overlap 差时应 abstain。
+2. **Support before optimization** — 没有 logging / distributional support 的高估值不能驱动策略更新。
+3. **Feasibility before ranking** — 先计算每个动作可安全更新多少，再比较候选策略价值。
+4. **Evidence before improvement** — point estimate 高但 uncertainty / overlap 差时应 abstain。
 
 ---
 
 ## 1. Cross-Fitted Doubly Robust CATE
 
-对 treatment `a` 与 control `a₀`，先将 logged multi-action propensity 在 pair 内重新归一化：
+对 treatment `a` 与 control `a₀`，先将 multi-action logging propensity 在 pair 内归一化：
 
 $$
 e_a(x)
@@ -91,27 +88,75 @@ $$
 \frac{(1-A_i)(Y_i-\widehat m_0(x_i))}{1-\widehat e(x_i)}.
 $$
 
-其中 nuisance outcome model 只在其他 folds 上训练，第二阶段 effect model 只消费 out-of-fold pseudo-outcomes，降低 nuisance leakage。
+nuisance outcome models 只在其他 folds 上训练；第二阶段 effect model 只消费 out-of-fold pseudo-outcomes。
 
-### Why DR?
+### OOF uncertainty
 
-若 outcome model 或 propensity mechanism 中至少一侧估计良好，DR estimator 仍具有较强鲁棒性；cross-fitting 进一步降低同一样本同时拟合 nuisance 与 effect 所造成的过拟合偏差。
-
-### Support-aware prediction
-
-预测不仅输出 effect：
+第二阶段 uncertainty 不使用 effect model 的 in-sample residual，而使用 held-out effect prediction：
 
 $$
-\widehat\tau(x),
+\widehat\sigma_{OOF}
+=
+\sqrt{
+\frac{1}{n}
+\sum_{i=1}^{n}
+\left(
+\widetilde\tau_i-\widehat\tau_{-f(i)}(x_i)
+\right)^2
+}.
 $$
 
-还同时携带 uncertainty 与 support diagnostics。低 support / extrapolation 区域不能被解释成“高置信度零 uplift”，而应增加不确定性并降低后续策略更新幅度。
+这样 residual scale 不会因为第二阶段模型直接拟合同一组 pseudo-outcomes 而系统性偏小。
+
+### Distributional support
+
+仅用 feature min/max 不能识别包围盒内部的低密度区域，因此额外估计正则化 Mahalanobis distance：
+
+$$
+d_M(x)
+=
+\sqrt{
+(x-\bar x)^\top
+(\Sigma+\lambda I)^{-1}
+(x-\bar x)
+}.
+$$
+
+令训练分布的 support radius 为：
+
+$$
+r_q
+=
+Q_q\left(\{d_M(x_i)\}_{i=1}^{n}\right).
+$$
+
+定义 distributional extrapolation：
+
+$$
+\xi(x)
+=
+\max\left(0,\frac{d_M(x)}{r_q}-1\right).
+$$
+
+最终 uncertainty 与 support 同时受全局 propensity overlap 和 distributional distance 控制：
+
+$$
+\sigma(x)
+=
+\widehat\sigma_{OOF}(1+\xi(x)),
+$$
+
+$$
+S(x)
+=
+\frac{\mathrm{OverlapCoverage}}{1+\xi(x)}.
+$$
+
+因此，一个点即使落在训练 feature 的 min/max 内，只要明显偏离训练分布主体，也不会获得虚假的高 support。
 
 ---
 
 ## 2. Feasible Support-Anchored Safe Policy Improvement
-
-这是当前方法中最关键的策略更新层。
 
 对每个动作构造 pessimistic value lower bound 与 cost upper bound：
 
@@ -136,24 +181,24 @@ $$
 \cup \{a_0\}.
 $$
 
-behavior policy 的 pessimistic baseline 为：
+behavior policy 的 pessimistic baseline：
 
 $$
 V_\mu^-
 =
-\sum_a \mu(a\mid x)Q_a^-.
+\sum_a\mu(a\mid x)Q_a^-.
 $$
 
-对每个 supported action **分别求最大可行更新幅度**，而不是先选 argmax 再截断。
-
-候选更新：
+候选策略向动作 `a` 移动：
 
 $$
 \pi_a^{(\eta)}
 =(1-\eta)\mu+\eta\delta_a.
 $$
 
-Total-variation trust region 给出：
+### Per-action feasible step
+
+Total-variation trust region：
 
 $$
 \eta
@@ -161,7 +206,7 @@ $$
 \frac{\epsilon_{TV}}{1-\mu(a\mid x)}.
 $$
 
-若动作 cost 高于 behavior baseline，则 cost constraint 进一步给出：
+若动作 cost 高于 behavior baseline：
 
 $$
 \eta
@@ -169,19 +214,19 @@ $$
 \frac{C_{max}-C_\mu^+}{C_a^+-C_\mu^+}.
 $$
 
-因此每个动作都有自己的最大可行步长：
+所以每个动作拥有自己的最大可行更新：
 
 $$
 \eta_a^*
 =
 \min\left(
 1,
-\frac{\epsilon_{TV}}{1-\mu(a\mid x)},
+\eta_{TV,a},
 \eta_{cost,a}
 \right).
 $$
 
-再比较约束后的 pessimistic candidate value：
+可行候选的 pessimistic value：
 
 $$
 V_a^-
@@ -191,27 +236,37 @@ V_a^-
 \eta_a^*Q_a^-.
 $$
 
+最小改进门槛作用于**最终候选策略**：
+
+$$
+V_a^- - V_\mu^-
+>
+\Delta_{min}.
+$$
+
 最终选择：
 
 $$
 a^*
 =
-\arg\max_{a\in\mathcal A_{sup}}V_a^-.
+\arg\max_{a\in\mathcal A_{sup},\,a\ feasible}V_a^-.
 $$
 
-这比“先选最高 LCB 动作，再被 cost cap 截断”更合理：一个理论估值最高但几乎不可更新的动作，不会阻止第二优、但具有更大安全更新空间的动作成为最终候选。
+这避免了“先选最高 LCB 动作，再被 cost / trust-region 截断”的次优行为：理论估值最高但几乎不可更新的动作，不会遮蔽第二优但具有更大安全更新空间的动作。
 
-若 behavior policy 本身已经违反硬 cost upper bound，则直接退回：
+若 behavior policy 已违反硬 cost limit，则回到：
 
 $$
 \pi(a_0)=1.
 $$
 
+前提是 `NO_TREATMENT` 自身满足 hard cost bound；否则问题被判为无可行安全 fallback。
+
 ---
 
 ## 3. Off-Policy Evaluation
 
-策略改进不能只依赖 learned Q / CATE。GrowthEvo 同时计算多个 OPE estimator。
+策略改进不只依赖 learned Q / CATE，同时计算多个 OPE estimator。
 
 ### IPS
 
@@ -241,7 +296,7 @@ $$
 令：
 
 $$
-Z_i=w_i-1,
+Z_i=w_i-1.
 $$
 
 估计 variance-minimizing coefficient：
@@ -261,18 +316,15 @@ $$
 \left[w_i r_i-\widehat\beta^*(w_i-1)\right].
 $$
 
-### OPE is not only a point estimate
+### Overlap diagnostics
 
-必须同时检查：
+除 point estimate 外，同时计算：
 
 - estimator-specific standard error；
-- effective sample size；
-- ESS ratio；
+- effective sample size / ESS ratio；
 - target-policy-mass weighted support coverage；
 - maximum importance weight；
 - weight coefficient of variation。
-
-ESS：
 
 $$
 ESS
@@ -288,9 +340,9 @@ $$
 
 ## 4. One-Sided Conformal Calibration
 
-统计标准误不能覆盖所有 model misspecification，因此策略指标进一步使用历史 matured cohorts 做 one-sided split-conformal calibration。
+统计标准误不能覆盖所有 model misspecification，因此使用独立 calibration samples 做 one-sided split-conformal correction。
 
-对于需要 lower bound 的 value / ROI，使用 residual：
+需要 lower bound 的量：
 
 $$
 r_i^{lower}
@@ -298,7 +350,7 @@ r_i^{lower}
 \widehat y_i-y_i.
 $$
 
-对于需要 upper bound 的 spend / risk，使用：
+需要 upper bound 的量：
 
 $$
 r_i^{upper}
@@ -314,7 +366,7 @@ q_{1-\alpha}
 r_{(\lceil(n+1)(1-\alpha)\rceil)}.
 $$
 
-最终形成：
+形成：
 
 $$
 LCB(y)=\widehat y-q,
@@ -322,15 +374,13 @@ LCB(y)=\widehat y-q,
 UCB(y)=\widehat y+q.
 $$
 
-多指标同时约束时使用 family-wise error correction，使整体 gate 的错误预算不被多个 marginal tests 放大。
+多指标同时约束时，对整体错误预算进行 family-wise correction。
 
 ---
 
 ## 5. Risk-Sensitive Long-Horizon Planning
 
-单步 uplift 最大不等于长期价值最大。长程候选序列通过 stochastic rollout 估计 return distribution，并用 downside CVaR 而不是 mean return 单独排序。
-
-对 return `R`：
+单步 uplift 最大不等于长期价值最大。候选序列通过 stochastic rollout 估计 return distribution，并使用 downside CVaR：
 
 $$
 CVaR_\alpha(R)
@@ -338,7 +388,7 @@ CVaR_\alpha(R)
 \mathbb E[R\mid R\le VaR_\alpha(R)].
 $$
 
-候选序列分数：
+候选分数：
 
 $$
 Score(\pi)
@@ -347,13 +397,11 @@ CVaR_\alpha(R_\pi)
 -\lambda\Pr(\mathrm{constraint\ violation}\mid\pi).
 $$
 
-因此短期均值更高、但 downside tail 更差或 constraint violation probability 更高的计划会被降权。
+短期均值更高、但 downside tail 或 violation probability 更差的候选会被降权。
 
 ---
 
 ## 6. Dynamics-Aware Process Credit
-
-长链决策需要比 terminal reward 更细的 credit assignment。
 
 使用 potential-based shaping：
 
@@ -363,7 +411,7 @@ F_t
 \gamma\Phi(s_{t+1})-\Phi(s_t),
 $$
 
-并结合 evidence gain、cost 与 failure penalties 形成 step reward。
+并结合 evidence gain、cost 与 failure penalty 构造 step reward。
 
 Trajectory advantage 使用 GAE：
 
@@ -379,18 +427,18 @@ A_t
 \delta_t+\gamma\lambda A_{t+1}.
 $$
 
-在 dynamics discontinuity 上设置 credit boundary，使 advantage 不跨不连续动力学传播。算法上等价于在边界处将 bootstrap / recursive trace 截断，从而降低错误归因。
+在 dynamics discontinuity 上截断 bootstrap / recursive trace，避免 advantage 跨错误动力学边界传播。
 
 ---
 
 ## Algorithm source
 
-公开代码入口只列算法实现：
+仅列算法实现：
 
 | Algorithm | Source |
 | --- | --- |
-| Cross-Fitted DR / CATE | `growthevo/causal/dr_learner.py` |
-| Support-Anchored Safe PI | `growthevo/rl/safe_policy_improvement.py` |
+| Cross-Fitted DR / support-aware CATE | `growthevo/causal/dr_learner.py` |
+| Feasible Support-Anchored Safe PI | `growthevo/rl/safe_policy_improvement.py` |
 | IPS / DR / β*-IPS OPE | `growthevo/rl/ope.py` |
 | One-sided conformal calibration | `growthevo/rl/conformal.py` |
 | Risk-sensitive MPC / CVaR | `growthevo/rl/model_based.py` |
@@ -403,20 +451,18 @@ README 不展开非算法实现细节。
 
 ## Evaluation
 
-### Reproducible algorithmic gates
+### Algorithmic acceptance gates
 
-当前仓库中的算法回归测试覆盖：
-
-| Property | Acceptance gate |
+| Property | Gate |
 | --- | ---: |
 | CATE recovery | RMSE `< 0.03` |
-| Cross-fitted overlap | coverage `> 0.95` |
+| Propensity overlap | coverage `> 0.95` |
 | Learned CATE policy | oracle regret `< 0.015` |
 | Low-support optimistic action | excluded |
-| Unsafe expected cost | fallback to `NO_TREATMENT` |
+| Unsafe expected cost | `NO_TREATMENT` fallback |
 | Dynamics boundary | stops GAE leakage |
 
-### Reported evaluation record
+### Evaluation record
 
 | Benchmark | Metric | Result |
 | --- | --- | ---: |
@@ -425,7 +471,7 @@ README 不展开非算法实现细节。
 | **Criteo Uplift v2** | Uplift@10% | **+6.8%** |
 | **Open Bandit Dataset** | OPE Error | **-8.4%** |
 
-GrowthAgentBench 是已知 ground-truth treatment effects 的 synthetic causal fixture。外部 public benchmark 数字属于 evaluation record，不等同于 production evidence。
+GrowthAgentBench 使用已知 ground-truth treatment effects，用于检验 CATE recovery 与 policy regret。
 
 ---
 
@@ -453,10 +499,10 @@ pytest
 
 ## Method boundaries
 
-- Causal estimates are not treated as valid outside observed support merely because a function approximator can extrapolate.
-- World-model rollout is a risk-ranking mechanism, not a replacement for causal evidence.
-- OPE point estimates are not sufficient when ESS or support coverage is poor.
-- Uncertainty is used pessimistically during policy improvement.
+- Causal estimates are not trusted outside observed support merely because a function approximator can extrapolate.
+- OPE point estimates are insufficient when ESS or support coverage is weak.
+- Policy improvement uses pessimistic uncertainty and per-action feasibility.
+- Long-horizon rollout ranks risk; it does not replace causal estimation.
 - `NO_TREATMENT` remains available whenever positive treatment evidence is insufficient.
 
 ---
@@ -465,6 +511,6 @@ pytest
 
 ### GrowthEvo-Harness
 
-**Causal estimation · Conservative policy improvement · Counterfactual evaluation · Risk-sensitive learning**
+**Causal estimation · Feasible conservative improvement · Counterfactual evaluation · Risk-sensitive learning**
 
 </div>
