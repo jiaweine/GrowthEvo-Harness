@@ -39,6 +39,8 @@ class SafePolicyImprovementConfig:
             raise ValueError("support_floor must be in (0, 1]")
         if not 0 <= self.max_total_variation <= 1:
             raise ValueError("max_total_variation must be in [0, 1]")
+        if self.min_pessimistic_improvement < 0:
+            raise ValueError("min_pessimistic_improvement must be non-negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +99,8 @@ class SupportAnchoredPolicyImprover:
         )
 
         if max_expected_cost is not None and baseline_cost > max_expected_cost:
+            if cost_ucb[Channel.NO_TREATMENT] > max_expected_cost:
+                raise ValueError("NO_TREATMENT does not satisfy the hard cost limit")
             fallback = {row.action: 0.0 for row in rows}
             fallback[Channel.NO_TREATMENT] = 1.0
             return PolicyImprovementResult(
@@ -122,10 +126,7 @@ class SupportAnchoredPolicyImprover:
             base_reasons.append("unsupported_actions_excluded")
 
         improving = [
-            row
-            for row in supported
-            if value_lcb[row.action]
-            > baseline_value + cfg.min_pessimistic_improvement
+            row for row in supported if value_lcb[row.action] > baseline_value
         ]
         if not improving:
             selected = max(
@@ -153,6 +154,7 @@ class SupportAnchoredPolicyImprover:
                 bool,
             ]
         ] = []
+        nonzero_update_exists = False
         cost_blocked = False
 
         for row in improving:
@@ -178,15 +180,21 @@ class SupportAnchoredPolicyImprover:
                 cost_blocked = cost_blocked or cost_cap_active
                 continue
 
+            nonzero_update_exists = True
             candidate_value = (
                 (1.0 - mixture) * baseline_value
                 + mixture * value_lcb[row.action]
             )
+            if (
+                candidate_value
+                <= baseline_value + cfg.min_pessimistic_improvement
+            ):
+                continue
+
             candidate_cost = (
                 (1.0 - mixture) * baseline_cost
                 + mixture * cost_ucb[row.action]
             )
-            total_variation = mixture * (1.0 - selected_behavior)
             feasible.append(
                 (
                     candidate_value,
@@ -206,7 +214,10 @@ class SupportAnchoredPolicyImprover:
             reasons = list(base_reasons)
             if cost_blocked:
                 reasons.append("expected_cost_cap_active")
-            reasons.append("safe_update_mass_is_zero")
+            if nonzero_update_exists:
+                reasons.append("min_pessimistic_improvement_not_met")
+            else:
+                reasons.append("safe_update_mass_is_zero")
             return PolicyImprovementResult(
                 probabilities=behavior,
                 selected_action=selected.action,
