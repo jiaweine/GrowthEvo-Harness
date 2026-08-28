@@ -19,6 +19,8 @@
 
 **Incrementality first · Holdout is an action · Evidence before promotion · Evolution stays inside hard safety boundaries**
 
+[Quick Start](#quick-start) · [Decision Loop](#decision-loop) · [Evidence](#evidence--reproducibility) · [Safety](#safety-invariants) · [Project Boundary](#what-this-project-is--and-is-not) · [Docs](#documentation)
+
 </div>
 
 ---
@@ -44,6 +46,25 @@ GrowthEvo-Harness 优化的是另一个问题：
 | Greedy policy optimization | 容易利用模型外推，在低 support 区域过度乐观 | Support-Anchored Safe Policy Improvement |
 | Agent 自主修改策略 | 容易把“学习”与“裁判”混在一起 | Learning / Runtime / Verifier 分离 |
 | 单步 reward | 难处理延迟反馈、rollback 和错误归因 | GrowthPRM + dynamics-aware credit boundary |
+
+---
+
+## 30-second mental model
+
+GrowthEvo 的核心不是“让一个 Agent 更大胆地自动做营销”，而是让策略改进始终留在 **因果证据与安全边界** 内：
+
+```text
+1. Estimate      估计 action 相对 NO_TREATMENT 的增量效应
+2. Constrain     只在有 behavior support 且满足 hard constraints 的区域改策略
+3. Verify        用 OPE + uncertainty + conformal evidence 判断是否值得提升
+4. Execute       通过 legal-action gate 后才允许执行
+5. Learn         用 outcome / process reward 回传 credit
+6. Evolve        从 failure trace 改进 whitelisted harness coordinates
+```
+
+一句话概括：
+
+> **No evidence → no confident improvement. No legal action → no treatment. No verifier pass → no promotion.**
 
 ---
 
@@ -110,6 +131,8 @@ estimate incrementality
 
 ## Quick Start
 
+### 1. Install and run the full test suite
+
 ```bash
 git clone https://github.com/jiaweine/GrowthEvo-Harness.git
 cd GrowthEvo-Harness
@@ -119,7 +142,6 @@ source .venv/bin/activate
 pip install -e '.[dev]'
 
 pytest
-python examples/demo.py
 ```
 
 Windows PowerShell:
@@ -129,10 +151,15 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e '.[dev]'
 pytest
+```
+
+### 2. Run the runtime / verifier demo
+
+```bash
 python examples/demo.py
 ```
 
-`examples/demo.py` 会串起一个最小闭环：
+`examples/demo.py` 串起一个最小运行闭环：
 
 ```text
 GrowthGoal + constraints
@@ -145,11 +172,30 @@ GrowthGoal + constraints
 → Counterfactual Verifier
 ```
 
-如果想看 planner trajectory / training export，运行：
+### 3. Run causal learning + policy improvement + training export
 
 ```bash
 python examples/training_demo.py
 ```
+
+这个 demo 会输出：
+
+```text
+held-out CATE metrics
+→ CATE serving into runtime belief
+→ support-anchored policy improvement
+→ planner trajectory JSONL export
+```
+
+### 4. Reproduce the in-repo benchmark acceptance tests
+
+```bash
+pytest -q tests/test_training_benchmark.py
+```
+
+当前测试直接检查 CATE recovery、support diagnostics、oracle policy regret、safe policy improvement、`NO_TREATMENT` fallback 与 dynamics-aware GAE boundary，而不是只检查代码能否 import。
+
+CI 在 Python **3.11 / 3.12** 上运行完整测试，并额外执行两个 example smoke tests。
 
 ---
 
@@ -294,17 +340,52 @@ NO_TREATMENT semantics
 
 ---
 
-## Evaluation
+## Evidence & reproducibility
 
-项目评测覆盖三个互补层次：CATE 估计、uplift ranking 与 logged-bandit OPE。
+GrowthEvo 将“能运行”“benchmark 表现”和“生产证据”明确分开。README 中的 claim 应落在以下 evidence ladder 中：
+
+```text
+Level 1 — executable repository evidence
+           code + tests + deterministic/synthetic fixtures
+
+Level 2 — project evaluation record
+           external public benchmark evaluation
+
+Level 3 — deployment evidence
+           randomized / shadow / canary / production outcomes
+```
+
+当前仓库主要提供 **Level 1** 证据；外部 benchmark 数字属于 **Level 2**；本项目当前不声称已经具备 **Level 3 production evidence**。
+
+### Reproducible acceptance gates in this repository
+
+`tests/test_training_benchmark.py` 对关键行为设有明确 acceptance gates：
+
+| Check | Repository gate |
+| --- | ---: |
+| Push CATE recovery | RMSE `< 0.03` |
+| Email / Push serving support | minimum / mean support `> 0.90` |
+| Cross-fitted training overlap | overlap coverage `> 0.95` |
+| Learned CATE policy | oracle regret `< 0.015` |
+| Unsupported optimistic action | must be excluded |
+| Unsafe behavior cost | must fall back to `NO_TREATMENT` |
+| Credit boundary | must stop GAE leakage across dynamics boundary |
+
+Run them directly:
+
+```bash
+pytest -q tests/test_training_benchmark.py
+```
+
+### Project evaluation record
 
 | Benchmark | Purpose | Reported result | Evidence status |
 | --- | --- | ---: | --- |
-| **GrowthAgentBench** | known-ground-truth CATE + oracle policy regression | CATE RMSE **0.026** · Oracle Regret **0.013** | synthetic fixture included in core repo |
+| **GrowthAgentBench** | known-ground-truth CATE + oracle policy regression | CATE RMSE **0.026** · Oracle Regret **0.013** | synthetic evaluation record + in-repo regression gates |
 | **Criteo Uplift v2** | uplift ranking / top-decile treatment-effect quality | Uplift@10% **+6.8%** | project evaluation record |
 | **Open Bandit Dataset** | logged-bandit off-policy evaluation | OPE Error **-8.4%** | project evaluation record |
 
-最小仓库内自带的可审计 benchmark 是 `GrowthAgentBench`：它提供已知 heterogeneous treatment effects、context-dependent behavior propensities 与 oracle potential outcomes，用于回归 CATE / policy quality。
+最小仓库自带的可审计 benchmark 是 `GrowthAgentBench`。它包含已知 heterogeneous treatment effects、context-dependent behavior propensities 与 oracle potential outcomes，因此适合检查 CATE recovery 与 policy regret；它不是 production evidence，也不替代真实 randomized experiment。
 
 ```python
 from growthevo.bench import GrowthAgentBench
@@ -315,7 +396,7 @@ model, metrics = bench.fit_cate(treatment=Channel.PUSH)
 print(metrics)
 ```
 
-> Public benchmark 数字应理解为项目 evaluation record；核心仓库不把外部数据集结果伪装成 production evidence。详细证据边界见 [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md)。
+详细实现状态与证据边界见 [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md)。
 
 ---
 
