@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import blake2b
-from math import fsum, sqrt
+from math import ceil, fsum, sqrt
 from typing import Iterable, Mapping, Sequence
 
 from growthevo.models import Channel
@@ -21,8 +21,6 @@ def _validate_features(features: Sequence[float], expected_dim: int | None = Non
 
 
 def _solve_linear_system(matrix: list[list[float]], target: list[float]) -> list[float]:
-    """Solve a small dense linear system with partial-pivot Gauss-Jordan elimination."""
-
     n = len(target)
     if len(matrix) != n or any(len(row) != n for row in matrix):
         raise ValueError("matrix must be square and match target dimension")
@@ -49,14 +47,34 @@ def _solve_linear_system(matrix: list[list[float]], target: list[float]) -> list
     return [augmented[row][-1] for row in range(n)]
 
 
+def _invert_matrix(matrix: list[list[float]]) -> tuple[tuple[float, ...], ...]:
+    n = len(matrix)
+    columns: list[list[float]] = []
+    for column in range(n):
+        target = [0.0] * n
+        target[column] = 1.0
+        columns.append(_solve_linear_system(matrix, target))
+    return tuple(
+        tuple(columns[column][row] for column in range(n))
+        for row in range(n)
+    )
+
+
+def _mahalanobis_distance(
+    features: Sequence[float],
+    center: Sequence[float],
+    precision: Sequence[Sequence[float]],
+) -> float:
+    delta = [float(value) - float(mean) for value, mean in zip(features, center, strict=True)]
+    transformed = [
+        fsum(weight * value for weight, value in zip(row, delta, strict=True))
+        for row in precision
+    ]
+    squared = fsum(value * transformed_value for value, transformed_value in zip(delta, transformed, strict=True))
+    return sqrt(max(0.0, squared))
+
+
 class RidgeRegressor:
-    """Dependency-free ridge regressor used by the reference causal learner.
-
-    The class is deliberately small: production experiments can replace it with
-    sklearn, CausalML, EconML or a neural model while keeping the cross-fitting
-    and doubly-robust contracts unchanged.
-    """
-
     def __init__(self, ridge: float = 1e-3) -> None:
         if ridge <= 0:
             raise ValueError("ridge must be positive")
@@ -104,8 +122,6 @@ class RidgeRegressor:
 
 @dataclass(frozen=True, slots=True)
 class LoggedTreatmentRecord:
-    """One logged growth decision with the full logging-policy probability vector."""
-
     unit_id: str
     features: FeatureVector
     action: Channel
@@ -139,13 +155,6 @@ class CATEEstimate:
 
 @dataclass(frozen=True, slots=True)
 class FittedTreatmentEffect:
-    """Fitted one-vs-control DR-Learner with explicit support diagnostics.
-
-    ``uncertainty`` is a residual/extrapolation diagnostic, not a causal
-    confidence interval. Promotion still belongs to randomized/logged OPE and
-    the Counterfactual Verifier.
-    """
-
     treatment: Channel
     control: Channel
     model: RidgeRegressor
@@ -153,19 +162,37 @@ class FittedTreatmentEffect:
     sample_size: int
     overlap_coverage: float
     feature_bounds: tuple[tuple[float, float], ...]
+    feature_center: FeatureVector = ()
+    feature_precision: tuple[tuple[float, ...], ...] = ()
+    support_radius: float = 1.0
 
     def predict(self, features: Sequence[float]) -> CATEEstimate:
         row = _validate_features(features, len(self.feature_bounds))
-        distances: list[float] = []
+
+        bound_distances: list[float] = []
         for value, (low, high) in zip(row, self.feature_bounds, strict=True):
             width = max(1e-9, high - low)
             if value < low:
-                distances.append((low - value) / width)
+                bound_distances.append((low - value) / width)
             elif value > high:
-                distances.append((value - high) / width)
+                bound_distances.append((value - high) / width)
             else:
-                distances.append(0.0)
-        extrapolation = fsum(distances) / len(distances)
+                bound_distances.append(0.0)
+        bound_extrapolation = fsum(bound_distances) / len(bound_distances)
+
+        radial_extrapolation = 0.0
+        if self.feature_center and self.feature_precision:
+            distance = _mahalanobis_distance(
+                row,
+                self.feature_center,
+                self.feature_precision,
+            )
+            radial_extrapolation = max(
+                0.0,
+                distance / max(1e-9, self.support_radius) - 1.0,
+            )
+
+        extrapolation = max(bound_extrapolation, radial_extrapolation)
         uncertainty = self.residual_scale * (1.0 + extrapolation)
         support_score = self.overlap_coverage / (1.0 + extrapolation)
         return CATEEstimate(
@@ -179,18 +206,7 @@ class FittedTreatmentEffect:
 
 
 class CrossFittedDRLearner:
-    """Cross-fitted one-vs-control doubly-robust treatment-effect learner.
-
-    For a treatment ``a`` and control ``a0``, records are restricted to the pair
-    and logging propensities are renormalized within that pair. Outcome models
-    are trained on K-1 folds, and each held-out sample receives the standard
-    augmented inverse-propensity pseudo-outcome:
-
-        m1(x)-m0(x) + A(Y-m1(x))/e(x) - (1-A)(Y-m0(x))/(1-e(x)).
-
-    A second-stage model is fitted only on out-of-fold pseudo-outcomes, avoiding
-    the most direct nuisance-model leakage into treatment-effect fitting.
-    """
+    """Cross-fitted one-vs-control doubly-robust treatment-effect learner."""
 
     def __init__(
         self,
@@ -198,6 +214,7 @@ class CrossFittedDRLearner:
         n_folds: int = 5,
         ridge: float = 1e-3,
         propensity_floor: float = 0.02,
+        support_quantile: float = 0.95,
     ) -> None:
         if n_folds < 2:
             raise ValueError("n_folds must be at least 2")
@@ -205,9 +222,12 @@ class CrossFittedDRLearner:
             raise ValueError("ridge must be positive")
         if not 0 < propensity_floor < 0.5:
             raise ValueError("propensity_floor must be in (0, 0.5)")
+        if not 0.5 <= support_quantile < 1.0:
+            raise ValueError("support_quantile must be in [0.5, 1)")
         self.n_folds = n_folds
         self.ridge = ridge
         self.propensity_floor = propensity_floor
+        self.support_quantile = support_quantile
 
     @staticmethod
     def _stable_key(unit_id: str) -> bytes:
@@ -229,7 +249,7 @@ class CrossFittedDRLearner:
                 )
             for position, index in enumerate(indices):
                 assignments[index] = position % self.n_folds
-        if any(fold < 0 for fold in assignments):  # pragma: no cover - defensive.
+        if any(fold < 0 for fold in assignments):
             raise RuntimeError("failed to assign every treatment/control row to a fold")
         return assignments
 
@@ -285,23 +305,41 @@ class CrossFittedDRLearner:
                 e = max(self.propensity_floor, min(1.0 - self.propensity_floor, raw_e))
 
                 if row.action is treatment:
-                    pseudo = m1 - m0 + (row.outcome - m1) / e
+                    pseudo_outcomes[index] = m1 - m0 + (row.outcome - m1) / e
                 else:
-                    pseudo = m1 - m0 - (row.outcome - m0) / (1.0 - e)
-                pseudo_outcomes[index] = pseudo
+                    pseudo_outcomes[index] = m1 - m0 - (row.outcome - m0) / (1.0 - e)
+
+        effect_oof_predictions = [0.0] * len(rows)
+        for fold in range(self.n_folds):
+            train_indices = [index for index in range(len(rows)) if folds[index] != fold]
+            held_indices = [index for index in range(len(rows)) if folds[index] == fold]
+            effect_fold_model = RidgeRegressor(self.ridge).fit(
+                (rows[index].features for index in train_indices),
+                (pseudo_outcomes[index] for index in train_indices),
+            )
+            for index in held_indices:
+                effect_oof_predictions[index] = effect_fold_model.predict_one(rows[index].features)
+
+        residual_scale = sqrt(
+            max(
+                0.0,
+                fsum(
+                    (pseudo - prediction) ** 2
+                    for pseudo, prediction in zip(
+                        pseudo_outcomes,
+                        effect_oof_predictions,
+                        strict=True,
+                    )
+                )
+                / len(rows),
+            )
+        )
 
         effect_model = RidgeRegressor(self.ridge).fit(
             (row.features for row in rows),
             pseudo_outcomes,
         )
-        fitted = effect_model.predict(row.features for row in rows)
-        residual_scale = sqrt(
-            max(
-                0.0,
-                fsum((pseudo - prediction) ** 2 for pseudo, prediction in zip(pseudo_outcomes, fitted, strict=True))
-                / len(rows),
-            )
-        )
+
         bounds = tuple(
             (
                 min(row.features[index] for row in rows),
@@ -309,6 +347,31 @@ class CrossFittedDRLearner:
             )
             for index in range(feature_dim)
         )
+        center = tuple(
+            fsum(row.features[index] for row in rows) / len(rows)
+            for index in range(feature_dim)
+        )
+        covariance = [[0.0 for _ in range(feature_dim)] for _ in range(feature_dim)]
+        denominator = max(1, len(rows) - 1)
+        for row in rows:
+            delta = [row.features[index] - center[index] for index in range(feature_dim)]
+            for left in range(feature_dim):
+                for right in range(feature_dim):
+                    covariance[left][right] += delta[left] * delta[right] / denominator
+        regularization = max(self.ridge, 1e-6)
+        for index in range(feature_dim):
+            covariance[index][index] += regularization
+        precision = _invert_matrix(covariance)
+
+        training_distances = sorted(
+            _mahalanobis_distance(row.features, center, precision) for row in rows
+        )
+        radius_index = min(
+            len(training_distances) - 1,
+            max(0, ceil(len(training_distances) * self.support_quantile) - 1),
+        )
+        support_radius = max(1e-9, training_distances[radius_index])
+
         return FittedTreatmentEffect(
             treatment=treatment,
             control=control,
@@ -317,4 +380,7 @@ class CrossFittedDRLearner:
             sample_size=len(rows),
             overlap_coverage=supported / len(rows),
             feature_bounds=bounds,
+            feature_center=center,
+            feature_precision=precision,
+            support_radius=support_radius,
         )
