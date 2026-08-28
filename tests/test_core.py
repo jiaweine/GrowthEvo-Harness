@@ -13,6 +13,7 @@ from growthevo.models import (
     UserObservation,
     VerificationStatus,
 )
+from growthevo.rl.causal_reward import CausalRewardModel, RewardWeights
 from growthevo.rl.hierarchical_policy import HierarchicalGrowthPolicy
 from growthevo.rl.ope import LoggedBanditRecord, evaluate_policy
 from growthevo.runtime.belief_state import build_causal_belief
@@ -20,6 +21,7 @@ from growthevo.runtime.engine import GrowthEvoRuntime
 from growthevo.runtime.event_store import EventStore
 from growthevo.runtime.legal_action import LegalActionGate
 from growthevo.runtime.planner import GrowthHypothesis
+from growthevo.simulator.user_world_model import UserWorldModel
 from growthevo.verifier.counterfactual import (
     CounterfactualVerifier,
     ThresholdEvidenceGate,
@@ -72,6 +74,19 @@ def _verifier() -> CounterfactualVerifier:
             min_support_coverage=0.95,
             max_importance_weight=20.0,
         ),
+    )
+
+
+def _reward_model() -> CausalRewardModel:
+    return CausalRewardModel(
+        RewardWeights(
+            conversion=0.0,
+            ltv=1.0,
+            retention=0.0,
+            cost=1.0,
+            fatigue=0.0,
+            risk=0.0,
+        )
     )
 
 
@@ -213,7 +228,10 @@ def test_evolver_rejects_frozen_coordinates() -> None:
 
 
 def test_runtime_executes_and_preserves_event_integrity() -> None:
-    runtime = GrowthEvoRuntime()
+    runtime = GrowthEvoRuntime(
+        world_model=UserWorldModel(seed=7),
+        reward_model=_reward_model(),
+    )
     goal = GrowthGoal(
         metric="incremental_ltv",
         horizon_days=30,
