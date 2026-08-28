@@ -9,7 +9,9 @@ from growthevo.models import (
     UserObservation,
     VerificationStatus,
 )
+from growthevo.rl.causal_reward import CausalRewardModel, RewardWeights
 from growthevo.runtime.engine import GrowthEvoRuntime
+from growthevo.simulator.user_world_model import UserWorldModel
 from growthevo.verifier.counterfactual import (
     CounterfactualVerifier,
     ThresholdEvidenceGate,
@@ -27,6 +29,19 @@ def _verifier() -> CounterfactualVerifier:
             min_support_coverage=0.95,
             max_importance_weight=20.0,
         ),
+    )
+
+
+def _reward_model() -> CausalRewardModel:
+    return CausalRewardModel(
+        RewardWeights(
+            conversion=0.0,
+            ltv=1.0,
+            retention=0.0,
+            cost=1.0,
+            fatigue=0.0,
+            risk=0.0,
+        )
     )
 
 
@@ -48,7 +63,11 @@ def test_runtime_persists_cohort_verification_in_same_event_chain() -> None:
         lifecycle_stage="dormant",
         consented_channels=frozenset({Channel.PUSH}),
     )
-    runtime = GrowthEvoRuntime(verifier=_verifier())
+    runtime = GrowthEvoRuntime(
+        world_model=UserWorldModel(seed=7),
+        reward_model=_reward_model(),
+        verifier=_verifier(),
+    )
     runtime.run(goal, observation)
 
     evidence = PolicyEvidence(
