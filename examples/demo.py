@@ -7,10 +7,12 @@ from growthevo.models import (
     UserObservation,
     to_primitive,
 )
+from growthevo.rl.causal_reward import CausalRewardModel, RewardWeights
 from growthevo.rl.conformal import ConformalCalibrationRecord, ConformalPolicyCalibrator
 from growthevo.rl.ope import LoggedBanditRecord, evaluate_policy, policy_evidence_from_ope
 from growthevo.rl.process_reward import ProcessState, TrajectoryStepSignal
 from growthevo.runtime.engine import GrowthEvoRuntime
+from growthevo.simulator.user_world_model import UserWorldModel
 from growthevo.verifier.counterfactual import (
     CounterfactualVerifier,
     ThresholdEvidenceGate,
@@ -56,9 +58,19 @@ def main() -> None:
         consented_channels=frozenset({Channel.PUSH, Channel.EMAIL, Channel.IN_APP}),
     )
 
-    # The demo chooses one explicit reference promotion protocol. These values are
-    # not defaults in the Runtime/Verifier and must not be treated as universal
-    # deployment thresholds.
+    # The demo chooses one explicit reference execution and promotion protocol.
+    # The net-value reward is incremental LTV minus direct cost; it is a demo
+    # choice, not a package-wide default or deployment recommendation.
+    reward_model = CausalRewardModel(
+        RewardWeights(
+            conversion=0.0,
+            ltv=1.0,
+            retention=0.0,
+            cost=1.0,
+            fatigue=0.0,
+            risk=0.0,
+        )
+    )
     verifier = CounterfactualVerifier(
         VerifierConfig(z_score=1.96),
         evidence_gate=ThresholdEvidenceGate(
@@ -69,7 +81,11 @@ def main() -> None:
             max_importance_weight=5.0,
         ),
     )
-    runtime = GrowthEvoRuntime(verifier=verifier)
+    runtime = GrowthEvoRuntime(
+        world_model=UserWorldModel(seed=7),
+        reward_model=reward_model,
+        verifier=verifier,
+    )
     result = runtime.run(goal, observation)
 
     print("=== Runtime decision ===")
