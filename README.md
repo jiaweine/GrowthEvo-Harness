@@ -2,66 +2,210 @@
 
 # GrowthEvo-Harness
 
-### Causal Reinforcement Learning Runtime for Autonomous User Growth
+### Causal Decision Runtime for Autonomous User Growth
 
-**让 Growth Agent 在因果增量、行为策略 support、预算约束与可回滚边界内自主决策，并从真实轨迹与失败证据中安全学习。**
+**把用户增长从「预测谁会转化」升级为「验证什么动作真正带来增量价值」。**
+
+面向优惠触达、渠道选择、预算分配、召回与留存的 **因果决策、安全策略改进与 bounded Agent evolution runtime**。
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![CI](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml)
+![Version](https://img.shields.io/badge/version-0.1.0-555555)
+![Causal RL](https://img.shields.io/badge/Causal-RL-8A2BE2)
+![OPE](https://img.shields.io/badge/OPE-IPS%20%7C%20DR%20%7C%20Robust-0A7EA4)
+![Status](https://img.shields.io/badge/status-reference%20implementation-13784B)
 
-`CAUSAL POMDP` · `CROSS-FITTED DR` · `HIERARCHICAL RL` · `SUPPORT-ANCHORED PI` · `ROBUST OPE` · `CONFORMAL GATE` · `GROWTHPRM` · `DYNAMICS-AWARE GAE` · `RISK-SENSITIVE MPC` · `HARNESS EVOLUTION`
+`Causal POMDP` · `Cross-Fitted DR` · `Hierarchical Policy` · `Support-Anchored PI` · `Robust OPE` · `Conformal Gate` · `GrowthPRM` · `Risk-Sensitive MPC` · `Harness Evolution`
+
+**Incrementality first · Holdout is an action · Evidence before promotion · Evolution stays inside hard safety boundaries**
 
 </div>
 
 ---
 
-## Why this repository exists
+## Why GrowthEvo?
 
-传统营销自动化回答“执行哪个活动”；GrowthEvo 研究更难的长期决策问题：
+大多数增长系统优化的是：
 
-> **对谁、什么时候、通过什么渠道、投入多少预算，以及什么时候应该什么都不做。**
+> **谁最可能点击、购买或回流？**
 
-项目把用户增长建模为带预算、ROI、频控、疲劳、延迟反馈和部分可观测状态的 **Causal POMDP**。核心目标不是 raw conversion，而是 incremental outcome：
+GrowthEvo-Harness 优化的是另一个问题：
 
-\[
-\tau(x,a)=\mathbb E[Y(a)-Y(a_0)\mid X=x],
-\qquad a_0=NO\_TREATMENT.
-\]
+> **对这个用户，在这个时刻采取这个动作，相比什么都不做，是否真的会产生足够可信的增量收益？**
 
-`NO_TREATMENT` / holdout 是一级动作。一个本来就会购买的用户，不应该仅因为转化概率高而被错误发券。
+这两个问题并不等价。一个本来就会转化的用户，可能拥有很高的 conversion probability，却不应该被额外发券；一个短期点击率高的动作，也可能因为疲劳、预算消耗或长期 churn risk 而不值得执行。
+
+因此，GrowthEvo 将用户增长建模为带 **预算、ROI、频控、疲劳、延迟反馈、logging-policy support 与部分可观测状态** 的 Causal POMDP，并把 `NO_TREATMENT` / holdout 作为一级动作。
+
+| 常见方法 | 主要问题 | GrowthEvo 的处理 |
+| --- | --- | --- |
+| Propensity / conversion model | 预测会不会转化，不回答动作是否造成转化 | 显式估计 treatment uplift / CATE |
+| Campaign rules | 能执行，但难证明策略比历史策略更好 | OPE + uncertainty + support-aware verification |
+| Greedy policy optimization | 容易利用模型外推，在低 support 区域过度乐观 | Support-Anchored Safe Policy Improvement |
+| Agent 自主修改策略 | 容易把“学习”与“裁判”混在一起 | Learning / Runtime / Verifier 分离 |
+| 单步 reward | 难处理延迟反馈、rollback 和错误归因 | GrowthPRM + dynamics-aware credit boundary |
 
 ---
 
-## Runtime and learning loop
+## What is implemented
+
+GrowthEvo-Harness 不是单一 uplift model，也不是 campaign scheduler。它实现了一条从 **因果估计 → 策略决策 → 离线验证 → 轨迹信用分配 → bounded harness evolution** 的 reference runtime，并提供真实数据 benchmark plumbing。
+
+| Capability | Implementation | Code |
+| --- | --- | --- |
+| **Causal runtime** | Goal / belief state / event store / legal action / `NO_TREATMENT` | `growthevo/runtime/*` |
+| **Causal estimation** | Cross-Fitted DR-Learner、CATE serving、support / uncertainty diagnostics | `growthevo/causal/*` |
+| **Policy decisioning** | Hierarchical policy、support-anchored conservative improvement | `growthevo/rl/hierarchical_policy.py`, `growthevo/rl/safe_policy_improvement.py` |
+| **Offline evidence** | DM / IPS / SNIPS / DR / SWITCH-DR / DR-OS、ESS、support / weight diagnostics | `growthevo/rl/ope.py` |
+| **Deployment gate** | Split-conformal calibration + Counterfactual Verifier | `growthevo/rl/conformal.py`, `growthevo/verifier/*` |
+| **Long-horizon risk** | stochastic rollout、CVaR、constraint violation、risk-sensitive MPC | `growthevo/rl/model_based.py` |
+| **Agent credit** | GrowthPRM、GAE、rollback-aware credit boundary | `growthevo/rl/process_reward.py`, `growthevo/training/*` |
+| **Real-data adapters** | Criteo Uplift、Open Bandit Dataset、KuaiRand sequence export | `growthevo/bench/*` |
+| **Harness evolution** | Failure Miner、bounded patch proposal、event-sourced evolution | `growthevo/evolution/*` |
+
+> **Design rule:** learner 可以提出更优策略，但不能绕过 hard constraints，也不能修改 Verifier 的判定标准。
+
+---
+
+## Decision loop
 
 ```mermaid
 flowchart LR
-    LOG[Logged / Randomized Data] --> DR[Cross-Fitted DR]
-    DR --> SERVE[CATE Serving]
-    SERVE --> BELIEF[Causal Belief]
+    G[Growth Goal + Constraints] --> B[Causal Belief State]
+    D[Logged / Randomized Data] --> C[Cross-Fitted DR / CATE]
+    C --> B
 
-    GOAL[Goal + Constraints] --> BELIEF
-    BELIEF --> PLAN[Hypothesis Planner]
-    PLAN --> POLICY[Hierarchical Policy]
-    POLICY --> SPI[Support-Anchored PI]
-    SPI --> LEGAL{Legal Action Gate}
-    LEGAL -->|allowed| EXEC[Execution]
-    LEGAL -->|blocked| HOLD[NO_TREATMENT]
+    B --> P[Hypothesis Planner]
+    P --> H[Hierarchical Policy]
+    H --> S[Support-Anchored Safe PI]
+    S --> L{Legal Action Gate}
 
-    EXEC --> OBS[Observation]
-    OBS --> PRM[GrowthPRM]
-    PRM --> GAE[GAE / Trainer Export]
-    OBS --> OUT[Delayed Outcome]
-    OUT --> OPE[DM / IPS / SNIPS / DR / Robust OPE]
-    OPE --> VERIFY[Conformal + Verifier]
-    VERIFY -->|pass| PROMOTE[Shadow / Canary / Promotion]
-    VERIFY -->|insufficient / fail| FAILURE[Failure Trace]
-    FAILURE --> EVOLVE[Harness Evolution]
-    EVOLVE --> MPC[World-Model Stress / CVaR]
-    MPC --> PLAN
+    L -->|allowed| X[Execute Action]
+    L -->|blocked| N[NO_TREATMENT]
+
+    X --> O[Observation / Delayed Outcome]
+    N --> O
+    O --> R[GrowthPRM + Trajectory Credit]
+    O --> E[DM / IPS / SNIPS / DR / Robust OPE]
+    E --> V[Conformal + Counterfactual Verifier]
+
+    V -->|PASS| M[Shadow / Canary / Promotion]
+    V -->|FAIL / insufficient evidence| F[Failure Trace]
+    F --> EV[Bounded Harness Evolution]
+    EV --> W[World-Model Stress / CVaR MPC]
+    W --> P
 ```
 
-**Learning、Runtime、Verifier 故意分开。训练器可以提出候选策略，但不能修改裁判。**
+核心闭环不是“模型给出最高分动作 → 直接执行”，而是：
+
+```text
+estimate incrementality
+→ respect behavior support
+→ generate a constrained candidate policy
+→ verify value + risk + overlap evidence
+→ promote only when evidence is sufficient
+→ mine failures and evolve only whitelisted coordinates
+```
+
+---
+
+## Quick Start
+
+```bash
+git clone https://github.com/jiaweine/GrowthEvo-Harness.git
+cd GrowthEvo-Harness
+
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+
+pytest
+python examples/demo.py
+python examples/training_demo.py
+```
+
+Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e '.[dev]'
+pytest
+python examples/demo.py
+python examples/training_demo.py
+```
+
+`examples/demo.py` 会串起一个最小闭环：
+
+```text
+GrowthGoal + constraints
+→ UserObservation
+→ explicit execution environment + reward utility
+→ Runtime decision
+→ append-only event chain
+→ GrowthPRM trajectory scoring
+→ OPE diagnostics
+→ conformal calibration
+→ Counterfactual Verifier
+```
+
+### Minimal execution example
+
+Runtime 执行是 **fail-closed** 的：仓库不会替调用方静默选择 synthetic environment 或业务 reward scalarization。下面的 simulator 和 net-value utility 只是显式的 reference/demo 选择。
+
+```python
+from growthevo.models import Channel, GrowthConstraints, GrowthGoal, UserObservation
+from growthevo.rl.causal_reward import CausalRewardModel, RewardWeights
+from growthevo.runtime.engine import GrowthEvoRuntime
+from growthevo.simulator.user_world_model import UserWorldModel
+
+constraints = GrowthConstraints(
+    max_budget=100.0,
+    min_roi=1.5,
+    max_fatigue=0.8,
+    max_churn_risk=0.5,
+)
+
+goal = GrowthGoal(
+    metric="incremental_ltv",
+    horizon_days=30,
+    target_delta=0.05,
+    constraints=constraints,
+)
+
+observation = UserObservation(
+    user_id="dormant-user",
+    natural_conversion=0.18,
+    channel_uplift={Channel.PUSH: 0.08, Channel.EMAIL: 0.04},
+    uplift_uncertainty=0.05,
+    ltv=120.0,
+    days_since_last_active=45,
+    lifecycle_stage="dormant",
+    consented_channels=frozenset({Channel.PUSH, Channel.EMAIL}),
+)
+
+reward_model = CausalRewardModel(
+    RewardWeights(
+        conversion=0.0,
+        ltv=1.0,
+        retention=0.0,
+        cost=1.0,
+        fatigue=0.0,
+        risk=0.0,
+    )
+)
+
+runtime = GrowthEvoRuntime(
+    world_model=UserWorldModel(seed=7),
+    reward_model=reward_model,
+)
+result = runtime.run(goal, observation)
+
+print(result)
+print("event_chain_valid:", runtime.event_store.verify())
+```
+
+Verification-only workflows 不需要 execution environment，可以直接构造 `GrowthEvoRuntime(...)` 后调用 `verify_candidate(...)`。
 
 ---
 
@@ -186,9 +330,11 @@ Policy 只能从合法动作空间中执行：
 
 ### Causal outcome reward
 
-默认环境 reward 优先采用可解释的 **net incremental value**，避免同时重复奖励由同一 conversion 派生出的多个指标。
+GrowthEvo **不选择默认业务 scalarization**。执行路径必须显式提供 `CausalRewardModel(RewardWeights(...))`，因为 conversion、LTV、retention、cost、fatigue 与 churn-risk 的单位和业务含义并不天然可加。
 
-模型 epistemic uncertainty 属于 policy / verifier 风险信息，默认不写进环境 reward，因此模型变准不会导致 reward definition 自己漂移。
+仓库的 reference tests / demo 明确选择 `incremental LTV - direct cost` 作为可读的 net-value utility；这不是通用 deployment recommendation。
+
+模型 epistemic uncertainty 属于 policy / verifier 风险信息，不写进 realized environment reward，因此模型变准不会导致 reward definition 自己漂移。
 
 ### GrowthPRM
 
@@ -206,8 +352,8 @@ Process reward 奖励 Goal / Evidence / Constraint progress，并惩罚：
 `PlannerTransition` 区分：
 
 ```text
-done          = true environment terminal
-truncated     = export/window boundary
+done            = true environment terminal
+truncated       = export/window boundary
 credit_boundary = attribution/dynamics boundary
 ```
 
@@ -288,6 +434,7 @@ Conformal calibration 对 value、ROI、spend、fatigue、churn risk 使用 simu
 - configurable channel delay / churn response；
 - common random numbers：所有候选 plan 使用相同 rollout seeds；
 - downside CVaR diagnostics；
+- finite-rollout Monte Carlo violation upper bound；
 - hard feasibility 与 reward scale 分离。
 
 违反硬约束的 plan 不会因为 reward 数值尺度变大而“买过”安全门。
@@ -399,31 +546,6 @@ GrowthEvo-Harness/
 ├── tests/
 ├── docs/
 └── .github/workflows/ci.yml
-```
-
----
-
-## Quick start
-
-```bash
-git clone https://github.com/jiaweine/GrowthEvo-Harness.git
-cd GrowthEvo-Harness
-python -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
-pytest
-python examples/demo.py
-```
-
-Minimal synthetic regression fixture:
-
-```python
-from growthevo.bench import GrowthAgentBench
-from growthevo.models import Channel
-
-bench = GrowthAgentBench.synthetic(sample_size=1200, seed=17)
-model, metrics = bench.fit_cate(treatment=Channel.PUSH)
-print(metrics)
 ```
 
 ---
