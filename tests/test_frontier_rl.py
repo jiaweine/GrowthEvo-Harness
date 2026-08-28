@@ -11,6 +11,7 @@ from growthevo.models import (
     PolicyEvidence,
     VerificationStatus,
 )
+from growthevo.rl.causal_reward import CausalRewardModel, RewardWeights
 from growthevo.rl.conformal import (
     ConformalCalibrationRecord,
     ConformalPolicyCalibrator,
@@ -57,6 +58,19 @@ def _verifier() -> CounterfactualVerifier:
             min_support_coverage=0.95,
             max_importance_weight=20.0,
         ),
+    )
+
+
+def _net_value_reward_model() -> CausalRewardModel:
+    return CausalRewardModel(
+        RewardWeights(
+            conversion=0.0,
+            ltv=1.0,
+            retention=0.0,
+            cost=1.0,
+            fatigue=0.0,
+            risk=0.0,
+        )
     )
 
 
@@ -425,7 +439,10 @@ def test_risk_sensitive_mpc_prefers_safe_holdout_to_budget_violating_plan() -> N
             gamma=0.99,
             base_seed=101,
         ),
-        world_factory=lambda seed: LongHorizonGrowthWorld(seed=seed),
+        world_factory=lambda seed: LongHorizonGrowthWorld(
+            seed=seed,
+            reward_model=_net_value_reward_model(),
+        ),
     )
 
     scores = planner.evaluate(
