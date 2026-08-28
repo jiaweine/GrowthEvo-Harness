@@ -2,178 +2,441 @@
 
 # GrowthEvo-Harness
 
-### Causal Decision Runtime for Autonomous User Growth
+### Causal Reinforcement Learning for Incremental User Growth
 
-**把用户增长从「预测谁会转化」升级为「验证什么动作真正带来增量价值」。**
-
-面向优惠触达、渠道选择、预算分配、召回与留存的 **因果决策、安全策略改进与 bounded Agent evolution runtime**。
+**Optimize what an action changes — not merely what a model predicts.**
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![CI](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml)
 ![Version](https://img.shields.io/badge/version-0.1.0-555555)
 ![Causal RL](https://img.shields.io/badge/Causal-RL-8A2BE2)
 ![OPE](https://img.shields.io/badge/OPE-IPS%20%7C%20DR%20%7C%20β*-IPS-0A7EA4)
-![Status](https://img.shields.io/badge/status-reference%20implementation-13784B)
 
-`Causal POMDP` · `Cross-Fitted DR` · `Hierarchical Policy` · `Safe PI` · `IPS / DR OPE` · `Conformal Gate` · `GrowthPRM` · `Risk-Sensitive MPC` · `Harness Evolution`
-
-**Incrementality first · Holdout is an action · Evidence before promotion · Evolution stays inside hard safety boundaries**
-
-[Quick Start](#quick-start) · [Decision Loop](#decision-loop) · [Evidence](#evidence--reproducibility) · [Safety](#safety-invariants) · [Project Boundary](#what-this-project-is--and-is-not) · [Docs](#documentation)
+`Cross-Fitted DR` · `Support-Anchored Safe PI` · `IPS / DR / β*-IPS` · `Conformal Calibration` · `Dynamics-Aware GAE` · `Risk-Sensitive MPC`
 
 </div>
 
 ---
 
-## At a glance
+## Problem
 
-| | GrowthEvo contract |
-| --- | --- |
-| **Optimize** | incremental outcome / treatment effect — not raw conversion probability |
-| **Control** | `NO_TREATMENT` is a first-class action and safe fallback |
-| **Improve** | candidate policies stay anchored to logged behavior support |
-| **Promote** | OPE + uncertainty + conformal evidence must pass the Verifier |
-| **Constrain** | consent, budget, frequency, fatigue, churn and risk gates are hard runtime boundaries |
-| **Evolve** | only whitelisted harness coordinates may change; safety and verification semantics stay frozen |
+传统 propensity / conversion model 回答的是：
 
-### Repository evidence snapshot
+> **谁最可能转化？**
 
-These are **executable acceptance gates in the repository**, not production claims:
+GrowthEvo 研究的是更严格的决策问题：
 
-| CATE recovery | Logged-data overlap | Learned policy | Safety fallback |
-| ---: | ---: | ---: | --- |
-| RMSE `< 0.03` | coverage `> 0.95` | oracle regret `< 0.015` | unsafe policy → `NO_TREATMENT` |
+> **对状态 `x` 采取动作 `a`，相比 `NO_TREATMENT`，究竟产生了多少可归因的增量价值？**
 
-PR CI runs the full suite on **Python 3.11 / 3.12** and smoke-tests both runtime and training demos.
+因此优化目标不是 raw conversion probability，而是 conditional treatment effect：
 
----
+$$
+\tau(x,a)
+=
+\mathbb{E}[Y(a)-Y(a_0)\mid X=x],
+\qquad a_0=\mathrm{NO\_TREATMENT}.
+$$
 
-## Why GrowthEvo?
-
-大多数增长系统优化的是：
-
-> **谁最可能点击、购买或回流？**
-
-GrowthEvo-Harness 优化的是另一个问题：
-
-> **对这个用户，在这个时刻采取这个动作，相比什么都不做，是否真的会产生足够可信的增量收益？**
-
-这两个问题并不等价。一个本来就会转化的用户，可能拥有很高的 conversion probability，却不应该被额外发券；一个短期点击率高的动作，也可能因为疲劳、预算消耗或长期 churn risk 而不值得执行。
-
-因此，GrowthEvo 将用户增长建模为带 **预算、ROI、频控、疲劳、延迟反馈、logging-policy support 与部分可观测状态** 的 Causal POMDP，并把 `NO_TREATMENT` / holdout 作为一级动作。
-
-| 常见方法 | 主要问题 | GrowthEvo 的处理 |
-| --- | --- | --- |
-| Propensity / conversion model | 预测会不会转化，不回答动作是否造成转化 | 显式估计 treatment uplift / CATE |
-| Campaign rules | 能执行，但难证明策略比历史策略更好 | OPE + uncertainty + support-aware verification |
-| Greedy policy optimization | 容易利用模型外推，在低 support 区域过度乐观 | Support-Anchored Safe Policy Improvement |
-| Agent 自主修改策略 | 容易把“学习”与“裁判”混在一起 | Learning / Runtime / Verifier 分离 |
-| 单步 reward | 难处理延迟反馈、rollback 和错误归因 | GrowthPRM + dynamics-aware credit boundary |
+`NO_TREATMENT` 是一级动作，而不是异常分支。若证据不足或约束不允许主动干预，策略应保留不干预概率，而不是强制选择某个 treatment。
 
 ---
 
-## 30-second mental model
+## Method
 
-GrowthEvo 的核心不是“让一个 Agent 更大胆地自动做营销”，而是让策略改进始终留在 **因果证据与安全边界** 内：
+GrowthEvo 将问题拆成六个相互约束的算法层：
 
 ```text
-1. Estimate      估计 action 相对 NO_TREATMENT 的增量效应
-2. Constrain     只在有 behavior support 且满足 hard constraints 的区域改策略
-3. Verify        用 OPE + uncertainty + conformal evidence 判断是否值得提升
-4. Execute       通过 legal-action gate 后才允许执行
-5. Learn         用 outcome / process reward 回传 credit
-6. Evolve        从 failure trace 改进 whitelisted harness coordinates
+logged causal data
+      ↓
+Cross-Fitted Doubly Robust CATE
+      ↓
+pessimistic action values + support
+      ↓
+Feasible Support-Anchored Safe PI
+      ↓
+IPS / DR / β*-IPS OPE + overlap diagnostics
+      ↓
+one-sided conformal calibration
+      ↓
+long-horizon risk + dynamics-aware credit
 ```
 
-一句话概括：
+核心原则只有三个：
 
-> **No evidence → no confident improvement. No legal action → no treatment. No verifier pass → no promotion.**
+1. **Incrementality before prediction** — treatment effect 优先于 conversion score。
+2. **Support before optimization** — 没有 logging support 的高估值不能驱动策略更新。
+3. **Evidence before improvement** — point estimate 高但不确定性 / overlap 差时应 abstain。
 
-### What happens when evidence is weak?
+---
 
-| Situation | Runtime / verifier behavior |
+## 1. Cross-Fitted Doubly Robust CATE
+
+对 treatment `a` 与 control `a₀`，先将 logged multi-action propensity 在 pair 内重新归一化：
+
+$$
+e_a(x)
+=
+\frac{\mu(a\mid x)}{\mu(a\mid x)+\mu(a_0\mid x)}.
+$$
+
+在 held-out fold 上构造 AIPW / doubly-robust pseudo-outcome：
+
+$$
+\widetilde\tau_i
+=
+\widehat m_1(x_i)-\widehat m_0(x_i)
++
+\frac{A_i(Y_i-\widehat m_1(x_i))}{\widehat e(x_i)}
+-
+\frac{(1-A_i)(Y_i-\widehat m_0(x_i))}{1-\widehat e(x_i)}.
+$$
+
+其中 nuisance outcome model 只在其他 folds 上训练，第二阶段 effect model 只消费 out-of-fold pseudo-outcomes，降低 nuisance leakage。
+
+### Why DR?
+
+若 outcome model 或 propensity mechanism 中至少一侧估计良好，DR estimator 仍具有较强鲁棒性；cross-fitting 进一步降低同一样本同时拟合 nuisance 与 effect 所造成的过拟合偏差。
+
+### Support-aware prediction
+
+预测不仅输出 effect：
+
+$$
+\widehat\tau(x),
+$$
+
+还同时携带 uncertainty 与 support diagnostics。低 support / extrapolation 区域不能被解释成“高置信度零 uplift”，而应增加不确定性并降低后续策略更新幅度。
+
+---
+
+## 2. Feasible Support-Anchored Safe Policy Improvement
+
+这是当前方法中最关键的策略更新层。
+
+对每个动作构造 pessimistic value lower bound 与 cost upper bound：
+
+$$
+Q_a^-
+=
+\widehat Q_a-z\widehat\sigma_a,
+$$
+
+$$
+C_a^+
+=
+\widehat C_a+z\widehat\sigma_{C,a}.
+$$
+
+只允许 behavior probability 满足 support floor 的 treatment 进入候选集合：
+
+$$
+\mathcal A_{sup}
+=
+\{a:\mu(a\mid x)\ge \epsilon_{sup}\}
+\cup \{a_0\}.
+$$
+
+behavior policy 的 pessimistic baseline 为：
+
+$$
+V_\mu^-
+=
+\sum_a \mu(a\mid x)Q_a^-.
+$$
+
+对每个 supported action **分别求最大可行更新幅度**，而不是先选 argmax 再截断。
+
+候选更新：
+
+$$
+\pi_a^{(\eta)}
+=(1-\eta)\mu+\eta\delta_a.
+$$
+
+Total-variation trust region 给出：
+
+$$
+\eta
+\le
+\frac{\epsilon_{TV}}{1-\mu(a\mid x)}.
+$$
+
+若动作 cost 高于 behavior baseline，则 cost constraint 进一步给出：
+
+$$
+\eta
+\le
+\frac{C_{max}-C_\mu^+}{C_a^+-C_\mu^+}.
+$$
+
+因此每个动作都有自己的最大可行步长：
+
+$$
+\eta_a^*
+=
+\min\left(
+1,
+\frac{\epsilon_{TV}}{1-\mu(a\mid x)},
+\eta_{cost,a}
+\right).
+$$
+
+再比较约束后的 pessimistic candidate value：
+
+$$
+V_a^-
+=
+(1-\eta_a^*)V_\mu^-
++
+\eta_a^*Q_a^-.
+$$
+
+最终选择：
+
+$$
+a^*
+=
+\arg\max_{a\in\mathcal A_{sup}}V_a^-.
+$$
+
+这比“先选最高 LCB 动作，再被 cost cap 截断”更合理：一个理论估值最高但几乎不可更新的动作，不会阻止第二优、但具有更大安全更新空间的动作成为最终候选。
+
+若 behavior policy 本身已经违反硬 cost upper bound，则直接退回：
+
+$$
+\pi(a_0)=1.
+$$
+
+---
+
+## 3. Off-Policy Evaluation
+
+策略改进不能只依赖 learned Q / CATE。GrowthEvo 同时计算多个 OPE estimator。
+
+### IPS
+
+$$
+\widehat V_{IPS}
+=
+\frac{1}{n}\sum_{i=1}^n
+w_i r_i,
+\qquad
+w_i=\frac{\pi(a_i\mid x_i)}{\mu(a_i\mid x_i)}.
+$$
+
+### Doubly Robust
+
+$$
+\widehat V_{DR}
+=
+\frac{1}{n}\sum_{i=1}^{n}
+\left[
+\widehat q_\pi(x_i)
++w_i(r_i-\widehat q(x_i,a_i))
+\right].
+$$
+
+### β*-IPS control variate
+
+令：
+
+$$
+Z_i=w_i-1,
+$$
+
+估计 variance-minimizing coefficient：
+
+$$
+\widehat\beta^*
+=
+\frac{\widehat{\mathrm{Cov}}(wR,Z)}{\widehat{\mathrm{Var}}(Z)}.
+$$
+
+得到：
+
+$$
+\widehat V_{\beta}
+=
+\frac{1}{n}\sum_{i=1}^{n}
+\left[w_i r_i-\widehat\beta^*(w_i-1)\right].
+$$
+
+### OPE is not only a point estimate
+
+必须同时检查：
+
+- estimator-specific standard error；
+- effective sample size；
+- ESS ratio；
+- target-policy-mass weighted support coverage；
+- maximum importance weight；
+- weight coefficient of variation。
+
+ESS：
+
+$$
+ESS
+=
+\frac{(\sum_iw_i)^2}{\sum_iw_i^2}.
+$$
+
+核心判据：
+
+> **High estimated value + weak overlap = insufficient evidence.**
+
+---
+
+## 4. One-Sided Conformal Calibration
+
+统计标准误不能覆盖所有 model misspecification，因此策略指标进一步使用历史 matured cohorts 做 one-sided split-conformal calibration。
+
+对于需要 lower bound 的 value / ROI，使用 residual：
+
+$$
+r_i^{lower}
+=
+\widehat y_i-y_i.
+$$
+
+对于需要 upper bound 的 spend / risk，使用：
+
+$$
+r_i^{upper}
+=
+y_i-\widehat y_i.
+$$
+
+有限样本 conformal quantile：
+
+$$
+q_{1-\alpha}
+=
+r_{(\lceil(n+1)(1-\alpha)\rceil)}.
+$$
+
+最终形成：
+
+$$
+LCB(y)=\widehat y-q,
+\qquad
+UCB(y)=\widehat y+q.
+$$
+
+多指标同时约束时使用 family-wise error correction，使整体 gate 的错误预算不被多个 marginal tests 放大。
+
+---
+
+## 5. Risk-Sensitive Long-Horizon Planning
+
+单步 uplift 最大不等于长期价值最大。长程候选序列通过 stochastic rollout 估计 return distribution，并用 downside CVaR 而不是 mean return 单独排序。
+
+对 return `R`：
+
+$$
+CVaR_\alpha(R)
+=
+\mathbb E[R\mid R\le VaR_\alpha(R)].
+$$
+
+候选序列分数：
+
+$$
+Score(\pi)
+=
+CVaR_\alpha(R_\pi)
+-\lambda\Pr(\mathrm{constraint\ violation}\mid\pi).
+$$
+
+因此短期均值更高、但 downside tail 更差或 constraint violation probability 更高的计划会被降权。
+
+---
+
+## 6. Dynamics-Aware Process Credit
+
+长链决策需要比 terminal reward 更细的 credit assignment。
+
+使用 potential-based shaping：
+
+$$
+F_t
+=
+\gamma\Phi(s_{t+1})-\Phi(s_t),
+$$
+
+并结合 evidence gain、cost 与 failure penalties 形成 step reward。
+
+Trajectory advantage 使用 GAE：
+
+$$
+\delta_t
+=
+r_t+\gamma V(s_{t+1})-V(s_t),
+$$
+
+$$
+A_t
+=
+\delta_t+\gamma\lambda A_{t+1}.
+$$
+
+在 dynamics discontinuity 上设置 credit boundary，使 advantage 不跨不连续动力学传播。算法上等价于在边界处将 bootstrap / recursive trace 截断，从而降低错误归因。
+
+---
+
+## Algorithm source
+
+公开代码入口只列算法实现：
+
+| Algorithm | Source |
 | --- | --- |
-| Action has very low logging-policy support | exclude unsupported optimistic action |
-| Candidate violates a hard legal / cost boundary | fall back to `NO_TREATMENT` |
-| OPE point estimate is high but overlap / ESS is poor | return `INSUFFICIENT_EVIDENCE`, not a promotion signal |
-| Candidate fails value or risk verification | return `FAIL`; do not promote |
-| Failure trace suggests planner / routing weakness | propose only a bounded patch to whitelisted harness coordinates |
+| Cross-Fitted DR / CATE | `growthevo/causal/dr_learner.py` |
+| Support-Anchored Safe PI | `growthevo/rl/safe_policy_improvement.py` |
+| IPS / DR / β*-IPS OPE | `growthevo/rl/ope.py` |
+| One-sided conformal calibration | `growthevo/rl/conformal.py` |
+| Risk-sensitive MPC / CVaR | `growthevo/rl/model_based.py` |
+| Process reward | `growthevo/rl/process_reward.py` |
+| Dynamics-aware GAE | `growthevo/training/trajectory.py` |
+
+README 不展开非算法实现细节。
 
 ---
 
-## What is implemented
+## Evaluation
 
-GrowthEvo-Harness 不是单一 uplift model，也不是一个 campaign scheduler。它实现了一条从 **因果估计 → 策略决策 → 离线验证 → 轨迹信用分配 → bounded harness evolution** 的完整 reference runtime。
+### Reproducible algorithmic gates
 
-| Capability | Implementation | Code |
-| --- | --- | --- |
-| **Causal runtime** | Goal / belief state / event store / legal action / `NO_TREATMENT` | `growthevo/runtime/*` |
-| **Causal estimation** | Cross-Fitted DR-Learner、CATE serving、support / uncertainty diagnostics | `growthevo/causal/*` |
-| **Policy decisioning** | Hierarchical policy、support-anchored conservative improvement | `growthevo/rl/hierarchical_policy.py`, `growthevo/rl/safe_policy_improvement.py` |
-| **Offline evidence** | IPS / DR / β*-IPS、ESS、support coverage、weight diagnostics | `growthevo/rl/ope.py` |
-| **Deployment gate** | Split-conformal calibration + Counterfactual Verifier | `growthevo/rl/conformal.py`, `growthevo/verifier/*` |
-| **Long-horizon risk** | stochastic rollout、CVaR、constraint violation、risk-sensitive MPC | `growthevo/rl/model_based.py` |
-| **Agent credit** | GrowthPRM、GAE、rollback-aware credit boundary | `growthevo/rl/process_reward.py`, `growthevo/training/*` |
-| **Harness evolution** | Failure Miner、bounded patch proposal、event-sourced evolution | `growthevo/evolution/*` |
+当前仓库中的算法回归测试覆盖：
 
-> **Design rule:** learner 可以提出更优策略，但不能绕过 hard constraints，也不能修改 Verifier 的判定标准。
+| Property | Acceptance gate |
+| --- | ---: |
+| CATE recovery | RMSE `< 0.03` |
+| Cross-fitted overlap | coverage `> 0.95` |
+| Learned CATE policy | oracle regret `< 0.015` |
+| Low-support optimistic action | excluded |
+| Unsafe expected cost | fallback to `NO_TREATMENT` |
+| Dynamics boundary | stops GAE leakage |
 
----
+### Reported evaluation record
 
-## Decision loop
+| Benchmark | Metric | Result |
+| --- | --- | ---: |
+| **GrowthAgentBench** | CATE RMSE | **0.026** |
+| **GrowthAgentBench** | Oracle Regret | **0.013** |
+| **Criteo Uplift v2** | Uplift@10% | **+6.8%** |
+| **Open Bandit Dataset** | OPE Error | **-8.4%** |
 
-```mermaid
-flowchart LR
-    G[Growth Goal + Constraints] --> B[Causal Belief State]
-    D[Logged / Randomized Data] --> C[Cross-Fitted DR / CATE]
-    C --> B
-
-    B --> P[Hypothesis Planner]
-    P --> H[Hierarchical Policy]
-    H --> S[Support-Anchored Safe PI]
-    S --> L{Legal Action Gate}
-
-    L -->|allowed| X[Execute Action]
-    L -->|blocked| N[NO_TREATMENT]
-
-    X --> O[Observation / Delayed Outcome]
-    N --> O
-    O --> R[GrowthPRM + Trajectory Credit]
-    O --> E[IPS / DR / β*-IPS OPE]
-    E --> V[Conformal + Counterfactual Verifier]
-
-    V -->|PASS| M[Shadow / Canary / Promotion]
-    V -->|FAIL / insufficient evidence| F[Failure Trace]
-    F --> EV[Bounded Harness Evolution]
-    EV --> W[World-Model Stress / CVaR MPC]
-    W --> P
-```
-
-核心闭环不是“模型给出最高分动作 → 直接执行”，而是：
-
-```text
-estimate incrementality
-→ respect behavior support
-→ generate a constrained candidate policy
-→ verify value + risk + overlap evidence
-→ promote only when evidence is sufficient
-→ mine failures and evolve only whitelisted coordinates
-```
+GrowthAgentBench 是已知 ground-truth treatment effects 的 synthetic causal fixture。外部 public benchmark 数字属于 evaluation record，不等同于 production evidence。
 
 ---
 
-## Quick Start
-
-### 1. Install and run the full test suite
+## Reproduce
 
 ```bash
 git clone https://github.com/jiaweine/GrowthEvo-Harness.git
 cd GrowthEvo-Harness
-
 python -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
-
 pytest
 ```
 
@@ -186,339 +449,15 @@ pip install -e '.[dev]'
 pytest
 ```
 
-### 2. Run the runtime / verifier demo
-
-```bash
-python examples/demo.py
-```
-
-`examples/demo.py` 串起一个最小运行闭环：
-
-```text
-GrowthGoal + constraints
-→ UserObservation
-→ Runtime decision
-→ append-only event chain
-→ GrowthPRM trajectory scoring
-→ OPE diagnostics
-→ conformal calibration
-→ Counterfactual Verifier
-```
-
-### 3. Run causal learning + policy improvement + training export
-
-```bash
-python examples/training_demo.py
-```
-
-这个 demo 会输出：
-
-```text
-held-out CATE metrics
-→ CATE serving into runtime belief
-→ support-anchored policy improvement
-→ planner trajectory JSONL export
-```
-
-### 4. Reproduce the in-repo benchmark acceptance tests
-
-```bash
-pytest -q tests/test_training_benchmark.py
-```
-
-当前测试直接检查 CATE recovery、support diagnostics、oracle policy regret、safe policy improvement、`NO_TREATMENT` fallback 与 dynamics-aware GAE boundary，而不是只检查代码能否 import。
-
-CI 在 Python **3.11 / 3.12** 上运行完整测试，并额外执行两个 example smoke tests。
-
 ---
 
-## Minimal API example
-
-```python
-from growthevo.models import Channel, GrowthConstraints, GrowthGoal, UserObservation
-from growthevo.runtime.engine import GrowthEvoRuntime
-
-constraints = GrowthConstraints(
-    max_budget=100.0,
-    min_roi=1.5,
-    max_fatigue=0.8,
-    max_churn_risk=0.5,
-)
-
-goal = GrowthGoal(
-    metric="incremental_ltv",
-    horizon_days=30,
-    target_delta=0.05,
-    constraints=constraints,
-)
-
-observation = UserObservation(
-    user_id="dormant-user",
-    natural_conversion=0.18,
-    channel_uplift={
-        Channel.PUSH: 0.08,
-        Channel.EMAIL: 0.04,
-        Channel.IN_APP: 0.02,
-    },
-    uplift_uncertainty=0.05,
-    ltv=120.0,
-    fatigue=0.12,
-    churn_risk=0.18,
-    touches_24h=0,
-    touches_7d=1,
-    spend_to_date=10.0,
-    days_since_last_active=45,
-    lifecycle_stage="dormant",
-    consented_channels=frozenset({Channel.PUSH, Channel.EMAIL, Channel.IN_APP}),
-)
-
-runtime = GrowthEvoRuntime()
-result = runtime.run(goal, observation)
-
-print(result)
-print("event_chain_valid:", runtime.event_store.verify())
-```
-
----
-
-## Core contracts
-
-### 1. Incrementality is the target
-
-GrowthEvo 不把 raw conversion 当作 treatment value。对 action `a` 与 control `a₀ = NO_TREATMENT`：
-
-$$
-\tau(x,a)=\mathbb{E}[Y(a)-Y(a_0)\mid X=x].
-$$
-
-Runtime 的 belief state 同时保存 natural outcome、per-channel uplift、uncertainty 与 behavior-policy support，从而区分“用户本来会转化”与“动作造成了额外转化”。
-
-### 2. `NO_TREATMENT` is a first-class action
-
-合法动作空间是多重硬约束的交集：
-
-$$
-\mathcal{A}_{legal}(s)
-=
-\mathcal{A}_{registered}
-\cap \mathcal{A}_{consent}
-\cap \mathcal{A}_{budget}
-\cap \mathcal{A}_{frequency}
-\cap \mathcal{A}_{risk}.
-$$
-
-如果一个 treatment 被 hard gate 拒绝，Runtime 不会偷偷切换到另一个营销动作绕过约束，而是安全退回 `NO_TREATMENT`。
-
-### 3. Policy improvement must stay near evidence
-
-候选策略不会直接跳到模型 argmax。Safe PI 使用 pessimistic value，并锚定历史 behavior policy：
-
-$$
-\pi_{new}=(1-\eta)\mu+\eta\delta_{a^*}.
-$$
-
-`η` 同时受 behavior support、total-variation cap、expected-cost cap 与 pessimistic improvement 约束。
-
-### 4. Promotion is an evidence decision
-
-OPE 模块输出：
-
-- IPS / Doubly Robust / estimated β*-IPS；
-- estimator-specific standard error；
-- ESS / ESS ratio；
-- target-policy-mass weighted support coverage；
-- max importance weight / weight CV。
-
-Verifier 联合 value、ROI、spend、fatigue、churn risk、ESS、support coverage 与 importance-weight tail，只返回：
-
-```text
-PASS
-FAIL
-INSUFFICIENT_EVIDENCE
-```
-
-**高 point estimate + 差 overlap = 证据不足，而不是上线理由。**
-
-### 5. Agent evolution is bounded
-
-关键状态进入 append-only hash-chained event stream：
-
-```text
-GOAL_COMPILED
-BELIEF_UPDATED
-HYPOTHESIS_PLANNED
-ACTION_PROPOSED
-ACTION_ALLOWED / ACTION_BLOCKED
-FEEDBACK_OBSERVED
-REWARD_ASSIGNED
-PROCESS_REWARD_ASSIGNED
-VERIFICATION_COMPLETED
-FAILURE_CLASSIFIED
-PATCH_PROPOSED
-```
-
-Evolver 只能修改 whitelisted cognitive coordinates，例如 planner template、feature / memory / tool routing、delegation、exploration 与 short-horizon reward shaping。
-
-以下边界保持冻结：
-
-```text
-North-Star Metric
-Consent
-Budget Ledger
-Event Store
-Verifier
-Deployment Gate
-NO_TREATMENT semantics
-```
-
----
-
-## Evidence & reproducibility
-
-GrowthEvo 将“能运行”“benchmark 表现”和“生产证据”明确分开。README 中的 claim 应落在以下 evidence ladder 中：
-
-```text
-Level 1 — executable repository evidence
-           code + tests + deterministic/synthetic fixtures
-
-Level 2 — project evaluation record
-           external public benchmark evaluation
-
-Level 3 — deployment evidence
-           randomized / shadow / canary / production outcomes
-```
-
-当前仓库主要提供 **Level 1** 证据；外部 benchmark 数字属于 **Level 2**；本项目当前不声称已经具备 **Level 3 production evidence**。
-
-### Reproducible acceptance gates in this repository
-
-`tests/test_training_benchmark.py` 对关键行为设有明确 acceptance gates：
-
-| Check | Repository gate |
-| --- | ---: |
-| Push / Email CATE recovery | RMSE `< 0.03` |
-| Email / Push serving support | minimum / mean support `> 0.90` |
-| Cross-fitted training overlap | overlap coverage `> 0.95` |
-| Learned CATE policy | oracle regret `< 0.015` |
-| Unsupported optimistic action | must be excluded |
-| Unsafe behavior cost | must fall back to `NO_TREATMENT` |
-| Credit boundary | must stop GAE leakage across dynamics boundary |
-
-Run them directly:
-
-```bash
-pytest -q tests/test_training_benchmark.py
-```
-
-### Project evaluation record
-
-| Benchmark | Purpose | Reported result | Evidence status |
-| --- | --- | ---: | --- |
-| **GrowthAgentBench** | known-ground-truth CATE + oracle policy regression | CATE RMSE **0.026** · Oracle Regret **0.013** | synthetic evaluation record + in-repo regression gates |
-| **Criteo Uplift v2** | uplift ranking / top-decile treatment-effect quality | Uplift@10% **+6.8%** | project evaluation record |
-| **Open Bandit Dataset** | logged-bandit off-policy evaluation | OPE Error **-8.4%** | project evaluation record |
-
-最小仓库自带的可审计 benchmark 是 `GrowthAgentBench`。它包含已知 heterogeneous treatment effects、context-dependent behavior propensities 与 oracle potential outcomes，因此适合检查 CATE recovery 与 policy regret；它不是 production evidence，也不替代真实 randomized experiment。
-
-```python
-from growthevo.bench import GrowthAgentBench
-from growthevo.models import Channel
-
-bench = GrowthAgentBench.synthetic(sample_size=1200, seed=17)
-model, metrics = bench.fit_cate(treatment=Channel.PUSH)
-print(metrics)
-```
-
-详细实现状态与证据边界见 [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md)。
-
----
-
-## Safety invariants
-
-GrowthEvo 把以下原则视为 runtime contract，而不是可选的训练技巧：
-
-1. **Incrementality first** — 优化 treatment effect，而不是 raw conversion。
-2. **Support before optimism** — out-of-support 动作不能靠 value extrapolation 获得虚假优势。
-3. **Holdout is an action** — `NO_TREATMENT` 永远是一级动作。
-4. **Hard gate cannot be bypassed** — 被拒绝的动作不能通过换渠道绕过同一步约束。
-5. **Execution is not promotion** — 能执行不代表证据足以上线。
-6. **Verifier is immutable to the learner** — learner 不能修改自己的部署裁判。
-7. **Rollback-aware credit** — advantage 不跨错误动力学边界传播。
-8. **Evolution is bounded** — Harness 可以演进，但 hard safety / evidence boundary 保持冻结。
-
----
-
-## Repository layout
-
-```text
-GrowthEvo-Harness/
-├── growthevo/
-│   ├── bench/          # synthetic causal / policy regression fixtures
-│   ├── causal/         # DR learner + CATE serving
-│   ├── runtime/        # belief, planner, legal-action gate, engine, event store
-│   ├── rl/             # policy, OPE, conformal, process reward, model-based safety
-│   ├── training/       # trajectory adapters / credit assignment / export
-│   ├── verifier/       # counterfactual promotion gate
-│   ├── simulator/      # user world model
-│   ├── evolution/      # failure mining + bounded harness patching
-│   └── tools/          # tool registry
-├── examples/
-│   ├── demo.py
-│   └── training_demo.py
-├── tests/
-├── docs/
-└── .github/workflows/ci.yml
-```
-
----
-
-## What this project is — and is not
-
-### Good fit
-
-- 需要区分 **自然转化** 与 **增量转化** 的优惠 / CRM / lifecycle decisioning；
-- 有 logged / randomized interaction data，希望做 conservative policy improvement；
-- 需要预算、ROI、频控、fatigue、churn 等 hard constraints；
-- 希望把 agent planner 与统计验证 / deployment gate 分离；
-- 研究 offline RL、causal decisioning、agent credit assignment 或 safe self-evolution。
-
-### Not intended as
-
-- 开箱即用的生产营销平台；
-- 已校准好的 production world model；
-- 对任意新动作进行无 support 的安全外推器；
-- 允许 agent 自主修改安全约束、Verifier 或 North-Star Metric 的 self-modifying system。
-
-当前 `v0.1.0` 更适合作为 **auditable reference implementation / research harness**：核心 decision contracts、OPE、Verifier、trajectory credit 与 bounded evolution 已实现；线上 shadow / canary / rollback 基础设施、生产级 world-model calibration 以及 IQL / CQL / neural uplift backend 属于扩展边界。
-
----
-
-## Extension points
-
-Runtime contract 与算法 backend 刻意解耦，可以替换或接入：
-
-```text
-CausalML / EconML / neural uplift
-IQL / CQL / other sequential offline-RL backends
-PPO / GRPO / Agent-RL planner post-training
-production feature / event / experimentation systems
-shadow / canary / rollback deployment infrastructure
-world-model calibration + rollout-error diagnostics
-```
-
-扩展 backend 不应改变 causal state、legal-action、OPE、Verifier、event sourcing 与 `NO_TREATMENT` 的语义。
-
----
-
-## Documentation
-
-| If you want to understand... | Read |
-| --- | --- |
-| system boundaries and runtime architecture | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
-| causal estimation, OPE and Safe PI | [`docs/ALGORITHM.md`](docs/ALGORITHM.md) |
-| trajectory training and benchmark fixtures | [`docs/TRAINING_AND_BENCHMARK.md`](docs/TRAINING_AND_BENCHMARK.md) |
-| research frontier and planned extensions | [`docs/FRONTIER_2026.md`](docs/FRONTIER_2026.md) |
-| what is implemented vs. extension boundary | [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) |
+## Method boundaries
+
+- Causal estimates are not treated as valid outside observed support merely because a function approximator can extrapolate.
+- World-model rollout is a risk-ranking mechanism, not a replacement for causal evidence.
+- OPE point estimates are not sufficient when ESS or support coverage is poor.
+- Uncertainty is used pessimistically during policy improvement.
+- `NO_TREATMENT` remains available whenever positive treatment evidence is insufficient.
 
 ---
 
@@ -526,8 +465,6 @@ world-model calibration + rollout-error diagnostics
 
 ### GrowthEvo-Harness
 
-**Causal decisioning · Verifiable policy improvement · Bounded agent evolution**
-
-*Optimize what your action changes — not merely what your model predicts.*
+**Causal estimation · Conservative policy improvement · Counterfactual evaluation · Risk-sensitive learning**
 
 </div>
