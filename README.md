@@ -25,6 +25,29 @@
 
 ---
 
+## At a glance
+
+| | GrowthEvo contract |
+| --- | --- |
+| **Optimize** | incremental outcome / treatment effect — not raw conversion probability |
+| **Control** | `NO_TREATMENT` is a first-class action and safe fallback |
+| **Improve** | candidate policies stay anchored to logged behavior support |
+| **Promote** | OPE + uncertainty + conformal evidence must pass the Verifier |
+| **Constrain** | consent, budget, frequency, fatigue, churn and risk gates are hard runtime boundaries |
+| **Evolve** | only whitelisted harness coordinates may change; safety and verification semantics stay frozen |
+
+### Repository evidence snapshot
+
+These are **executable acceptance gates in the repository**, not production claims:
+
+| CATE recovery | Logged-data overlap | Learned policy | Safety fallback |
+| ---: | ---: | ---: | --- |
+| RMSE `< 0.03` | coverage `> 0.95` | oracle regret `< 0.015` | unsafe policy → `NO_TREATMENT` |
+
+PR CI runs the full suite on **Python 3.11 / 3.12** and smoke-tests both runtime and training demos.
+
+---
+
 ## Why GrowthEvo?
 
 大多数增长系统优化的是：
@@ -65,6 +88,16 @@ GrowthEvo 的核心不是“让一个 Agent 更大胆地自动做营销”，而
 一句话概括：
 
 > **No evidence → no confident improvement. No legal action → no treatment. No verifier pass → no promotion.**
+
+### What happens when evidence is weak?
+
+| Situation | Runtime / verifier behavior |
+| --- | --- |
+| Action has very low logging-policy support | exclude unsupported optimistic action |
+| Candidate violates a hard legal / cost boundary | fall back to `NO_TREATMENT` |
+| OPE point estimate is high but overlap / ESS is poor | return `INSUFFICIENT_EVIDENCE`, not a promotion signal |
+| Candidate fails value or risk verification | return `FAIL`; do not promote |
+| Failure trace suggests planner / routing weakness | propose only a bounded patch to whitelisted harness coordinates |
 
 ---
 
@@ -363,7 +396,7 @@ Level 3 — deployment evidence
 
 | Check | Repository gate |
 | --- | ---: |
-| Push CATE recovery | RMSE `< 0.03` |
+| Push / Email CATE recovery | RMSE `< 0.03` |
 | Email / Push serving support | minimum / mean support `> 0.90` |
 | Cross-fitted training overlap | overlap coverage `> 0.95` |
 | Learned CATE policy | oracle regret `< 0.015` |
@@ -479,11 +512,13 @@ world-model calibration + rollout-error diagnostics
 
 ## Documentation
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Runtime、Learning、Verifier 与模块边界
-- [`docs/ALGORITHM.md`](docs/ALGORITHM.md) — 因果估计、OPE、Safe PI 与策略安全
-- [`docs/TRAINING_AND_BENCHMARK.md`](docs/TRAINING_AND_BENCHMARK.md) — trajectory training 与 benchmark
-- [`docs/FRONTIER_2026.md`](docs/FRONTIER_2026.md) — 研究方向与扩展
-- [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) — 已实现能力、工程边界与证据规则
+| If you want to understand... | Read |
+| --- | --- |
+| system boundaries and runtime architecture | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| causal estimation, OPE and Safe PI | [`docs/ALGORITHM.md`](docs/ALGORITHM.md) |
+| trajectory training and benchmark fixtures | [`docs/TRAINING_AND_BENCHMARK.md`](docs/TRAINING_AND_BENCHMARK.md) |
+| research frontier and planned extensions | [`docs/FRONTIER_2026.md`](docs/FRONTIER_2026.md) |
+| what is implemented vs. extension boundary | [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) |
 
 ---
 
