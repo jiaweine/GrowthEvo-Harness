@@ -10,10 +10,16 @@
   "protocol_fingerprint": "b9206804bde8752a88b2a03bbda4b648f648f891",
   "tuning_fingerprint": "3f4698265dc1e1f77003788e8b48e2347b826cf5",
   "test_fingerprint": "d93bdd9361bd9d5d7d6e8552f67b0134600474c1",
-  "files": {
+  "source_artifact_file_sha256": {
     "locked-result.json": "sha256:2cac986d25877d079f5d094799ce89098892977dca4f78a266388cf5ea918317",
     "export-manifest.json": "sha256:a030b5e529436eef87c38a90c7f57743efe95b3bf629d7345c9c4ea35ece6ff4",
     "source-provenance.json": "sha256:7453e6c759cc2d78b227708392476d164c556872b7899a4d996efc520ab6309b",
     "environment.txt": "sha256:9458c23ad75a88a3df5856204a2c487d82dcb9f623f2adeac268ab87ad51eaea"
+  },
+  "persisted_copy_format": {
+    "locked-result.json": "content-preserving compact JSON; compare parsed content/fingerprints to the source artifact, not byte SHA256",
+    "export-manifest.json": "content-preserving compact JSON; compare parsed content/fingerprint to the source artifact, not byte SHA256",
+    "source-provenance.json": "content-preserving compact JSON; source data-file SHA256 values are unchanged",
+    "environment.txt": "byte-identical source artifact copy"
   }
 }

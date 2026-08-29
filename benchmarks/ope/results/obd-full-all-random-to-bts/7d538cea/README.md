@@ -66,6 +66,8 @@ Validation support coverage was `1.0` and validation effective-sample ratio was 
 - BTS/all SHA256: `05ba8416e6626be0dc16ee09a434d736eca1c4c274e10eabe3931521c4aeede2`
 - Item-context SHA256: `88345bc52dea9965cf148f02c661d03ce566f278b2b870ec0c70c5d3da1c2d1c`
 
+`evidence-metadata.json` labels the four per-file hashes as **source Actions-artifact byte hashes**. The three JSON files committed here are content-preserving compact JSON copies, so audit them through parsed content plus the recorded experiment/export/protocol/tuning/test fingerprints rather than expecting their git byte hashes to equal the pretty-printed artifact bytes. `environment.txt` is byte-identical to the source artifact and its SHA256 can be reproduced directly.
+
 `environment.txt` is the exact `pip freeze` captured by the full-data workflow. It intentionally preserves the upstream packaging fact that both `sb-obp==0.5.10` and `obp==0.4.1` distributions were installed, while the imported OBP module reported version string `0.5.5` in the export manifest.
 
 The checked-in evidence is compact. Raw OBD CSV files and generated validation/holdout JSONL are not stored in git.
