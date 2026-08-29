@@ -15,6 +15,8 @@ def test_regular_ci_uses_node24_native_actions_and_builds_distribution() -> None
     assert "actions/checkout@v4" not in ci
     assert "actions/setup-python@v5" not in ci
     assert "actions/upload-artifact@v4" not in ci
+    assert 'python-version: ["3.11", "3.12", "3.13", "3.14"]' in ci
+    assert 'python-version: "3.14"' in ci
     assert "  package:\n" in ci
     assert "python -m build" in ci
     assert "python -m twine check dist/*" in ci
