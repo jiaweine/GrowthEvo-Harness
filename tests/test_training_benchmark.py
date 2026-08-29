@@ -149,7 +149,7 @@ def test_support_anchored_policy_excludes_unsupported_optimistic_action() -> Non
     result = SupportAnchoredPolicyImprover().improve(rows)
 
     assert result.selected_action is Channel.PUSH
-    assert "unsupported_actions_excluded" in result.reasons
+    assert "unsupported_actions_anchored" in result.reasons
 
 
 def test_support_anchored_policy_uses_no_treatment_when_behavior_cost_is_unsafe() -> None:
