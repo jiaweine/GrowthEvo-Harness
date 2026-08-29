@@ -2,6 +2,13 @@
 
 from .criteo import CriteoUpliftData, load_criteo_uplift
 from .kuairand_features import load_kuairand_user_features, load_kuairand_video_features
+from .offline_rl import (
+    HistorySummary,
+    OfflineRLDataset,
+    OfflineRLTransition,
+    default_kuairand_state_builder,
+    kuairand_to_offline_rl,
+)
 from .open_bandit_features import load_open_bandit_item_context
 from .open_bandit_ope import open_bandit_to_ope
 from .real_world import (
@@ -31,17 +38,22 @@ __all__ = [
     "DEFAULT_KUAIRAND_REWARD_WEIGHTS",
     "DatasetSplit",
     "GrowthAgentBench",
+    "HistorySummary",
     "KuaiRandInteraction",
+    "OfflineRLDataset",
+    "OfflineRLTransition",
     "OpenBanditInteraction",
     "PolicyBenchmarkResult",
     "RandomizedTargetingResult",
     "SyntheticGrowthSample",
     "TargetingBootstrapResult",
     "bootstrap_randomized_targeting",
+    "default_kuairand_state_builder",
     "deterministic_stratified_split",
     "evaluate_cate",
     "evaluate_randomized_targeting",
     "kuairand_reward",
+    "kuairand_to_offline_rl",
     "load_criteo_uplift",
     "load_kuairand",
     "load_kuairand_user_features",
