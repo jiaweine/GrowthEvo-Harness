@@ -3,10 +3,11 @@ from __future__ import annotations
 """Run the preregistered full Open Bandit Dataset OPE benchmark end-to-end.
 
 The default transport uses the ZOZO NEXT Hugging Face mirror pinned to the OBD
-1.0 data revision.  Only the random-policy campaign used as OPE evidence is
-materialised locally; the much larger BTS campaign is streamed by the exporter
-for its factual on-policy reference.  This avoids the previous requirement to
-store the 11.7 GB full archive plus an extracted copy.
+1.0 data revision.  Only the three files required by the pre-registered ``all``
+experiment are materialised locally: random-policy evidence, BTS factual
+reference, and the random campaign item context.  This preserves local
+chronological parsing semantics while avoiding the 11.7 GB all-campaign archive
+and a second extracted copy.
 """
 
 import argparse
@@ -27,6 +28,7 @@ _CANONICAL_RELEASE = "https://research.zozo.com/data_release/open_bandit_dataset
 _HF_DATASET = "zozonext/open-bandit"
 _HF_DATA_REVISION = "57a688e"
 _HF_BASE = f"https://huggingface.co/datasets/{_HF_DATASET}/resolve/{_HF_DATA_REVISION}"
+_MIN_FREE_BYTES_AFTER_DOWNLOAD = 2 * 1024**3
 
 
 def _sha256(path: Path) -> str:
@@ -87,6 +89,62 @@ def _mirror_url(policy: str, campaign: str, filename: str) -> str:
     return f"{_HF_BASE}/{policy}/{campaign}/{filename}?download=true"
 
 
+def _request(url: str, *, method: str = "GET") -> urllib.request.Request:
+    return urllib.request.Request(
+        url,
+        method=method,
+        headers={"User-Agent": "GrowthEvo-Harness/full-obd-benchmark"},
+    )
+
+
+def _remote_size(url: str) -> int | None:
+    """Return final response Content-Length after redirects when advertised."""
+
+    try:
+        with urllib.request.urlopen(_request(url, method="HEAD")) as response:
+            raw = response.headers.get("Content-Length")
+    except OSError:
+        return None
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+def _assert_download_budget(
+    cache_dir: Path,
+    downloads: list[tuple[str, Path]],
+    *,
+    reserve_bytes: int = _MIN_FREE_BYTES_AFTER_DOWNLOAD,
+) -> dict[str, int | None]:
+    """Fail before large transfers when advertised sizes exceed local free disk."""
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    free_bytes = shutil.disk_usage(cache_dir).free
+    sizes: dict[str, int | None] = {}
+    required_bytes = 0
+    unknown = False
+    for url, destination in downloads:
+        if destination.is_file() and destination.stat().st_size > 0:
+            sizes[url] = destination.stat().st_size
+            continue
+        size = _remote_size(url)
+        sizes[url] = size
+        if size is None:
+            unknown = True
+        else:
+            required_bytes += size
+    if not unknown and free_bytes - required_bytes < reserve_bytes:
+        raise RuntimeError(
+            "insufficient disk for pinned OBD campaign files: "
+            f"free={free_bytes}, required={required_bytes}, reserve={reserve_bytes}"
+        )
+    return sizes
+
+
 def _download(url: str, destination: Path) -> None:
     if destination.is_file() and destination.stat().st_size > 0:
         return
@@ -94,47 +152,59 @@ def _download(url: str, destination: Path) -> None:
     temporary = destination.with_suffix(destination.suffix + ".partial")
     if temporary.exists():
         temporary.unlink()
-    request = urllib.request.Request(
-        url,
-        headers={"User-Agent": "GrowthEvo-Harness/full-obd-benchmark"},
-    )
-    with urllib.request.urlopen(request) as response, temporary.open("wb") as output:
+    with urllib.request.urlopen(_request(url)) as response, temporary.open("wb") as output:
         shutil.copyfileobj(response, output, length=8 * 1024 * 1024)
+    if temporary.stat().st_size <= 0:
+        raise RuntimeError(f"downloaded empty OBD file from {url}")
     temporary.replace(destination)
 
 
-def _download_behavior_campaign(
+def _download_campaign_pair(
     cache_dir: Path,
     *,
     campaign: str,
-) -> tuple[Path, str, dict[str, object]]:
-    """Materialise only random-policy evidence and stream BTS reference later."""
+) -> tuple[Path, dict[str, object]]:
+    """Materialise only the pinned campaign files needed by this experiment."""
 
     root = cache_dir / f"obd-v1-{_HF_DATA_REVISION}"
     behavior_csv = _campaign_file(root, "random", campaign)
+    target_csv = _campaign_file(root, "bts", campaign)
     item_context = _item_context_file(root, "random", campaign)
     behavior_url = _mirror_url("random", campaign, f"{campaign}.csv")
-    item_context_url = _mirror_url("random", campaign, "item_context.csv")
     target_url = _mirror_url("bts", campaign, f"{campaign}.csv")
-    _download(behavior_url, behavior_csv)
-    _download(item_context_url, item_context)
-    if not _looks_like_behavior_root(root, campaign):
+    item_context_url = _mirror_url("random", campaign, "item_context.csv")
+    downloads = [
+        (behavior_url, behavior_csv),
+        (target_url, target_csv),
+        (item_context_url, item_context),
+    ]
+    advertised = _assert_download_budget(cache_dir, downloads)
+    for url, destination in downloads:
+        _download(url, destination)
+    if not _looks_like_full_root(root, campaign):
         raise RuntimeError("downloaded OBD mirror does not satisfy OBP campaign layout")
+
     provenance: dict[str, object] = {
         "canonical_release_url": _CANONICAL_RELEASE,
         "transport": "huggingface-zozonext-pinned-campaign-files",
         "mirror_dataset": _HF_DATASET,
         "mirror_data_revision": _HF_DATA_REVISION,
+        "disk_reserve_bytes": _MIN_FREE_BYTES_AFTER_DOWNLOAD,
         "behavior_url": behavior_url,
+        "behavior_advertised_bytes": advertised[behavior_url],
         "behavior_sha256": _sha256(behavior_csv),
         "behavior_bytes": behavior_csv.stat().st_size,
+        "target_reference_url": target_url,
+        "target_reference_advertised_bytes": advertised[target_url],
+        "target_reference_sha256": _sha256(target_csv),
+        "target_reference_bytes": target_csv.stat().st_size,
+        "target_reference_storage": "local-pinned-campaign-file",
         "item_context_url": item_context_url,
+        "item_context_advertised_bytes": advertised[item_context_url],
         "item_context_sha256": _sha256(item_context),
         "item_context_bytes": item_context.stat().st_size,
-        "target_reference_url": target_url,
-        "target_reference_storage": "remote-streamed",
     }
-    return root, target_url, provenance
+    return root, provenance
 
 
 def _git_sha() -> str:
@@ -160,10 +230,9 @@ def run_full_obd(
     if prediction_batch_size <= 0:
         raise ValueError("prediction_batch_size must be positive")
 
-    target_csv_url: str | None
     source_provenance: dict[str, object]
     if data_root is None:
-        resolved_data_root, target_csv_url, source_provenance = _download_behavior_campaign(
+        resolved_data_root, source_provenance = _download_campaign_pair(
             cache_dir,
             campaign=plan.campaign,
         )
@@ -173,7 +242,6 @@ def run_full_obd(
             campaign=plan.campaign,
             require_target=True,
         )
-        target_csv_url = None
         behavior_csv = _campaign_file(resolved_data_root, "random", plan.campaign)
         target_csv = _campaign_file(resolved_data_root, "bts", plan.campaign)
         item_context = _item_context_file(
@@ -193,37 +261,40 @@ def run_full_obd(
     output_dir.mkdir(parents=True, exist_ok=True)
     export_dir = output_dir / "export"
     exporter = _REPO_ROOT / "scripts" / "export_obd_locked_ope.py"
-    export_command = [
-        sys.executable,
-        str(exporter),
-        "--campaign",
-        plan.campaign,
-        "--data-path",
-        str(resolved_data_root),
-        "--dataset-source",
-        plan.dataset_source,
-        "--output-dir",
-        str(export_dir),
-        "--validation-fraction",
-        str(plan.validation_fraction),
-        "--n-sim",
-        str(plan.n_sim),
-        "--q-model",
-        plan.q_model,
-        "--q-folds",
-        str(plan.q_folds),
-        "--random-state",
-        str(plan.random_state),
-        "--prediction-batch-size",
-        str(prediction_batch_size),
-    ]
-    if target_csv_url is not None:
-        export_command.extend(["--target-csv-url", target_csv_url])
-    subprocess.run(export_command, cwd=_REPO_ROOT, check=True)
+    subprocess.run(
+        [
+            sys.executable,
+            str(exporter),
+            "--campaign",
+            plan.campaign,
+            "--data-path",
+            str(resolved_data_root),
+            "--dataset-source",
+            plan.dataset_source,
+            "--output-dir",
+            str(export_dir),
+            "--validation-fraction",
+            str(plan.validation_fraction),
+            "--n-sim",
+            str(plan.n_sim),
+            "--q-model",
+            plan.q_model,
+            "--q-folds",
+            str(plan.q_folds),
+            "--random-state",
+            str(plan.random_state),
+            "--prediction-batch-size",
+            str(prediction_batch_size),
+        ],
+        cwd=_REPO_ROOT,
+        check=True,
+    )
 
     manifest_path = export_dir / "export_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     plan.validate_export_manifest(manifest)
+    if manifest.get("schema_version") != "growthevo.obd-export.v3":
+        raise RuntimeError("full OBD export requires the memory-bounded v3 manifest")
     if manifest.get("action_distribution_storage") != "shared_context_free":
         raise RuntimeError("full OBD export did not use memory-bounded action probabilities")
     if manifest.get("q_prediction_storage") != "compact_factual_and_target":
@@ -301,7 +372,8 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help=(
             "Existing full OBD root with random/<campaign>/<campaign>.csv and "
-            "bts/<campaign>/<campaign>.csv. Omit to use the pinned ZOZO NEXT mirror."
+            "bts/<campaign>/<campaign>.csv. Omit to fetch only the pinned files "
+            "needed by the checked-in campaign plan."
         ),
     )
     parser.add_argument(
