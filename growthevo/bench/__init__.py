@@ -11,6 +11,13 @@ from .offline_rl import (
 )
 from .open_bandit_features import load_open_bandit_item_context
 from .open_bandit_ope import open_bandit_to_ope
+from .planner_sequences import (
+    KuaiRandHistory,
+    KuaiRandPlannerRecord,
+    default_planner_observation,
+    kuairand_to_planner_records,
+    kuairand_to_planner_transitions,
+)
 from .real_world import (
     DEFAULT_KUAIRAND_REWARD_WEIGHTS,
     KuaiRandInteraction,
@@ -39,7 +46,9 @@ __all__ = [
     "DatasetSplit",
     "GrowthAgentBench",
     "HistorySummary",
+    "KuaiRandHistory",
     "KuaiRandInteraction",
+    "KuaiRandPlannerRecord",
     "OfflineRLDataset",
     "OfflineRLTransition",
     "OpenBanditInteraction",
@@ -49,11 +58,14 @@ __all__ = [
     "TargetingBootstrapResult",
     "bootstrap_randomized_targeting",
     "default_kuairand_state_builder",
+    "default_planner_observation",
     "deterministic_stratified_split",
     "evaluate_cate",
     "evaluate_randomized_targeting",
     "kuairand_reward",
     "kuairand_to_offline_rl",
+    "kuairand_to_planner_records",
+    "kuairand_to_planner_transitions",
     "load_criteo_uplift",
     "load_kuairand",
     "load_kuairand_user_features",
