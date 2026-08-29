@@ -4,6 +4,7 @@ import math
 
 import pytest
 
+from growthevo.rl import ope as ope_module
 from growthevo.rl.ope import (
     LoggedBanditRecord,
     estimate_beta_coefficient,
@@ -90,7 +91,7 @@ def test_switch_dr_and_optimistic_shrinkage_limit_extreme_weight_residuals() -> 
     assert estimate.dr_os_standard_error < estimate.dr_standard_error
 
 
-def test_cluster_robust_uncertainty_and_meta_blue_are_exposed() -> None:
+def test_cluster_robust_uncertainty_and_recsys_meta_blue_are_exposed() -> None:
     rows = [
         LoggedBanditRecord(1.0, 0.5, 0.5, 0.3, 0.4, cluster_id="day-1", record_id="a"),
         LoggedBanditRecord(0.0, 0.5, 0.5, 0.3, 0.4, cluster_id="day-1", record_id="b"),
@@ -102,11 +103,64 @@ def test_cluster_robust_uncertainty_and_meta_blue_are_exposed() -> None:
 
     assert estimate.standard_error_method == "cluster"
     assert estimate.cluster_count == 2
+    assert [name for name, _ in estimate.meta_blue_weights] == [
+        "beta_ips",
+        "self_normalized_ips",
+        "doubly_robust",
+    ]
+    assert "ips" not in {name for name, _ in estimate.meta_blue_weights}
     assert sum(weight for _, weight in estimate.meta_blue_weights) == pytest.approx(1.0)
     assert math.isfinite(estimate.meta_blue)
     assert estimate.meta_blue_standard_error >= 0.0
     assert estimate.mean_importance_weight > 0.0
     assert estimate.importance_weight_normalization_error >= 0.0
+
+
+def test_meta_blue_uses_cluster_covariance_not_only_cluster_final_se() -> None:
+    influences = (
+        ("beta_ips", [3.0, 3.0, -3.0, -3.0, 1.0, -1.0]),
+        ("self_normalized_ips", [2.0, 2.0, -2.0, -2.0, -1.0, 1.0]),
+        ("doubly_robust", [1.0, -1.0, 1.0, -1.0, 0.5, -0.5]),
+    )
+    iid_covariance = ope_module._covariance_of_means(
+        influences,
+        cluster_ids=None,
+    )
+    cluster_covariance = ope_module._covariance_of_means(
+        influences,
+        cluster_ids=["a", "a", "b", "b", "c", "c"],
+    )
+
+    assert cluster_covariance != iid_covariance
+    assert ope_module._blue_weights(cluster_covariance) != pytest.approx(
+        ope_module._blue_weights(iid_covariance)
+    )
+
+
+def test_meta_blue_drops_snips_when_target_importance_mass_is_zero() -> None:
+    rows = [
+        LoggedBanditRecord(
+            reward=float(index % 2),
+            behavior_propensity=0.5,
+            target_action_probability=0.0,
+            baseline_q=0.2,
+            target_q=0.3,
+            record_id=f"zero-{index}",
+        )
+        for index in range(4)
+    ]
+
+    estimate = evaluate_policy(rows, beta_folds=2)
+
+    assert math.isnan(estimate.self_normalized_ips)
+    assert math.isnan(estimate.snips_standard_error)
+    assert [name for name, _ in estimate.meta_blue_weights] == [
+        "beta_ips",
+        "doubly_robust",
+    ]
+    assert math.isfinite(estimate.meta_blue)
+    assert estimate.support_coverage == pytest.approx(0.0)
+    assert estimate.effective_sample_ratio == pytest.approx(0.0)
 
 
 def test_partial_cluster_or_record_ids_fail_closed() -> None:
