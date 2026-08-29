@@ -26,6 +26,13 @@ _ALLOWED_ESTIMATORS = {
     "beta_ips",
     "meta_blue",
 }
+_CANDIDATE_FIELDS = {
+    "name",
+    "estimator",
+    "switch_threshold",
+    "dr_os_lambda",
+    "beta_folds",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,10 +45,10 @@ class OPEExperimentPlan:
     A plan fingerprint can then be bound to the locked protocol fingerprint.
 
     Export-manifest schema versions are deliberately not part of the statistical
-    plan fingerprint.  A storage/implementation revision (for example replacing a
+    plan fingerprint. A storage/implementation revision (for example replacing a
     tiled tensor with an exactly equivalent compact representation) may emit a new
     supported manifest schema without pretending the statistical experiment has
-    changed.  Runtime/full-benchmark gates may still require a specific manifest
+    changed. Runtime/full-benchmark gates may still require a specific manifest
     schema when an implementation property itself matters.
     """
 
@@ -194,12 +201,11 @@ class OPEExperimentPlan:
                 continue
             observed = manifest[key]
             if isinstance(planned, float):
-                try:
-                    observed_float = float(observed)
-                except (TypeError, ValueError):
+                if isinstance(observed, bool) or not isinstance(observed, (int, float)):
                     mismatches.append(key)
                     continue
-                if observed_float != planned:
+                observed_float = float(observed)
+                if not isfinite(observed_float) or observed_float != planned:
                     mismatches.append(key)
             elif observed != planned:
                 mismatches.append(key)
@@ -217,18 +223,21 @@ def _required_string(payload: Mapping[str, Any], key: str) -> str:
     return value
 
 
+def _required_number(payload: Mapping[str, Any], key: str) -> float:
+    value = payload[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"experiment plan field {key!r} must be a JSON number")
+    numeric = float(value)
+    if not isfinite(numeric):
+        raise ValueError(f"experiment plan field {key!r} must be finite")
+    return numeric
+
+
 def _required_int(payload: Mapping[str, Any], key: str) -> int:
     value = payload[key]
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"experiment plan field {key!r} must be a JSON integer")
     return value
-
-
-def _required_number(payload: Mapping[str, Any], key: str) -> float:
-    value = payload[key]
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"experiment plan field {key!r} must be a JSON number")
-    return float(value)
 
 
 def _optional_number(payload: Mapping[str, Any], key: str, *, index: int) -> float | None:
@@ -239,12 +248,16 @@ def _optional_number(payload: Mapping[str, Any], key: str, *, index: int) -> flo
         raise ValueError(
             f"experiment plan candidate {index} field {key!r} must be a JSON number"
         )
-    return float(value)
+    numeric = float(value)
+    if not isfinite(numeric):
+        raise ValueError(
+            f"experiment plan candidate {index} field {key!r} must be finite"
+        )
+    return numeric
 
 
 def _candidate_from_payload(payload: Mapping[str, Any], index: int) -> OPECandidate:
-    allowed = {"name", "estimator", "switch_threshold", "dr_os_lambda", "beta_folds"}
-    unknown = set(payload).difference(allowed)
+    unknown = set(payload).difference(_CANDIDATE_FIELDS)
     if unknown:
         raise ValueError(
             f"experiment plan candidate {index} has unknown fields: {sorted(unknown)}"
@@ -261,7 +274,7 @@ def _candidate_from_payload(payload: Mapping[str, Any], index: int) -> OPECandid
     raw_beta_folds = payload.get("beta_folds", 5)
     if isinstance(raw_beta_folds, bool) or not isinstance(raw_beta_folds, int):
         raise ValueError(
-            f"experiment plan candidate {index} field 'beta_folds' must be a JSON integer"
+            f"experiment plan candidate {index} beta_folds must be a JSON integer"
         )
     try:
         return OPECandidate(
@@ -323,15 +336,11 @@ def load_ope_experiment_plan(path: str | Path) -> OPEExperimentPlan:
     raw_positive_mass = gate_payload["require_positive_importance_mass"]
     if not isinstance(raw_positive_mass, bool):
         raise ValueError("require_positive_importance_mass must be a JSON boolean")
-    min_support = gate_payload["min_support_coverage"]
-    min_ess = gate_payload["min_effective_sample_ratio"]
-    if isinstance(min_support, bool) or not isinstance(min_support, (int, float)):
-        raise ValueError("min_support_coverage must be a JSON number")
-    if isinstance(min_ess, bool) or not isinstance(min_ess, (int, float)):
-        raise ValueError("min_effective_sample_ratio must be a JSON number")
     evidence_gate = OPEEvidenceGate(
-        min_support_coverage=float(min_support),
-        min_effective_sample_ratio=float(min_ess),
+        min_support_coverage=_required_number(gate_payload, "min_support_coverage"),
+        min_effective_sample_ratio=_required_number(
+            gate_payload, "min_effective_sample_ratio"
+        ),
         require_positive_importance_mass=raw_positive_mass,
     )
 
