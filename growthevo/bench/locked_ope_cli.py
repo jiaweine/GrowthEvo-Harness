@@ -9,7 +9,8 @@ from typing import Any, Sequence
 
 from growthevo.rl.ope import LoggedBanditRecord
 
-from .locked_evaluation import LockedOPEProtocol, OPECandidate
+from .locked_evaluation import OPECandidate
+from .ope_evidence_gate import EvidenceGatedOPEProtocol, OPEEvidenceGate
 
 
 _ALLOWED_ESTIMATORS = {
@@ -125,11 +126,15 @@ def run_locked_ope_benchmark(
     commit_sha: str,
     output: str | Path,
     support_propensity_floor: float = 1e-3,
+    min_support_coverage: float = 0.0,
+    min_effective_sample_ratio: float = 0.0,
 ) -> dict[str, Any]:
-    """Run validation selection followed by exactly one frozen test evaluation.
+    """Run evidence-gated validation selection and one frozen holdout reveal.
 
-    The test JSONL is intentionally opened only after ``protocol.tune`` returns.
-    This keeps the executable path aligned with the conceptual holdout protocol.
+    The test JSONL is intentionally opened only after validation evidence passes
+    and estimator selection is frozen. The CLI always requires positive supported
+    importance mass; stronger support/ESS thresholds are protocol parameters and
+    are included in the resulting protocol fingerprint/artifact.
     """
 
     if not isfinite(tuning_reference) or not isfinite(test_reference):
@@ -137,13 +142,18 @@ def run_locked_ope_benchmark(
     candidates = _load_candidates(candidates_json)
     tuning_records = _load_ope_jsonl(tuning_jsonl)
 
-    protocol = LockedOPEProtocol(
+    protocol = EvidenceGatedOPEProtocol(
         candidates,
         support_propensity_floor=support_propensity_floor,
+        evidence_gate=OPEEvidenceGate(
+            min_support_coverage=min_support_coverage,
+            min_effective_sample_ratio=min_effective_sample_ratio,
+            require_positive_importance_mass=True,
+        ),
     )
     protocol.tune(tuning_records, reference_value=float(tuning_reference))
 
-    # Deliberately defer even reading the holdout until estimator selection is frozen.
+    # Deliberately defer even reading the holdout until selection is frozen.
     test_records = _load_ope_jsonl(test_jsonl)
     holdout = protocol.evaluate_once(test_records, reference_value=float(test_reference))
     artifact = protocol.artifact(
@@ -154,8 +164,9 @@ def run_locked_ope_benchmark(
     )
 
     bundle: dict[str, Any] = {
-        "schema_version": "growthevo.locked-ope-run.v1",
+        "schema_version": "growthevo.locked-ope-run.v2",
         "artifact": loads(artifact.to_json()),
+        "evidence_gate": asdict(protocol.evidence_gate),
         "validation_scores": [
             {
                 "candidate": asdict(score.candidate),
@@ -180,8 +191,8 @@ def run_locked_ope_benchmark(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Select an OPE estimator on validation, then evaluate the frozen winner "
-            "once on holdout."
+            "Gate OPE evidence, select an estimator on validation, then evaluate "
+            "the frozen winner once on holdout."
         ),
     )
     parser.add_argument("--tuning-jsonl", required=True)
@@ -194,6 +205,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--support-propensity-floor", type=float, default=1e-3)
+    parser.add_argument("--min-support-coverage", type=float, default=0.0)
+    parser.add_argument("--min-effective-sample-ratio", type=float, default=0.0)
     return parser
 
 
@@ -210,6 +223,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         commit_sha=args.commit_sha,
         output=args.output,
         support_propensity_floor=args.support_propensity_floor,
+        min_support_coverage=args.min_support_coverage,
+        min_effective_sample_ratio=args.min_effective_sample_ratio,
     )
     return 0
 
