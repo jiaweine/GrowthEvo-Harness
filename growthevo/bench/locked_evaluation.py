@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from hashlib import blake2b
 from json import dumps
 from math import isfinite
-from typing import Iterable, Literal, Mapping, Sequence
+from typing import Hashable, Iterable, Literal, Mapping, Sequence
 
 from growthevo.causal.dr_learner import LoggedTreatmentRecord
 from growthevo.models import Channel
@@ -39,13 +39,21 @@ class OPECandidate:
         if not self.name:
             raise ValueError("candidate name cannot be empty")
         if self.estimator == "switch_dr":
-            if self.switch_threshold is None or self.switch_threshold <= 0:
-                raise ValueError("switch_dr candidate requires a positive switch_threshold")
+            if (
+                self.switch_threshold is None
+                or not isfinite(self.switch_threshold)
+                or self.switch_threshold <= 0
+            ):
+                raise ValueError("switch_dr candidate requires a positive finite switch_threshold")
         elif self.switch_threshold is not None:
             raise ValueError("switch_threshold is only valid for switch_dr candidates")
         if self.estimator == "dr_os":
-            if self.dr_os_lambda is None or self.dr_os_lambda <= 0:
-                raise ValueError("dr_os candidate requires a positive dr_os_lambda")
+            if (
+                self.dr_os_lambda is None
+                or not isfinite(self.dr_os_lambda)
+                or self.dr_os_lambda <= 0
+            ):
+                raise ValueError("dr_os candidate requires a positive finite dr_os_lambda")
         elif self.dr_os_lambda is not None:
             raise ValueError("dr_os_lambda is only valid for dr_os candidates")
         if self.beta_folds < 2:
@@ -130,40 +138,72 @@ def _hash_lines(lines: Iterable[str]) -> str:
     return digest.hexdigest()
 
 
-def ope_records_fingerprint(records: Iterable[LoggedBanditRecord]) -> str:
-    """Fingerprint complete OPE evidence, not merely row identities."""
+def _stable_hashable(value: Hashable | None) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return f"bool:{int(value)}"
+    if isinstance(value, int):
+        return f"int:{value}"
+    if isinstance(value, float):
+        if not isfinite(value):
+            raise ValueError("locked evaluation cluster_id floats must be finite")
+        return f"float:{value.hex()}"
+    if isinstance(value, str):
+        return f"str:{value}"
+    if isinstance(value, tuple):
+        return "tuple:[" + ",".join(_stable_hashable(item) for item in value) + "]"
+    raise ValueError(
+        "locked evaluation cluster_id must use stable scalar/tuple identity semantics"
+    )
 
-    rows = list(records)
-    if not rows:
-        raise ValueError("at least one OPE record is required")
+
+def _ope_record_ids(rows: Sequence[LoggedBanditRecord]) -> tuple[str, ...]:
     if any(row.record_id is None for row in rows):
         raise ValueError("locked evaluation requires record_id for every OPE record")
-    record_ids = [str(row.record_id) for row in rows]
+    record_ids = tuple(str(row.record_id) for row in rows)
     if len(set(record_ids)) != len(record_ids):
         raise ValueError("locked evaluation requires unique OPE record_id values")
+    return record_ids
+
+
+def ope_records_fingerprint(records: Iterable[LoggedBanditRecord]) -> str:
+    """Fingerprint OPE rows including target-policy and Q-model evidence."""
+
+    rows = tuple(records)
+    if not rows:
+        raise ValueError("at least one OPE record is required")
+    _ope_record_ids(rows)
     return _hash_lines(
         "|".join(
             (
                 str(row.record_id),
-                row.reward.hex(),
-                row.behavior_propensity.hex(),
-                row.target_action_probability.hex(),
-                row.baseline_q.hex(),
-                row.target_q.hex(),
-                repr(row.cluster_id),
+                float(row.reward).hex(),
+                float(row.behavior_propensity).hex(),
+                float(row.target_action_probability).hex(),
+                float(row.baseline_q).hex(),
+                float(row.target_q).hex(),
+                _stable_hashable(row.cluster_id),
             )
         )
         for row in rows
     )
 
 
-def treatment_records_fingerprint(records: Iterable[LoggedTreatmentRecord]) -> str:
-    rows = list(records)
-    if not rows:
-        raise ValueError("at least one treatment record is required")
-    ids = [row.unit_id for row in rows]
+def _treatment_unit_ids(rows: Sequence[LoggedTreatmentRecord]) -> tuple[str, ...]:
+    ids = tuple(row.unit_id for row in rows)
     if len(set(ids)) != len(ids):
         raise ValueError("locked evaluation requires unique treatment unit_id values")
+    return ids
+
+
+def treatment_records_fingerprint(records: Iterable[LoggedTreatmentRecord]) -> str:
+    """Fingerprint randomized treatment rows independent of source-file order."""
+
+    rows = tuple(records)
+    if not rows:
+        raise ValueError("at least one treatment record is required")
+    _treatment_unit_ids(rows)
     return _hash_lines(
         "|".join(
             (
@@ -177,11 +217,39 @@ def treatment_records_fingerprint(records: Iterable[LoggedTreatmentRecord]) -> s
                         row.action_propensities.items(), key=lambda item: item[0].value
                     )
                 ),
-                repr(row.group_id),
+                "none" if row.group_id is None else f"group:{row.group_id}",
             )
         )
         for row in rows
     )
+
+
+def targeting_evidence_fingerprint(
+    records: Iterable[LoggedTreatmentRecord],
+    candidate_scores: Mapping[str, Sequence[float]],
+) -> str:
+    """Fingerprint randomized rows together with candidate model predictions."""
+
+    rows = tuple(records)
+    if not rows:
+        raise ValueError("at least one treatment record is required")
+    unit_ids = _treatment_unit_ids(rows)
+    if not candidate_scores:
+        raise ValueError("at least one targeting candidate is required")
+    lines = [f"data:{treatment_records_fingerprint(rows)}"]
+    for candidate_name in sorted(candidate_scores):
+        if not candidate_name:
+            raise ValueError("targeting candidate names cannot be empty")
+        scores = tuple(float(value) for value in candidate_scores[candidate_name])
+        if len(scores) != len(rows):
+            raise ValueError("candidate scores must align with treatment records")
+        if any(not isfinite(score) for score in scores):
+            raise ValueError("candidate scores must be finite")
+        lines.extend(
+            f"score:{candidate_name}|{unit_id}|{score.hex()}"
+            for unit_id, score in zip(unit_ids, scores, strict=True)
+        )
+    return _hash_lines(lines)
 
 
 def _candidate_protocol_fingerprint(
@@ -192,7 +260,9 @@ def _candidate_protocol_fingerprint(
         {
             "selection_objective": "validation_absolute_error",
             "support_propensity_floor": support_propensity_floor,
-            "candidates": [asdict(candidate) for candidate in candidates],
+            "candidates": [
+                asdict(candidate) for candidate in sorted(candidates, key=lambda item: item.name)
+            ],
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -235,12 +305,20 @@ def _evaluate_ope_candidate(
     return estimate, value, standard_error
 
 
+def _disjoint_or_raise(tuning_ids: frozenset[str], test_ids: Sequence[str]) -> None:
+    overlap = tuning_ids.intersection(test_ids)
+    if overlap:
+        preview = sorted(overlap)[:3]
+        raise ValueError(f"tuning and test identities overlap: {preview}")
+
+
 class LockedOPEProtocol:
     """Tune estimator/hyperparameters on validation, then reveal one test result.
 
-    This object intentionally has no API for evaluating every candidate on test.
     The selected configuration is frozen before ``evaluate_once`` sees test data.
-    Reusing the same protocol object for a second test reveal fails closed.
+    There is deliberately no API to score all candidates on test, and the same
+    protocol object refuses a second holdout reveal. Stable record identities are
+    also checked for *any* tuning/test overlap, not merely equality of full sets.
     """
 
     def __init__(
@@ -264,6 +342,7 @@ class LockedOPEProtocol:
         self.validation_scores: tuple[OPEValidationScore, ...] = ()
         self.selected_candidate: OPECandidate | None = None
         self.tuning_fingerprint: str | None = None
+        self._tuning_ids: frozenset[str] | None = None
         self._evaluated = False
 
     def tune(
@@ -277,7 +356,11 @@ class LockedOPEProtocol:
         if not isfinite(reference_value):
             raise ValueError("reference_value must be finite")
         rows = tuple(records)
+        if not rows:
+            raise ValueError("at least one OPE record is required")
+        ids = _ope_record_ids(rows)
         self.tuning_fingerprint = ope_records_fingerprint(rows)
+        self._tuning_ids = frozenset(ids)
         scores: list[OPEValidationScore] = []
         for candidate in self.candidates:
             estimate, value, standard_error = _evaluate_ope_candidate(
@@ -317,16 +400,22 @@ class LockedOPEProtocol:
         *,
         reference_value: float,
     ) -> OPEHoldoutResult:
-        if self.selected_candidate is None or self.tuning_fingerprint is None:
+        if (
+            self.selected_candidate is None
+            or self.tuning_fingerprint is None
+            or self._tuning_ids is None
+        ):
             raise RuntimeError("tune must be completed before test evaluation")
         if self._evaluated:
             raise RuntimeError("test split has already been revealed for this protocol object")
         if not isfinite(reference_value):
             raise ValueError("reference_value must be finite")
         rows = tuple(records)
+        if not rows:
+            raise ValueError("at least one OPE record is required")
+        test_ids = _ope_record_ids(rows)
+        _disjoint_or_raise(self._tuning_ids, test_ids)
         test_fingerprint = ope_records_fingerprint(rows)
-        if test_fingerprint == self.tuning_fingerprint:
-            raise ValueError("tuning and test evidence fingerprints must differ")
         estimate, value, standard_error = _evaluate_ope_candidate(
             rows,
             self.selected_candidate,
@@ -361,8 +450,15 @@ class LockedOPEProtocol:
     ) -> LockedBenchmarkArtifact:
         if self.selected_candidate is None or self.tuning_fingerprint is None:
             raise RuntimeError("protocol must be tuned before creating an artifact")
+        if not self._evaluated:
+            raise RuntimeError("test evaluation must complete before creating an artifact")
         if holdout.candidate != self.selected_candidate:
             raise ValueError("holdout result does not match the frozen OPE candidate")
+        selected_validation = next(
+            score
+            for score in self.validation_scores
+            if score.candidate == self.selected_candidate
+        )
         return LockedBenchmarkArtifact(
             benchmark=benchmark,
             dataset=dataset,
@@ -372,6 +468,9 @@ class LockedOPEProtocol:
             test_fingerprint=holdout.test_fingerprint,
             selected_candidate=self.selected_candidate.name,
             metrics={
+                "candidate_count": len(self.candidates),
+                "estimator": self.selected_candidate.estimator,
+                "validation_absolute_error": selected_validation.absolute_error,
                 "estimate": holdout.estimate,
                 "reference_value": holdout.reference_value,
                 "absolute_error": holdout.absolute_error,
@@ -380,7 +479,6 @@ class LockedOPEProtocol:
                 "effective_sample_ratio": holdout.effective_sample_ratio,
                 "support_coverage": holdout.support_coverage,
                 "max_importance_weight": holdout.max_importance_weight,
-                "estimator": self.selected_candidate.estimator,
             },
         )
 
@@ -416,6 +514,7 @@ class LockedTargetingProtocol:
         self.validation_scores: tuple[TargetingValidationScore, ...] = ()
         self.selected_candidate: str | None = None
         self.tuning_fingerprint: str | None = None
+        self._tuning_ids: frozenset[str] | None = None
         self._evaluated = False
 
     def tune(
@@ -425,12 +524,12 @@ class LockedTargetingProtocol:
     ) -> str:
         if self.selected_candidate is not None:
             raise RuntimeError("protocol has already been tuned")
-        if not candidate_scores:
-            raise ValueError("at least one targeting candidate is required")
-        if any(not name for name in candidate_scores):
-            raise ValueError("targeting candidate names cannot be empty")
         rows = tuple(records)
-        self.tuning_fingerprint = treatment_records_fingerprint(rows)
+        if not rows:
+            raise ValueError("at least one treatment record is required")
+        ids = _treatment_unit_ids(rows)
+        self.tuning_fingerprint = targeting_evidence_fingerprint(rows, candidate_scores)
+        self._tuning_ids = frozenset(ids)
         scores: list[TargetingValidationScore] = []
         for name in sorted(candidate_scores):
             result = evaluate_randomized_targeting(
@@ -457,14 +556,23 @@ class LockedTargetingProtocol:
         records: Iterable[LoggedTreatmentRecord],
         selected_scores: Sequence[float],
     ) -> TargetingHoldoutResult:
-        if self.selected_candidate is None or self.tuning_fingerprint is None:
+        if (
+            self.selected_candidate is None
+            or self.tuning_fingerprint is None
+            or self._tuning_ids is None
+        ):
             raise RuntimeError("tune must be completed before test evaluation")
         if self._evaluated:
             raise RuntimeError("test split has already been revealed for this protocol object")
         rows = tuple(records)
-        test_fingerprint = treatment_records_fingerprint(rows)
-        if test_fingerprint == self.tuning_fingerprint:
-            raise ValueError("tuning and test evidence fingerprints must differ")
+        if not rows:
+            raise ValueError("at least one treatment record is required")
+        test_ids = _treatment_unit_ids(rows)
+        _disjoint_or_raise(self._tuning_ids, test_ids)
+        test_fingerprint = targeting_evidence_fingerprint(
+            rows,
+            {self.selected_candidate: selected_scores},
+        )
         result = evaluate_randomized_targeting(
             rows,
             selected_scores,
@@ -488,8 +596,15 @@ class LockedTargetingProtocol:
     ) -> LockedBenchmarkArtifact:
         if self.selected_candidate is None or self.tuning_fingerprint is None:
             raise RuntimeError("protocol must be tuned before creating an artifact")
+        if not self._evaluated:
+            raise RuntimeError("test evaluation must complete before creating an artifact")
         if holdout.candidate_name != self.selected_candidate:
             raise ValueError("holdout result does not match the frozen targeting candidate")
+        selected_validation = next(
+            score
+            for score in self.validation_scores
+            if score.candidate_name == self.selected_candidate
+        ).result
         result = holdout.result
         return LockedBenchmarkArtifact(
             benchmark=benchmark,
@@ -500,6 +615,10 @@ class LockedTargetingProtocol:
             test_fingerprint=holdout.test_fingerprint,
             selected_candidate=self.selected_candidate,
             metrics={
+                "candidate_count": len(self.validation_scores),
+                "validation_incremental_value_vs_none": (
+                    selected_validation.incremental_value_vs_none
+                ),
                 "sample_size": result.sample_size,
                 "selected_fraction": result.selected_fraction,
                 "policy_value": result.policy_value,
