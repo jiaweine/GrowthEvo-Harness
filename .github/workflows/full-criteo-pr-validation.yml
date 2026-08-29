@@ -1,0 +1,192 @@
+name: Full Criteo Research Validation
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-criteo-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-criteo:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'bench/criteo-full-locked'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout exact evidence commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Inspect initial runner resources
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          df -h
+          free -h
+
+      - name: Install Criteo research environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[criteo]'
+          python - <<'PY'
+          import lightgbm, numpy, pandas, sklearn
+          print('lightgbm', lightgbm.__version__)
+          print('numpy', numpy.__version__)
+          print('pandas', pandas.__version__)
+          print('sklearn', sklearn.__version__)
+          assert lightgbm.__version__ == '4.7.0'
+          assert numpy.__version__ == '1.26.4'
+          assert pandas.__version__ == '2.3.3'
+          assert sklearn.__version__ == '1.9.0'
+          PY
+
+      - name: Exercise all five CATE learners before real data
+        run: |
+          python - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          import numpy as np
+
+          script = Path('scripts/run_criteo_full_locked.py')
+          spec = importlib.util.spec_from_file_location('criteo_runner', script)
+          module = importlib.util.module_from_spec(spec)
+          assert spec is not None and spec.loader is not None
+          spec.loader.exec_module(module)
+          config, fingerprint = module._load_candidate_config(
+              Path('benchmarks/targeting/criteo-lgbm-candidates.v1.json')
+          )
+          assert fingerprint == 'e10eb2fc6552b28109b67cfe075b55fd1d0e8f62'
+
+          rng = np.random.default_rng(20260830)
+          n = 6000
+          x = rng.normal(size=(n, 12)).astype(np.float32)
+          treatment = (rng.random(n) < 0.82).astype(np.uint8)
+          logits = -2.4 + 0.3 * x[:, 0] - 0.2 * x[:, 1] + treatment * (0.35 + 0.25 * (x[:, 2] > 0))
+          probability = 1.0 / (1.0 + np.exp(-logits))
+          outcome = (rng.random(n) < probability).astype(np.uint8)
+          source_index = np.arange(n, dtype=np.uint64)
+          train = {'x': x, 't': treatment, 'y': outcome, 'source_index': source_index}
+          propensity = float(treatment.mean())
+          models = module._fit_candidate_models(
+              train, config=config, propensity=propensity, split_seed=20260830
+          )
+          assert set(models) == {'s-lgbm', 't-lgbm', 'x-lgbm', 'r-lgbm', 'dr-lgbm'}
+
+          validation = {
+              'x': x[:1200],
+              't': treatment[:1200],
+              'y': outcome[:1200],
+              'source_index': source_index[:1200],
+          }
+          for name in sorted(models):
+              score = module._predict_candidate(
+                  name, models, validation['x'], propensity=propensity, batch_size=257
+              )
+              assert score.shape == (1200,)
+              assert np.isfinite(score).all()
+              metrics = module._evaluate_vectorized_targeting(
+                  validation, score, propensity=propensity, selected_fraction=0.1
+              )
+              assert metrics['sample_size'] == 1200
+              assert metrics['standard_error'] >= 0
+
+          indices = np.arange(10000, dtype=np.uint64)
+          vector = module._split_labels_np(
+              indices, seed=20260830, training_fraction=0.5, validation_fraction=0.25
+          )
+          scalar = np.asarray([
+              module._split_label_value(
+                  int(index), seed=20260830, training_fraction=0.5, validation_fraction=0.25
+              )
+              for index in indices
+          ], dtype=np.uint8)
+          np.testing.assert_array_equal(vector, scalar)
+          PY
+
+      - name: Run full preregistered Criteo benchmark
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p /tmp/growthevo-full-criteo
+          python scripts/run_criteo_full_locked.py \
+            --cache-dir /tmp/growthevo-full-criteo/cache \
+            --output-dir /tmp/growthevo-full-criteo/result \
+            --chunk-size 250000 \
+            --prediction-batch-size 250000 \
+            2>&1 | tee /tmp/growthevo-full-criteo/full-run.log
+
+      - name: Inspect final result and exact-head provenance
+        if: always()
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          df -h
+          free -h
+          du -sh /tmp/growthevo-full-criteo/* 2>/dev/null || true
+          if test -f /tmp/growthevo-full-criteo/result/locked-result.json; then
+            python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path('/tmp/growthevo-full-criteo/result')
+          result = json.loads((root / 'locked-result.json').read_text())
+          manifest = json.loads((root / 'export-manifest.json').read_text())
+          provenance = json.loads((root / 'source-provenance.json').read_text())
+          artifact = result['artifact']
+          expected = os.environ['EXPECTED_SHA']
+          assert artifact['commit_sha'] == expected
+          assert provenance['growth_evo_commit_sha'] == expected
+          assert artifact['selected_candidate'] in {'s-lgbm', 't-lgbm', 'x-lgbm', 'r-lgbm', 'dr-lgbm'}
+          assert artifact['tuning_fingerprint'] != artifact['test_fingerprint']
+          assert artifact['metrics']['candidate_count'] == 5
+          assert abs(artifact['metrics']['selected_fraction'] - 0.1) < 1e-6
+          assert artifact['metrics']['standard_error'] >= 0
+          assert manifest['source_rows'] == 13979592
+          assert manifest['candidate_config_fingerprint'] == 'e10eb2fc6552b28109b67cfe075b55fd1d0e8f62'
+          assert manifest['holdout_score_policy'] == 'winner-only-after-validation-freeze'
+          print(json.dumps({
+              'selected_candidate': artifact['selected_candidate'],
+              'metrics': artifact['metrics'],
+              'tuning_fingerprint': artifact['tuning_fingerprint'],
+              'test_fingerprint': artifact['test_fingerprint'],
+              'plan': result['experiment_plan'],
+          }, indent=2, sort_keys=True))
+          PY
+          fi
+
+      - name: Freeze research environment
+        if: always()
+        run: |
+          mkdir -p /tmp/growthevo-full-criteo/result
+          python -m pip freeze > /tmp/growthevo-full-criteo/result/environment.txt
+
+      - name: Upload full Criteo research evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: criteo-full-preregistered-evidence
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            /tmp/growthevo-full-criteo/full-run.log
+            /tmp/growthevo-full-criteo/result/source-provenance.json
+            /tmp/growthevo-full-criteo/result/criteo-v2.1-visit-top10.v1.json
+            /tmp/growthevo-full-criteo/result/criteo-lgbm-candidates.v1.json
+            /tmp/growthevo-full-criteo/result/export-manifest.json
+            /tmp/growthevo-full-criteo/result/locked-result.json
+            /tmp/growthevo-full-criteo/result/environment.txt
