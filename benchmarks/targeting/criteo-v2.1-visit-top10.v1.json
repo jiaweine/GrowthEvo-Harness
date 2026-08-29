@@ -12,7 +12,7 @@
   "selected_fraction": 0.1,
   "propensity_protocol": "pooled-training-assignment-share-v1",
   "score_protocol": "fixed-lightgbm-4.7.0-cate-v1",
-  "candidate_config_fingerprint": "374b8b9c4caef8d6ffd5640e7015e804ebba42c0",
+  "candidate_config_fingerprint": "e10eb2fc6552b28109b67cfe075b55fd1d0e8f62",
   "candidate_names": [
     "s-lgbm",
     "t-lgbm",
