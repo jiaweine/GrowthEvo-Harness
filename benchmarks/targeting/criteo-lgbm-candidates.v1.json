@@ -1,0 +1,85 @@
+{
+  "schema_version": "growthevo.criteo-cate-candidates.v1",
+  "lightgbm_version": "4.7.0",
+  "feature_columns": [
+    "f0",
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8",
+    "f9",
+    "f10",
+    "f11"
+  ],
+  "forbidden_columns": [
+    "exposure"
+  ],
+  "nuisance_folds": 2,
+  "common_classifier": {
+    "objective": "binary",
+    "n_estimators": 300,
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "min_child_samples": 200,
+    "subsample": 1.0,
+    "colsample_bytree": 1.0,
+    "reg_alpha": 0.0,
+    "reg_lambda": 1.0,
+    "random_state": 20260830,
+    "n_jobs": -1,
+    "deterministic": true,
+    "force_col_wise": true,
+    "verbosity": -1
+  },
+  "common_regressor": {
+    "objective": "regression",
+    "n_estimators": 300,
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "min_child_samples": 200,
+    "subsample": 1.0,
+    "colsample_bytree": 1.0,
+    "reg_alpha": 0.0,
+    "reg_lambda": 1.0,
+    "random_state": 20260830,
+    "n_jobs": -1,
+    "deterministic": true,
+    "force_col_wise": true,
+    "verbosity": -1
+  },
+  "candidates": [
+    {
+      "name": "s-lgbm",
+      "learner": "s",
+      "treatment_as_feature": true
+    },
+    {
+      "name": "t-lgbm",
+      "learner": "t",
+      "shared_crossfit_outcome_nuisance": true
+    },
+    {
+      "name": "x-lgbm",
+      "learner": "x",
+      "shared_crossfit_outcome_nuisance": true,
+      "combination": "e*tau0+(1-e)*tau1"
+    },
+    {
+      "name": "r-lgbm",
+      "learner": "r",
+      "shared_crossfit_outcome_nuisance": true,
+      "propensity": "frozen_training_share",
+      "weighted_pseudo_outcome": true
+    },
+    {
+      "name": "dr-lgbm",
+      "learner": "dr",
+      "shared_crossfit_outcome_nuisance": true,
+      "propensity": "frozen_training_share"
+    }
+  ]
+}
