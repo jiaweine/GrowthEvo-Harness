@@ -28,12 +28,12 @@ GrowthEvo 研究的是更严格的决策问题：
 
 优化目标不是 raw conversion probability，而是 conditional treatment effect：
 
-$$
+```math
 \tau(x,a)
 =
 \mathbb{E}[Y(a)-Y(a_0)\mid X=x],
 \qquad a_0=\mathrm{NO\_TREATMENT}.
-$$
+```
 
 `NO_TREATMENT` 是一级动作。没有足够证据支持主动 treatment 时，策略保留不干预概率，而不是强制选择某个动作。
 
@@ -70,15 +70,15 @@ risk-sensitive return + dynamics-aware credit
 
 对 treatment `a` 与 control `a₀`，先将 multi-action logging propensity 在 pair 内归一化：
 
-$$
+```math
 e_a(x)
 =
 \frac{\mu(a\mid x)}{\mu(a\mid x)+\mu(a_0\mid x)}.
-$$
+```
 
 在 held-out fold 上构造 AIPW / doubly-robust pseudo-outcome：
 
-$$
+```math
 \widetilde\tau_i
 =
 \widehat m_1(x_i)-\widehat m_0(x_i)
@@ -86,7 +86,7 @@ $$
 \frac{A_i(Y_i-\widehat m_1(x_i))}{\widehat e(x_i)}
 -
 \frac{(1-A_i)(Y_i-\widehat m_0(x_i))}{1-\widehat e(x_i)}.
-$$
+```
 
 nuisance outcome models 只在其他 folds 上训练；第二阶段 effect model 只消费 out-of-fold pseudo-outcomes。
 
@@ -94,7 +94,7 @@ nuisance outcome models 只在其他 folds 上训练；第二阶段 effect model
 
 第二阶段 uncertainty 不使用 effect model 的 in-sample residual，而使用 held-out effect prediction：
 
-$$
+```math
 \widehat\sigma_{OOF}
 =
 \sqrt{
@@ -104,7 +104,7 @@ $$
 \widetilde\tau_i-\widehat\tau_{-f(i)}(x_i)
 \right)^2
 }.
-$$
+```
 
 这样 residual scale 不会因为第二阶段模型直接拟合同一组 pseudo-outcomes 而系统性偏小。
 
@@ -112,7 +112,7 @@ $$
 
 仅用 feature min/max 不能识别包围盒内部的低密度区域，因此额外估计正则化 Mahalanobis distance：
 
-$$
+```math
 d_M(x)
 =
 \sqrt{
@@ -120,37 +120,37 @@ d_M(x)
 (\Sigma+\lambda I)^{-1}
 (x-\bar x)
 }.
-$$
+```
 
 令训练分布的 support radius 为：
 
-$$
+```math
 r_q
 =
 Q_q\left(\{d_M(x_i)\}_{i=1}^{n}\right).
-$$
+```
 
 定义 distributional extrapolation：
 
-$$
+```math
 \xi(x)
 =
 \max\left(0,\frac{d_M(x)}{r_q}-1\right).
-$$
+```
 
 最终 uncertainty 与 support 同时受全局 propensity overlap 和 distributional distance 控制：
 
-$$
+```math
 \sigma(x)
 =
 \widehat\sigma_{OOF}(1+\xi(x)),
-$$
+```
 
-$$
+```math
 S(x)
 =
 \frac{\mathrm{OverlapCoverage}}{1+\xi(x)}.
-$$
+```
 
 因此，一个点即使落在训练 feature 的 min/max 内，只要明显偏离训练分布主体，也不会获得虚假的高 support。
 
@@ -160,63 +160,63 @@ $$
 
 对每个动作构造 pessimistic value lower bound 与 cost upper bound：
 
-$$
+```math
 Q_a^-
 =
 \widehat Q_a-z\widehat\sigma_a,
-$$
+```
 
-$$
+```math
 C_a^+
 =
 \widehat C_a+z\widehat\sigma_{C,a}.
-$$
+```
 
 只允许 behavior probability 满足 support floor 的 treatment 进入候选集合：
 
-$$
+```math
 \mathcal A_{sup}
 =
 \{a:\mu(a\mid x)\ge \epsilon_{sup}\}
 \cup \{a_0\}.
-$$
+```
 
 behavior policy 的 pessimistic baseline：
 
-$$
+```math
 V_\mu^-
 =
 \sum_a\mu(a\mid x)Q_a^-.
-$$
+```
 
 候选策略向动作 `a` 移动：
 
-$$
+```math
 \pi_a^{(\eta)}
 =(1-\eta)\mu+\eta\delta_a.
-$$
+```
 
 ### Per-action feasible step
 
 Total-variation trust region：
 
-$$
+```math
 \eta
 \le
 \frac{\epsilon_{TV}}{1-\mu(a\mid x)}.
-$$
+```
 
 若动作 cost 高于 behavior baseline：
 
-$$
+```math
 \eta
 \le
 \frac{C_{max}-C_\mu^+}{C_a^+-C_\mu^+}.
-$$
+```
 
 所以每个动作拥有自己的最大可行更新：
 
-$$
+```math
 \eta_a^*
 =
 \min\left(
@@ -224,41 +224,41 @@ $$
 \eta_{TV,a},
 \eta_{cost,a}
 \right).
-$$
+```
 
 可行候选的 pessimistic value：
 
-$$
+```math
 V_a^-
 =
 (1-\eta_a^*)V_\mu^-
 +
 \eta_a^*Q_a^-.
-$$
+```
 
 最小改进门槛作用于**最终候选策略**：
 
-$$
+```math
 V_a^- - V_\mu^-
 >
 \Delta_{min}.
-$$
+```
 
 最终选择：
 
-$$
+```math
 a^*
 =
 \arg\max_{a\in\mathcal A_{sup},\,a\ feasible}V_a^-.
-$$
+```
 
 这避免了“先选最高 LCB 动作，再被 cost / trust-region 截断”的次优行为：理论估值最高但几乎不可更新的动作，不会遮蔽第二优但具有更大安全更新空间的动作。
 
 若 behavior policy 已违反硬 cost limit，则回到：
 
-$$
+```math
 \pi(a_0)=1.
-$$
+```
 
 前提是 `NO_TREATMENT` 自身满足 hard cost bound；否则问题被判为无可行安全 fallback。
 
@@ -270,18 +270,18 @@ $$
 
 ### IPS
 
-$$
+```math
 \widehat V_{IPS}
 =
 \frac{1}{n}\sum_{i=1}^n
 w_i r_i,
 \qquad
 w_i=\frac{\pi(a_i\mid x_i)}{\mu(a_i\mid x_i)}.
-$$
+```
 
 ### Doubly Robust
 
-$$
+```math
 \widehat V_{DR}
 =
 \frac{1}{n}\sum_{i=1}^{n}
@@ -289,32 +289,32 @@ $$
 \widehat q_\pi(x_i)
 +w_i(r_i-\widehat q(x_i,a_i))
 \right].
-$$
+```
 
 ### β*-IPS control variate
 
 令：
 
-$$
+```math
 Z_i=w_i-1.
-$$
+```
 
 估计 variance-minimizing coefficient：
 
-$$
+```math
 \widehat\beta^*
 =
 \frac{\widehat{\mathrm{Cov}}(wR,Z)}{\widehat{\mathrm{Var}}(Z)}.
-$$
+```
 
 得到：
 
-$$
+```math
 \widehat V_{\beta}
 =
 \frac{1}{n}\sum_{i=1}^{n}
 \left[w_i r_i-\widehat\beta^*(w_i-1)\right].
-$$
+```
 
 ### Overlap diagnostics
 
@@ -326,11 +326,11 @@ $$
 - maximum importance weight；
 - weight coefficient of variation。
 
-$$
+```math
 ESS
 =
 \frac{(\sum_iw_i)^2}{\sum_iw_i^2}.
-$$
+```
 
 核心判据：
 
@@ -344,35 +344,35 @@ $$
 
 需要 lower bound 的量：
 
-$$
+```math
 r_i^{lower}
 =
 \widehat y_i-y_i.
-$$
+```
 
 需要 upper bound 的量：
 
-$$
+```math
 r_i^{upper}
 =
 y_i-\widehat y_i.
-$$
+```
 
 有限样本 conformal quantile：
 
-$$
+```math
 q_{1-\alpha}
 =
 r_{(\lceil(n+1)(1-\alpha)\rceil)}.
-$$
+```
 
 形成：
 
-$$
+```math
 LCB(y)=\widehat y-q,
 \qquad
 UCB(y)=\widehat y+q.
-$$
+```
 
 多指标同时约束时，对整体错误预算进行 family-wise correction。
 
@@ -382,20 +382,20 @@ $$
 
 单步 uplift 最大不等于长期价值最大。候选序列通过 stochastic rollout 估计 return distribution，并使用 downside CVaR：
 
-$$
+```math
 CVaR_\alpha(R)
 =
 \mathbb E[R\mid R\le VaR_\alpha(R)].
-$$
+```
 
 候选分数：
 
-$$
+```math
 Score(\pi)
 =
 CVaR_\alpha(R_\pi)
 -\lambda\Pr(\mathrm{constraint\ violation}\mid\pi).
-$$
+```
 
 短期均值更高、但 downside tail 或 violation probability 更差的候选会被降权。
 
@@ -405,27 +405,27 @@ $$
 
 使用 potential-based shaping：
 
-$$
+```math
 F_t
 =
 \gamma\Phi(s_{t+1})-\Phi(s_t),
-$$
+```
 
 并结合 evidence gain、cost 与 failure penalty 构造 step reward。
 
 Trajectory advantage 使用 GAE：
 
-$$
+```math
 \delta_t
 =
 r_t+\gamma V(s_{t+1})-V(s_t),
-$$
+```
 
-$$
+```math
 A_t
 =
 \delta_t+\gamma\lambda A_{t+1}.
-$$
+```
 
 在 dynamics discontinuity 上截断 bootstrap / recursive trace，避免 advantage 跨错误动力学边界传播。
 
