@@ -22,6 +22,13 @@ _ALLOWED_ESTIMATORS = {
     "beta_ips",
     "meta_blue",
 }
+_CANDIDATE_FIELDS = {
+    "name",
+    "estimator",
+    "switch_threshold",
+    "dr_os_lambda",
+    "beta_folds",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +38,7 @@ class OPEExperimentPlan:
     The plan freezes choices that are otherwise only implicit in exported JSONL:
     dataset/source identity, policy direction, reward, split protocol, Q backend,
     Monte-Carlo policy replication, evidence gates, and the estimator grid.
-    A plan fingerprint can then be bound to the locked protocol fingerprint.
+    A plan fingerprint is then bound to the locked protocol fingerprint.
     """
 
     benchmark: str
@@ -158,6 +165,11 @@ class OPEExperimentPlan:
             )
 
     def validate_export_manifest(self, manifest: Mapping[str, Any]) -> None:
+        schema = manifest.get("schema_version")
+        if schema != "growthevo.obd-export.v2":
+            raise ValueError(
+                "export manifest does not match pre-registered plan: schema_version"
+            )
         required_matches: tuple[tuple[str, Any], ...] = (
             ("dataset_source", self.dataset_source),
             ("campaign", self.campaign),
@@ -178,12 +190,11 @@ class OPEExperimentPlan:
                 continue
             observed = manifest[key]
             if isinstance(planned, float):
-                try:
-                    observed_float = float(observed)
-                except (TypeError, ValueError):
+                if isinstance(observed, bool) or not isinstance(observed, (int, float)):
                     mismatches.append(key)
                     continue
-                if observed_float != planned:
+                observed_float = float(observed)
+                if not isfinite(observed_float) or observed_float != planned:
                     mismatches.append(key)
             elif observed != planned:
                 mismatches.append(key)
@@ -201,7 +212,41 @@ def _required_string(payload: Mapping[str, Any], key: str) -> str:
     return value
 
 
+def _required_number(payload: Mapping[str, Any], key: str) -> float:
+    value = payload[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"experiment plan field {key!r} must be a JSON number")
+    numeric = float(value)
+    if not isfinite(numeric):
+        raise ValueError(f"experiment plan field {key!r} must be finite")
+    return numeric
+
+
+def _required_int(payload: Mapping[str, Any], key: str) -> int:
+    value = payload[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"experiment plan field {key!r} must be a JSON integer")
+    return value
+
+
+def _optional_number(payload: Mapping[str, Any], key: str) -> float | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"candidate field {key!r} must be a JSON number")
+    numeric = float(value)
+    if not isfinite(numeric):
+        raise ValueError(f"candidate field {key!r} must be finite")
+    return numeric
+
+
 def _candidate_from_payload(payload: Mapping[str, Any], index: int) -> OPECandidate:
+    unknown = set(payload).difference(_CANDIDATE_FIELDS)
+    if unknown:
+        raise ValueError(
+            f"experiment plan candidate {index} has unknown fields: {sorted(unknown)}"
+        )
     try:
         raw_name = payload["name"]
         estimator = payload["estimator"]
@@ -211,21 +256,16 @@ def _candidate_from_payload(payload: Mapping[str, Any], index: int) -> OPECandid
         raise ValueError(f"experiment plan candidate {index} name must be a non-empty string")
     if not isinstance(estimator, str) or estimator not in _ALLOWED_ESTIMATORS:
         raise ValueError(f"experiment plan candidate {index} has unsupported estimator")
+    raw_beta_folds = payload.get("beta_folds", 5)
+    if isinstance(raw_beta_folds, bool) or not isinstance(raw_beta_folds, int):
+        raise ValueError(f"experiment plan candidate {index} beta_folds must be a JSON integer")
     try:
         return OPECandidate(
             name=raw_name,
             estimator=estimator,
-            switch_threshold=(
-                float(payload["switch_threshold"])
-                if payload.get("switch_threshold") is not None
-                else None
-            ),
-            dr_os_lambda=(
-                float(payload["dr_os_lambda"])
-                if payload.get("dr_os_lambda") is not None
-                else None
-            ),
-            beta_folds=int(payload.get("beta_folds", 5)),
+            switch_threshold=_optional_number(payload, "switch_threshold"),
+            dr_os_lambda=_optional_number(payload, "dr_os_lambda"),
+            beta_folds=raw_beta_folds,
         )
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid experiment plan candidate {index}: {exc}") from exc
@@ -280,8 +320,10 @@ def load_ope_experiment_plan(path: str | Path) -> OPEExperimentPlan:
     if not isinstance(raw_positive_mass, bool):
         raise ValueError("require_positive_importance_mass must be a JSON boolean")
     evidence_gate = OPEEvidenceGate(
-        min_support_coverage=float(gate_payload["min_support_coverage"]),
-        min_effective_sample_ratio=float(gate_payload["min_effective_sample_ratio"]),
+        min_support_coverage=_required_number(gate_payload, "min_support_coverage"),
+        min_effective_sample_ratio=_required_number(
+            gate_payload, "min_effective_sample_ratio"
+        ),
         require_positive_importance_mass=raw_positive_mass,
     )
 
@@ -304,12 +346,12 @@ def load_ope_experiment_plan(path: str | Path) -> OPEExperimentPlan:
         evaluation_policy=_required_string(payload, "evaluation_policy"),
         reward_definition=_required_string(payload, "reward_definition"),
         split_strategy=_required_string(payload, "split_strategy"),
-        validation_fraction=float(payload["validation_fraction"]),
+        validation_fraction=_required_number(payload, "validation_fraction"),
         q_model=_required_string(payload, "q_model"),
-        q_folds=int(payload["q_folds"]),
-        n_sim=int(payload["n_sim"]),
-        random_state=int(payload["random_state"]),
-        support_propensity_floor=float(payload["support_propensity_floor"]),
+        q_folds=_required_int(payload, "q_folds"),
+        n_sim=_required_int(payload, "n_sim"),
+        random_state=_required_int(payload, "random_state"),
+        support_propensity_floor=_required_number(payload, "support_propensity_floor"),
         evidence_gate=evidence_gate,
         candidates=tuple(candidates),
     )
