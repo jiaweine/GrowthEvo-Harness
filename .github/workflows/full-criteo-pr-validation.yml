@@ -1,41 +1,46 @@
 name: Full Criteo Research Validation
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      experiment_reason:
+        description: "New preregistered experiment or explicit evidence rerun reason"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: full-criteo-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: full-criteo-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   full-criteo:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'bench/criteo-full-locked'
     runs-on: ubuntu-latest
     timeout-minutes: 300
 
     steps:
       - name: Checkout exact evidence commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Inspect initial runner resources
         env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_SHA: ${{ github.sha }}
+          EXPERIMENT_REASON: ${{ inputs.experiment_reason }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -n "$EXPERIMENT_REASON"
+          printf 'experiment_reason=%s\n' "$EXPERIMENT_REASON"
           df -h
           free -h
 
@@ -133,7 +138,7 @@ jobs:
       - name: Inspect final result and exact-head provenance
         if: always()
         env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           df -h
           free -h
@@ -177,7 +182,7 @@ jobs:
 
       - name: Upload full Criteo research evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: criteo-full-preregistered-evidence
           if-no-files-found: warn
