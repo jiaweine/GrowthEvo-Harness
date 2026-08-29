@@ -3,8 +3,12 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-import pandas as pd
 import pytest
+
+pd = pytest.importorskip(
+    "pandas",
+    reason="streamed OBD reference requires optional [obd] dependencies",
+)
 
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "export_obd_locked_ope.py"
