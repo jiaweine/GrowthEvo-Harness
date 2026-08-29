@@ -12,6 +12,16 @@ from .ope_evidence_gate import OPEEvidenceGate
 
 
 _SCHEMA_VERSION = "growthevo.ope-experiment-plan.v1"
+_ALLOWED_ESTIMATORS = {
+    "direct_method",
+    "ips",
+    "self_normalized_ips",
+    "doubly_robust",
+    "switch_dr",
+    "dr_os",
+    "beta_ips",
+    "meta_blue",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,8 +74,8 @@ class OPEExperimentPlan:
             raise ValueError("q_folds must be at least 2")
         if self.n_sim <= 0:
             raise ValueError("n_sim must be positive")
-        if not 0.0 < self.support_propensity_floor <= 1.0:
-            raise ValueError("support_propensity_floor must be in (0, 1]")
+        if not isfinite(self.support_propensity_floor) or not 0.0 < self.support_propensity_floor <= 1.0:
+            raise ValueError("support_propensity_floor must be finite and in (0, 1]")
         if not self.candidates:
             raise ValueError("experiment plan requires at least one OPE candidate")
         names = [candidate.name for candidate in self.candidates]
@@ -149,9 +159,12 @@ class OPEExperimentPlan:
 
     def validate_export_manifest(self, manifest: Mapping[str, Any]) -> None:
         required_matches: tuple[tuple[str, Any], ...] = (
+            ("dataset_source", self.dataset_source),
             ("campaign", self.campaign),
             ("behavior_policy", self.behavior_policy),
             ("evaluation_policy", self.evaluation_policy),
+            ("reward_definition", self.reward_definition),
+            ("split_strategy", self.split_strategy),
             ("validation_fraction", self.validation_fraction),
             ("q_model", self.q_model),
             ("q_folds", self.q_folds),
@@ -181,11 +194,27 @@ class OPEExperimentPlan:
             )
 
 
+def _required_string(payload: Mapping[str, Any], key: str) -> str:
+    value = payload[key]
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"experiment plan field {key!r} must be a non-empty string")
+    return value
+
+
 def _candidate_from_payload(payload: Mapping[str, Any], index: int) -> OPECandidate:
     try:
+        raw_name = payload["name"]
+        estimator = payload["estimator"]
+    except KeyError as exc:
+        raise ValueError(f"experiment plan candidate {index} is missing {exc.args[0]!r}") from exc
+    if not isinstance(raw_name, str) or not raw_name:
+        raise ValueError(f"experiment plan candidate {index} name must be a non-empty string")
+    if not isinstance(estimator, str) or estimator not in _ALLOWED_ESTIMATORS:
+        raise ValueError(f"experiment plan candidate {index} has unsupported estimator")
+    try:
         return OPECandidate(
-            name=str(payload["name"]),
-            estimator=payload["estimator"],
+            name=raw_name,
+            estimator=estimator,
             switch_threshold=(
                 float(payload["switch_threshold"])
                 if payload.get("switch_threshold") is not None
@@ -198,8 +227,6 @@ def _candidate_from_payload(payload: Mapping[str, Any], index: int) -> OPECandid
             ),
             beta_folds=int(payload.get("beta_folds", 5)),
         )
-    except KeyError as exc:
-        raise ValueError(f"experiment plan candidate {index} is missing {exc.args[0]!r}") from exc
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid experiment plan candidate {index}: {exc}") from exc
 
@@ -249,10 +276,13 @@ def load_ope_experiment_plan(path: str | Path) -> OPEExperimentPlan:
     }
     if set(gate_payload) != gate_keys:
         raise ValueError("experiment plan evidence_gate must use the exact v1 fields")
+    raw_positive_mass = gate_payload["require_positive_importance_mass"]
+    if not isinstance(raw_positive_mass, bool):
+        raise ValueError("require_positive_importance_mass must be a JSON boolean")
     evidence_gate = OPEEvidenceGate(
         min_support_coverage=float(gate_payload["min_support_coverage"]),
         min_effective_sample_ratio=float(gate_payload["min_effective_sample_ratio"]),
-        require_positive_importance_mass=bool(gate_payload["require_positive_importance_mass"]),
+        require_positive_importance_mass=raw_positive_mass,
     )
 
     candidate_payload = payload["candidates"]
@@ -265,17 +295,17 @@ def load_ope_experiment_plan(path: str | Path) -> OPEExperimentPlan:
         candidates.append(_candidate_from_payload(candidate, index))
 
     return OPEExperimentPlan(
-        schema_version=str(payload["schema_version"]),
-        benchmark=str(payload["benchmark"]),
-        dataset=str(payload["dataset"]),
-        dataset_source=str(payload["dataset_source"]),
-        campaign=str(payload["campaign"]),
-        behavior_policy=str(payload["behavior_policy"]),
-        evaluation_policy=str(payload["evaluation_policy"]),
-        reward_definition=str(payload["reward_definition"]),
-        split_strategy=str(payload["split_strategy"]),
+        schema_version=_required_string(payload, "schema_version"),
+        benchmark=_required_string(payload, "benchmark"),
+        dataset=_required_string(payload, "dataset"),
+        dataset_source=_required_string(payload, "dataset_source"),
+        campaign=_required_string(payload, "campaign"),
+        behavior_policy=_required_string(payload, "behavior_policy"),
+        evaluation_policy=_required_string(payload, "evaluation_policy"),
+        reward_definition=_required_string(payload, "reward_definition"),
+        split_strategy=_required_string(payload, "split_strategy"),
         validation_fraction=float(payload["validation_fraction"]),
-        q_model=str(payload["q_model"]),
+        q_model=_required_string(payload, "q_model"),
         q_folds=int(payload["q_folds"]),
         n_sim=int(payload["n_sim"]),
         random_state=int(payload["random_state"]),
