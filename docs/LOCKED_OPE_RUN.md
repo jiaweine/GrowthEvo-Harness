@@ -1,10 +1,12 @@
 # Locked OPE Run
 
-This command is the executable path for promoting an Open Bandit-style OPE result. It deliberately separates estimator selection from final holdout evaluation.
+`growthevo-locked-ope` is the executable promotion path for Open Bandit-style OPE. It enforces three layers in order:
 
-## Command
+1. **pre-registration** — upstream data/Q/policy/candidate/gate settings must match a checked plan and realized export manifest;
+2. **evidence eligibility** — validation and final OPE cohorts must pass predeclared support/ESS gates;
+3. **locked selection** — choose on validation, freeze one estimator, then open final holdout once.
 
-After installing the package:
+## Preregistered command
 
 ```bash
 growthevo-locked-ope \
@@ -13,15 +15,44 @@ growthevo-locked-ope \
   --candidates-json ope_candidates.json \
   --tuning-reference 0.01234 \
   --test-reference 0.01210 \
-  --benchmark open-bandit-ope \
-  --dataset obd-all-random-vs-bts \
+  --benchmark open-bandit-ope-small-evidence \
+  --dataset obd-small-all-random-to-bts \
   --commit-sha "$(git rev-parse HEAD)" \
+  --support-propensity-floor 0.001 \
+  --min-support-coverage 0.95 \
+  --min-effective-sample-ratio 0.05 \
+  --experiment-plan-json benchmarks/ope/obd-small-all-random-to-bts.v1.json \
+  --export-manifest-json export_manifest.json \
   --output benchmark-result.json
 ```
 
-The implementation reads the candidate list and validation evidence first, freezes the winning estimator, and only then opens `holdout.jsonl`.
+`--experiment-plan-json` and `--export-manifest-json` are optional only for exploratory/backwards-compatible runs. A promotable real-world result should supply both.
 
-The reference values must come from a legitimate validation/test ground-truth or on-policy reference protocol. Open Bandit Dataset is useful here because multiple production logging policies were run on the same platform, enabling real-world OPE estimator evaluation against policy values measured from online logs.
+Plan/runtime/manifest agreement is checked **before `validation.jsonl` is opened**.
+
+## Pre-registered OPE plan
+
+`growthevo.ope-experiment-plan.v1` freezes:
+
+- benchmark and dataset name;
+- immutable dataset/source identity;
+- campaign and behavior/evaluation policies;
+- reward definition;
+- split strategy and validation fraction;
+- Q model and cross-fit folds;
+- target-policy Monte Carlo replication count;
+- seed;
+- support propensity floor;
+- evidence gate;
+- complete estimator/hyperparameter grid.
+
+Unknown plan/candidate fields and JSON type confusion fail closed. For example, JSON boolean `true` is not accepted as integer `1` for `q_folds`.
+
+## Realized export manifest
+
+The exporter records what was actually generated. For OBD, the current `growthevo.obd-export.v2` manifest includes dataset source, policy direction, reward, split, Q settings, simulation count and seed. The runner verifies those fields against the pre-registered plan and hashes the full manifest into the final evidence bundle.
+
+A plan describes **intent**; the manifest describes **realization**. Both are retained.
 
 ## OPE JSONL schema
 
@@ -39,22 +70,9 @@ Each line is one logged evaluation record:
 }
 ```
 
-Required fields:
-
-- `reward`: observed reward for the logged action;
-- `behavior_propensity`: logged probability of that action under the behavior policy;
-- `target_action_probability`: probability assigned to that same logged action by the target policy;
-- `baseline_q`: estimated reward for the logged action used by DR-style correction;
-- `target_q`: target-policy expected Q term used by DM/DR;
-- `record_id`: stable, unique, source-order-invariant identity.
-
-`cluster_id` is optional. Supply it only when the experiment has a defensible repeated-unit/block definition. JSON arrays are converted to immutable tuple identities. Do not invent clusters merely to obtain a different standard error.
-
-For paper-facing runs, nuisance/Q predictions should be produced by a training/cross-fitting protocol that never learns from the final holdout outcomes it predicts.
+`record_id` must be a stable non-empty string. `cluster_id` is optional and should only represent a defensible repeated-unit/block definition. Q predictions for paper-facing runs must be generated without holdout leakage.
 
 ## Candidate schema
-
-`ope_candidates.json` is a non-empty JSON array. Every candidate and every tuning parameter must be declared before final holdout evaluation.
 
 ```json
 [
@@ -68,43 +86,40 @@ For paper-facing runs, nuisance/Q predictions should be produced by a training/c
 ]
 ```
 
-Supported estimator names are:
+Supported estimator names are `direct_method`, `ips`, `self_normalized_ips`, `doubly_robust`, `switch_dr`, `dr_os`, `beta_ips`, and `meta_blue`.
 
-- `direct_method`
-- `ips`
-- `self_normalized_ips`
-- `doubly_robust`
-- `switch_dr`
-- `dr_os`
-- `beta_ips`
-- `meta_blue`
+A large grid can overfit validation. Changing the grid after validation/final inspection creates a new protocol fingerprint and is not the same experiment.
 
-`switch_threshold` is valid only for `switch_dr`; `dr_os_lambda` is valid only for `dr_os`. β cross-fit folds are fixed by `beta_folds`.
+## Evidence gate
 
-A large hyperparameter grid can itself overfit validation. Candidate multiplicity should therefore be justified and fixed in the experiment protocol rather than expanded after inspecting results.
+The executable runner requires positive supported importance mass. Optional minimum support coverage and ESS ratio are predeclared through the plan/CLI. The current OBD plans use support `>= 0.95` and ESS ratio `>= 0.05`.
 
-## Output
+Gate order matters: a numerically accurate-looking estimator cannot win when the logged cohort itself lacks admissible OPE evidence.
 
-The output JSON contains two components:
+## Output v3
 
-1. `validation_scores`: all pre-declared candidates evaluated against the validation reference;
-2. `artifact`: the single frozen winner evaluated on the final holdout.
+A preregistered run emits `growthevo.locked-ope-run.v3` with:
 
-The artifact includes:
+- `validation_scores` for the complete predeclared grid;
+- `evidence_gate` configuration;
+- `experiment_plan.plan` and plan fingerprint;
+- realized export-manifest fingerprint;
+- final `artifact` for one frozen candidate.
 
-- benchmark and dataset identity;
-- commit SHA;
-- selected candidate;
-- protocol fingerprint;
-- tuning-evidence fingerprint;
-- test-evidence fingerprint;
+The artifact binds:
+
+- code commit SHA;
+- bound protocol fingerprint;
+- validation evidence fingerprint;
+- holdout evidence fingerprint;
+- experiment-plan fingerprint;
+- export-manifest fingerprint;
+- dataset source;
 - final estimate/error/SE;
-- ESS ratio, support coverage and maximum importance weight.
-
-OPE evidence fingerprints include rewards, logged propensities, target-policy probabilities, Q predictions, stable record IDs and cluster IDs. Changing any of these changes the fingerprint.
+- ESS/support/importance-weight diagnostics.
 
 ## Promotion rule
 
-Do **not** run a second candidate set against the same final holdout and replace the reported result because it looks better. If the method or hyperparameter grid changes after the holdout is revealed, create a new experimental claim with a new untouched holdout/cohort or clearly label it exploratory rather than confirmation evidence.
+Do not run another candidate grid against the same final holdout and replace the result. A changed estimator family, Q protocol, data source, split, seed, evidence gate or hyperparameter grid is a new experiment and receives a new plan/protocol fingerprint.
 
-The in-memory one-reveal guard is a workflow safety mechanism, not a cryptographic claim. Reproducibility ultimately comes from the pre-declared protocol, immutable data/model evidence, fingerprints, code SHA and publication of the full validation scoreboard alongside the single final-test winner.
+For the official OBD workflows, see `docs/OBD_ISOLATED_EXPORT.md` and `scripts/run_obd_full_locked.py`.

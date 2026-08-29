@@ -42,6 +42,10 @@ jobs:
   obd-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      SB_OBP_COMMIT: 1c6d14677ec6f06094a2f8886a1158bab99c571e
+      OBD_DATASET_SOURCE: github:sb-ai-lab/sb-obp@1c6d14677ec6f06094a2f8886a1158bab99c571e:obd-small
+      OBD_PLAN: benchmarks/ope/obd-small-all-random-to-bts.v1.json
 
     steps:
       - name: Checkout
@@ -58,14 +62,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e '.[obd]'
 
-      - name: Fetch public small Open Bandit Dataset
-        run: git clone --depth 1 https://github.com/sb-ai-lab/sb-obp.git /tmp/sb-obp
+      - name: Fetch pinned public small Open Bandit Dataset
+        run: |
+          git init /tmp/sb-obp
+          git -C /tmp/sb-obp remote add origin https://github.com/sb-ai-lab/sb-obp.git
+          git -C /tmp/sb-obp fetch --depth 1 origin "$SB_OBP_COMMIT"
+          git -C /tmp/sb-obp checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/sb-obp rev-parse HEAD)" = "$SB_OBP_COMMIT"
 
-      - name: Export real OBD random-to-BTS evidence with cross-fitted Q
+      - name: Export preregistered OBD evidence with cross-fitted Q
         run: |
           python scripts/export_obd_locked_ope.py \
             --campaign all \
             --data-path /tmp/sb-obp/obd \
+            --dataset-source "$OBD_DATASET_SOURCE" \
             --output-dir /tmp/growthevo-obd \
             --validation-fraction 0.5 \
             --n-sim 500 \
@@ -73,10 +83,11 @@ jobs:
             --q-folds 2 \
             --random-state 12345
 
-      - name: Run evidence-gated locked OPE selection
+      - name: Run preregistered evidence-gated locked OPE selection
         run: |
           python - <<'PY'
           import json
+          import os
           import subprocess
 
           root = "/tmp/growthevo-obd"
@@ -84,6 +95,7 @@ jobs:
               manifest = json.load(handle)
           assert manifest["q_model"] == "logistic"
           assert manifest["q_folds"] == 2
+          assert manifest["dataset_source"] == os.environ["OBD_DATASET_SOURCE"]
 
           subprocess.run(
               [
@@ -96,8 +108,11 @@ jobs:
                   "--benchmark", "open-bandit-ope-small-evidence",
                   "--dataset", "obd-small-all-random-to-bts",
                   "--commit-sha", "${{ github.event.pull_request.head.sha }}",
+                  "--support-propensity-floor", "0.001",
                   "--min-support-coverage", "0.95",
                   "--min-effective-sample-ratio", "0.05",
+                  "--experiment-plan-json", os.environ["OBD_PLAN"],
+                  "--export-manifest-json", f"{root}/export_manifest.json",
                   "--output", f"{root}/locked-result.json",
               ],
               check=True,
@@ -106,7 +121,9 @@ jobs:
           with open(f"{root}/locked-result.json", encoding="utf-8") as handle:
               result = json.load(handle)
           artifact = result["artifact"]
-          assert result["schema_version"] == "growthevo.locked-ope-run.v2"
+          prereg = result["experiment_plan"]
+          assert result["schema_version"] == "growthevo.locked-ope-run.v3"
+          assert prereg is not None
           assert result["evidence_gate"]["min_support_coverage"] == 0.95
           assert result["evidence_gate"]["min_effective_sample_ratio"] == 0.05
           assert result["evidence_gate"]["require_positive_importance_mass"] is True
@@ -116,10 +133,13 @@ jobs:
           assert artifact["metrics"]["effective_sample_ratio"] >= 0.05
           assert artifact["metrics"]["validation_support_coverage"] >= 0.95
           assert artifact["metrics"]["validation_effective_sample_ratio"] >= 0.05
+          assert artifact["metrics"]["experiment_plan_fingerprint"] == prereg["fingerprint"]
+          assert artifact["metrics"]["dataset_source"] == os.environ["OBD_DATASET_SOURCE"]
           assert artifact["tuning_fingerprint"] != artifact["test_fingerprint"]
           print(json.dumps({
               "manifest": manifest,
               "evidence_gate": result["evidence_gate"],
+              "experiment_plan": prereg,
               "validation_scores": result["validation_scores"],
               "artifact": artifact,
           }, indent=2, sort_keys=True))
@@ -132,6 +152,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
+            benchmarks/ope/obd-small-all-random-to-bts.v1.json
             /tmp/growthevo-obd/export_manifest.json
             /tmp/growthevo-obd/ope_candidates.json
             /tmp/growthevo-obd/locked-result.json

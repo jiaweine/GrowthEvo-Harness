@@ -12,3 +12,5 @@ build/
 .idea/
 .vscode/
 outputs/
+.benchmark-data/
+benchmark-results/

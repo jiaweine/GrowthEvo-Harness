@@ -1,0 +1,33 @@
+{
+  "schema_version": "growthevo.ope-experiment-plan.v1",
+  "benchmark": "open-bandit-ope-full-evidence",
+  "dataset": "obd-full-all-random-to-bts",
+  "dataset_source": "zozo-research:open-bandit-dataset-full:https://research.zozo.com/data_release/open_bandit_dataset.zip",
+  "campaign": "all",
+  "behavior_policy": "random",
+  "evaluation_policy": "bts",
+  "reward_definition": "click",
+  "split_strategy": "paired_chronological_relative_fraction",
+  "validation_fraction": 0.5,
+  "q_model": "logistic",
+  "q_folds": 3,
+  "n_sim": 100000,
+  "random_state": 12345,
+  "support_propensity_floor": 0.001,
+  "evidence_gate": {
+    "min_support_coverage": 0.95,
+    "min_effective_sample_ratio": 0.05,
+    "require_positive_importance_mass": true
+  },
+  "candidates": [
+    {"name": "beta-cf5", "estimator": "beta_ips", "beta_folds": 5},
+    {"name": "dr", "estimator": "doubly_robust"},
+    {"name": "ips", "estimator": "ips"},
+    {"name": "snips", "estimator": "self_normalized_ips"},
+    {"name": "switch-5", "estimator": "switch_dr", "switch_threshold": 5.0},
+    {"name": "switch-10", "estimator": "switch_dr", "switch_threshold": 10.0},
+    {"name": "dros-1", "estimator": "dr_os", "dr_os_lambda": 1.0},
+    {"name": "dros-10", "estimator": "dr_os", "dr_os_lambda": 10.0},
+    {"name": "meta-blue", "estimator": "meta_blue"}
+  ]
+}
