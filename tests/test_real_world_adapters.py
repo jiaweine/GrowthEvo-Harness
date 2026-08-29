@@ -75,6 +75,8 @@ def test_open_bandit_adapter_preserves_logged_propensity_for_current_ope(tmp_pat
         target_action_probability=lambda row: 0.5 if row.item_id == 7 else 0.25,
         baseline_q=lambda row: 0.1,
         target_q=lambda row: 0.2,
+        cluster_key=lambda row: f"item-block-{row.item_id}",
+        record_identity=lambda row: f"{row.timestamp}:{row.item_id}:{row.position}",
     )
     estimate = evaluate_policy(ope_rows)
 
@@ -82,8 +84,12 @@ def test_open_bandit_adapter_preserves_logged_propensity_for_current_ope(tmp_pat
     assert rows[0].categorical_context == ("segment-A",)
     assert ope_rows[0].behavior_propensity == pytest.approx(0.25)
     assert ope_rows[0].importance_weight == pytest.approx(2.0)
+    assert ope_rows[0].record_id == "2020-01-01 00:00:00:7:1"
+    assert ope_rows[0].cluster_id == "item-block-7"
     assert estimate.ips == pytest.approx(1.0)
     assert estimate.sample_size == 2
+    assert estimate.standard_error_method == "cluster"
+    assert estimate.cluster_count == 2
 
 
 def test_kuairand_loader_keeps_randomization_as_provenance_and_reward_is_explicit(tmp_path: Path) -> None:
