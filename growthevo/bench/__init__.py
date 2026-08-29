@@ -44,7 +44,12 @@ from .real_world import (
 )
 from .runner import GrowthAgentBench, PolicyBenchmarkResult
 from .splits import DatasetSplit, deterministic_stratified_split, ordered_split
-from .statistics import TargetingBootstrapResult, bootstrap_randomized_targeting
+from .statistics import (
+    TargetingBootstrapResult,
+    TargetingInferenceResult,
+    bootstrap_randomized_targeting,
+    infer_randomized_targeting,
+)
 from .synthetic import (
     CATEBenchmarkResult,
     SyntheticGrowthSample,
@@ -79,6 +84,7 @@ __all__ = [
     "SyntheticGrowthSample",
     "TargetingBootstrapResult",
     "TargetingHoldoutResult",
+    "TargetingInferenceResult",
     "TargetingValidationScore",
     "bootstrap_randomized_targeting",
     "default_kuairand_state_builder",
@@ -86,6 +92,7 @@ __all__ = [
     "deterministic_stratified_split",
     "evaluate_cate",
     "evaluate_randomized_targeting",
+    "infer_randomized_targeting",
     "kuairand_reward",
     "kuairand_to_offline_rl",
     "kuairand_to_planner_records",
