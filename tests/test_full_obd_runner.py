@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -84,3 +85,45 @@ def test_full_mirror_transport_is_pinned_to_obd_v1_revision() -> None:
     target_url = _RUNNER._mirror_url("bts", "all", "all.csv")
     assert "/resolve/57a688e/random/all/all.csv" in behavior_url
     assert "/resolve/57a688e/bts/all/all.csv" in target_url
+
+
+def test_download_budget_fails_before_transfer_when_known_files_do_not_fit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_RUNNER, "_remote_size", lambda _url: 4 * 1024**3)
+    monkeypatch.setattr(
+        _RUNNER.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(total=10 * 1024**3, used=0, free=10 * 1024**3),
+    )
+    downloads = [
+        ("https://example.test/a", tmp_path / "a.csv"),
+        ("https://example.test/b", tmp_path / "b.csv"),
+        ("https://example.test/c", tmp_path / "c.csv"),
+    ]
+
+    with pytest.raises(RuntimeError, match="insufficient disk"):
+        _RUNNER._assert_download_budget(tmp_path, downloads)
+
+
+def test_download_budget_counts_existing_cache_as_already_materialized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cached = tmp_path / "cached.csv"
+    cached.write_bytes(b"cached")
+    monkeypatch.setattr(_RUNNER, "_remote_size", lambda _url: 3 * 1024**3)
+    monkeypatch.setattr(
+        _RUNNER.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(total=8 * 1024**3, used=0, free=8 * 1024**3),
+    )
+    sizes = _RUNNER._assert_download_budget(
+        tmp_path,
+        [
+            ("https://example.test/cached", cached),
+            ("https://example.test/new", tmp_path / "new.csv"),
+        ],
+    )
+
+    assert sizes["https://example.test/cached"] == len(b"cached")
+    assert sizes["https://example.test/new"] == 3 * 1024**3
