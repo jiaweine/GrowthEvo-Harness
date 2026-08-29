@@ -73,7 +73,7 @@ jobs:
             --q-folds 2 \
             --random-state 12345
 
-      - name: Run locked OPE selection on exported OBD evidence
+      - name: Run evidence-gated locked OPE selection
         run: |
           python - <<'PY'
           import json
@@ -96,6 +96,8 @@ jobs:
                   "--benchmark", "open-bandit-ope-small-evidence",
                   "--dataset", "obd-small-all-random-to-bts",
                   "--commit-sha", "${{ github.event.pull_request.head.sha }}",
+                  "--min-support-coverage", "0.95",
+                  "--min-effective-sample-ratio", "0.05",
                   "--output", f"{root}/locked-result.json",
               ],
               check=True,
@@ -104,11 +106,20 @@ jobs:
           with open(f"{root}/locked-result.json", encoding="utf-8") as handle:
               result = json.load(handle)
           artifact = result["artifact"]
+          assert result["schema_version"] == "growthevo.locked-ope-run.v2"
+          assert result["evidence_gate"]["min_support_coverage"] == 0.95
+          assert result["evidence_gate"]["min_effective_sample_ratio"] == 0.05
+          assert result["evidence_gate"]["require_positive_importance_mass"] is True
           assert artifact["selected_candidate"]
           assert artifact["metrics"]["candidate_count"] >= 5
+          assert artifact["metrics"]["support_coverage"] >= 0.95
+          assert artifact["metrics"]["effective_sample_ratio"] >= 0.05
+          assert artifact["metrics"]["validation_support_coverage"] >= 0.95
+          assert artifact["metrics"]["validation_effective_sample_ratio"] >= 0.05
           assert artifact["tuning_fingerprint"] != artifact["test_fingerprint"]
           print(json.dumps({
               "manifest": manifest,
+              "evidence_gate": result["evidence_gate"],
               "validation_scores": result["validation_scores"],
               "artifact": artifact,
           }, indent=2, sort_keys=True))
