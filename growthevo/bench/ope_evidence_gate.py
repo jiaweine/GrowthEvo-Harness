@@ -85,11 +85,9 @@ def _protocol_fingerprint(inner_fingerprint: str, gate: OPEEvidenceGate) -> str:
 class EvidenceGatedOPEProtocol:
     """Locked validation selection with cohort evidence gates before error ranking.
 
-    The wrapper deliberately keeps the underlying ``LockedOPEProtocol`` intact.
-    Validation evidence must first satisfy the pre-declared support/ESS contract.
-    The final holdout is likewise gated, but once its rows are read the wrapper
-    marks that holdout as revealed even if the gate fails. This prevents swapping
-    in a different test cohort after seeing that the first one had weak evidence.
+    Both validation and holdout are one-shot evidence reveals. Once a cohort has
+    been supplied, a gate failure cannot be followed by swapping in a different
+    cohort. This prevents support/ESS shopping in addition to estimator shopping.
     """
 
     def __init__(
@@ -112,6 +110,7 @@ class EvidenceGatedOPEProtocol:
         self.holdout_diagnostics: OPEEstimate | None = None
         self.validation_gate_failures: tuple[str, ...] = ()
         self.holdout_gate_failures: tuple[str, ...] = ()
+        self._validation_revealed = False
         self._holdout_revealed = False
 
     @property
@@ -146,9 +145,15 @@ class EvidenceGatedOPEProtocol:
         *,
         reference_value: float,
     ) -> OPECandidate:
+        if self._validation_revealed:
+            raise RuntimeError("validation split has already been revealed for this protocol object")
+        if not isfinite(reference_value):
+            raise ValueError("reference_value must be finite")
         rows = tuple(records)
         if not rows:
             raise ValueError("at least one OPE record is required")
+
+        self._validation_revealed = True
         diagnostics = self._diagnose(rows)
         failures = self.evidence_gate.failures(diagnostics)
         self.validation_diagnostics = diagnostics
