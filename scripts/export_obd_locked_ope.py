@@ -237,6 +237,7 @@ def export_obd_pair(
     campaign: str,
     output_dir: Path,
     data_path: Optional[Path],
+    dataset_source: Optional[str],
     validation_fraction: float,
     n_sim: int,
     q_folds: int,
@@ -245,6 +246,8 @@ def export_obd_pair(
 ) -> Dict[str, Any]:
     if campaign not in {"all", "men", "women"}:
         raise ValueError("campaign must be one of: all, men, women")
+    if dataset_source is not None and not dataset_source:
+        raise ValueError("dataset_source cannot be empty when provided")
     if not 0.1 <= validation_fraction <= 0.9:
         raise ValueError("validation_fraction must be in [0.1, 0.9]")
     if n_sim <= 0:
@@ -266,6 +269,12 @@ def export_obd_pair(
     dataset_kwargs: Dict[str, Any] = {"campaign": campaign}
     if data_path is not None:
         dataset_kwargs["data_path"] = data_path
+    if dataset_source is not None:
+        resolved_dataset_source = dataset_source
+    elif data_path is not None:
+        resolved_dataset_source = f"local-path:{data_path.resolve()}"
+    else:
+        resolved_dataset_source = "obp-default-small-dataset"
 
     behavior_dataset = OpenBanditDataset(behavior_policy="random", **dataset_kwargs)
     target_dataset = OpenBanditDataset(behavior_policy="bts", **dataset_kwargs)
@@ -331,11 +340,14 @@ def export_obd_pair(
         encoding="utf-8",
     )
     manifest = {
-        "schema_version": "growthevo.obd-export.v1",
+        "schema_version": "growthevo.obd-export.v2",
         "obp_version": str(getattr(obp, "__version__", "unknown")),
+        "dataset_source": resolved_dataset_source,
         "campaign": campaign,
         "behavior_policy": "random",
         "evaluation_policy": "bts",
+        "reward_definition": "click",
+        "split_strategy": "paired_chronological_relative_fraction",
         "validation_fraction": validation_fraction,
         "validation_reference": validation_reference,
         "holdout_reference": holdout_reference,
@@ -369,6 +381,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--campaign", choices=["all", "men", "women"], default="all")
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--data-path", type=Path)
+    parser.add_argument("--dataset-source")
     parser.add_argument("--validation-fraction", type=float, default=0.5)
     parser.add_argument("--n-sim", type=int, default=100000)
     parser.add_argument("--q-folds", type=int, default=3)
@@ -383,6 +396,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         campaign=args.campaign,
         output_dir=args.output_dir,
         data_path=args.data_path,
+        dataset_source=args.dataset_source,
         validation_fraction=args.validation_fraction,
         n_sim=args.n_sim,
         q_folds=args.q_folds,
