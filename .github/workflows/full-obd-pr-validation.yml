@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: full-obd-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   full-obd:
     if: github.event_name == 'workflow_dispatch' || github.head_ref == 'bench/obd-full-streaming'
@@ -42,7 +46,9 @@ jobs:
           df -h
 
       - name: Run full preregistered Open Bandit benchmark
+        shell: bash
         run: |
+          set -o pipefail
           mkdir -p /tmp/growthevo-full-obd
           python scripts/run_obd_full_locked.py \
             --cache-dir /tmp/growthevo-full-obd/cache \
