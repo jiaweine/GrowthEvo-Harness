@@ -90,7 +90,7 @@ def test_explicit_support_overrides_behavior_probability_as_evidence() -> None:
     )
 
     assert result.selected_action is Channel.EMAIL
-    assert result.probabilities[Channel.PUSH] <= pytest.approx(0.50)
+    assert result.probabilities[Channel.PUSH] <= 0.50 + 1e-12
     assert "unsupported_actions_anchored" in result.reasons
 
 
@@ -208,7 +208,7 @@ def test_learned_proposal_is_support_anchored_before_feasibility_search() -> Non
         },
     )
 
-    assert result.probabilities[Channel.PUSH] <= pytest.approx(0.30)
+    assert result.probabilities[Channel.PUSH] <= 0.30 + 1e-12
     assert "proposal_support_constraint_active" in result.reasons
 
 
