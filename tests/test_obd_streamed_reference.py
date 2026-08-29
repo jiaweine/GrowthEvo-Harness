@@ -18,17 +18,17 @@ _EXPORTER = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_EXPORTER)
 
 
-def test_chunked_target_reference_matches_obp_timestamp_sort_semantics(tmp_path: Path) -> None:
+def test_chunked_target_reference_handles_mixed_iso8601_precision(tmp_path: Path) -> None:
     source = tmp_path / "all.csv"
     frame = pd.DataFrame(
         {
             "timestamp": [
-                "2020-01-01 00:00:06",
-                "2020-01-01 00:00:01",
-                "2020-01-01 00:00:04",
-                "2020-01-01 00:00:03",
-                "2020-01-01 00:00:02",
-                "2020-01-01 00:00:05",
+                "2020-01-01 00:00:06.500000+00:00",
+                "2020-01-01 00:00:01+00:00",
+                "2020-01-01 00:00:04.250000+00:00",
+                "2020-01-01 00:00:03+00:00",
+                "2020-01-01 00:00:02.900000+00:00",
+                "2020-01-01 00:00:05+00:00",
             ],
             "item_id": [2, 0, 1, 2, 1, 0],
             "position": [3, 1, 2, 3, 2, 1],
@@ -45,11 +45,9 @@ def test_chunked_target_reference_matches_obp_timestamp_sort_semantics(tmp_path:
         chunksize=2,
     )
 
-    expected = pd.read_csv(source, index_col=0).sort_values("timestamp")
-    split = int(len(expected) * 0.5)
-    assert rows == len(expected)
-    assert validation == pytest.approx(expected["click"].iloc[:split].mean())
-    assert holdout == pytest.approx(expected["click"].iloc[split:].mean())
+    assert rows == 6
+    assert validation == pytest.approx(1.0 / 3.0)
+    assert holdout == pytest.approx(2.0 / 3.0)
 
 
 def test_chunked_target_reference_rejects_action_or_slate_mismatch(tmp_path: Path) -> None:
