@@ -19,22 +19,23 @@ This repository is presented as one coherent implementation of a causal decision
 - Cross-fitted one-vs-control Doubly-Robust learner using out-of-fold AIPW pseudo-outcomes.
 - Treatment-vs-control propensity renormalization for multi-action logs.
 - Dependency-free ridge nuisance/effect models as an auditable reference backend.
-- Residual + extrapolation uncertainty diagnostics and explicit overlap coverage.
+- Out-of-fold second-stage residual uncertainty plus distributional extrapolation diagnostics.
+- Explicit overlap coverage and support-aware uncertainty inflation.
 - CATE serving bridge from fitted treatment-effect models into Runtime `UserObservation` uplift beliefs.
-- Low-support uncertainty inflation instead of silently converting unsupported estimates into confident zero uplift.
+- Low-support regions increase uncertainty instead of silently becoming confident zero uplift.
 
 ### Offline policy evaluation and policy safety
 
 - IPS, Doubly-Robust and estimated β*-IPS off-policy evaluation.
 - Estimator-specific standard errors.
 - Effective sample size / ESS ratio.
-- Logging-policy support coverage, maximum importance weight and weight-CV diagnostics.
+- Target-policy-mass-weighted support coverage, maximum importance weight and weight-CV diagnostics.
 - Split-conformal one-sided residual margins for value, ROI, spend, fatigue and churn risk.
 - Counterfactual Verifier with `PASS / FAIL / INSUFFICIENT_EVIDENCE` semantics.
 - Conservative intersection of statistical and calibrated value bounds.
-- Support-anchored conservative policy improvement for discrete growth actions.
-- Pessimistic value lower bounds, behavior-policy anchoring, total-variation update caps and expected-cost caps.
-- `NO_TREATMENT` safe fallback when the logged behavior policy itself violates a configured hard cost limit.
+- Feasible support-anchored conservative policy improvement for discrete growth actions.
+- Per-action pessimistic value bounds, behavior-policy anchoring, total-variation update caps and expected-cost caps.
+- `NO_TREATMENT` safe fallback when the logged behavior policy itself violates a configured hard cost limit and a safe fallback exists.
 
 ### Agentic credit assignment and training export
 
@@ -44,12 +45,33 @@ This repository is presented as one coherent implementation of a causal decision
 - Process reward persistence in the same event stream as outcome reward and policy verification.
 - Backend-neutral planner transition contract containing observation, action, legal-action flag and tool-success state.
 - Generalized Advantage Estimation for planner trajectories.
-- Dynamics-aware `credit_boundary` that stops advantage leakage across rollback/reset/segment/delayed-outcome boundaries.
+- Dynamics-aware `credit_boundary` that stops advantage/bootstrap leakage across declared rollback/reset/segment/delayed-outcome boundaries.
 - Stable JSONL / record export for external PPO/GRPO/Agent-RL training services.
+- KuaiRand planner-sequence export aligned with the current `PlannerTransition` contract.
+- Sequence export windows remain metadata-only truncations; they do not silently become dynamics credit boundaries.
+
+### Real-world benchmark plumbing
+
+The main branch now contains executable adapters and protocol utilities rather than only the synthetic fixture:
+
+- Criteo Uplift loader using randomized `treatment` assignment rather than post-treatment `exposure`.
+- Explicit Criteo propensity provenance (`design` vs. empirical fallback) and source-order-stable record identities.
+- Randomized top-score targeting policy evaluation plus treatment/control-stratified bootstrap intervals.
+- Open Bandit interaction loader preserving logged action probabilities and mixed user feature types.
+- Open Bandit item-context loader preserving raw anonymized features.
+- Open Bandit adapter into the current IPS / DR / β*-IPS OPE contract without replacing logged propensities.
+- KuaiRand sequential interaction loader and mixed user/video feature loaders.
+- Explicit KuaiRand reward scalarization; `is_rand` remains provenance rather than a fabricated propensity.
+- Backend-neutral KuaiRand offline-RL transitions with correct terminal vs. truncation semantics and bootstrap behavior.
+- Protocol-defined candidate-action export with logged-action containment checks.
+- Current-main-compatible KuaiRand planner records with explicit dynamics-boundary control.
+- Deterministic stratified and ordered benchmark split utilities.
+
+See `docs/REAL_WORLD_BENCHMARKS.md` for the evidence and split protocol.
 
 ### Evaluation coverage
 
-The project evaluation matrix covers three complementary layers:
+The project evaluation matrix covers complementary layers:
 
 | Benchmark | Primary purpose | Reported metric |
 | --- | --- | ---: |
@@ -57,7 +79,9 @@ The project evaluation matrix covers three complementary layers:
 | Criteo Uplift v2 | uplift ranking / top-decile treatment-effect quality | Uplift@10% **+6.8%** |
 | Open Bandit Dataset | logged-bandit off-policy evaluation | OPE error **-8.4%** |
 
-GrowthAgentBench remains the auditable synthetic fixture inside the minimal core repository; public benchmark results are documented as part of the project evaluation record and are aligned with the README / resume presentation.
+GrowthAgentBench remains the auditable synthetic fixture with known potential outcomes. Mainline now also contains real-world dataset adapters and evaluation/export plumbing for Criteo, Open Bandit and KuaiRand.
+
+The large public datasets themselves are intentionally not vendored. The numeric Criteo/Open Bandit results above are part of the project evaluation record; they are not regenerated by unit tests from committed dataset files. Paper-facing evidence should retain dataset release identity, immutable split definitions, hyperparameters, seeds and the commit SHA used for the run.
 
 ### GrowthAgentBench research fixtures
 
@@ -80,19 +104,21 @@ GrowthAgentBench remains the auditable synthetic fixture inside the minimal core
 The runtime keeps several concerns intentionally modular rather than collapsing them into one monolithic trainer:
 
 - pluggable nonlinear CATE backends through CausalML / EconML / neural uplift models;
-- sequential offline-RL backends such as IQL / CQL;
+- external sequential offline-RL training backends such as Behavior Cloning, IQL, CQL and Decision Transformer;
 - external planner post-training through PPO / GRPO / Agent-RL services;
 - production world-model calibration and rollout-error diagnostics;
 - online shadow / canary / rollback infrastructure.
 
-These are extension points around the implemented Runtime contracts, not changes to the causal state, legal-action, OPE, Verifier or event-sourcing semantics.
+Mainline provides the causal/runtime contracts and backend-neutral KuaiRand offline-RL/planner exports. It does **not** claim that CQL, IQL, Decision Transformer, PPO or GRPO trainers are implemented inside this repository.
+
+These are extension points around the implemented causal state, legal-action, OPE, Verifier, event-sourcing and training-export semantics.
 
 ## Evidence rule
 
 Project claims should remain tied to one of three evidence sources:
 
 1. executable Runtime / algorithm code;
-2. reproducible benchmark or evaluation record;
+2. reproducible benchmark or evaluation record with dataset/split provenance;
 3. explicit deployment evidence when available.
 
-This keeps the README, resume and codebase aligned around the same causal decisioning story instead of presenting separate versions of the project.
+A dataset adapter is implementation evidence, not by itself benchmark-result evidence. This keeps the README, resume and codebase aligned around the same causal decisioning story instead of presenting separate versions of the project.
