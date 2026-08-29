@@ -11,6 +11,9 @@ requires-python = ">=3.11"
 authors = [{ name = "GrowthEvo contributors" }]
 dependencies = []
 
+[project.scripts]
+growthevo-locked-ope = "growthevo.bench.locked_ope_cli:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
