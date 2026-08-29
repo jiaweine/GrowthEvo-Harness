@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, replace
+from hashlib import blake2b
 from json import dumps, loads
 from math import isfinite
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from growthevo.rl.ope import LoggedBanditRecord
 
 from .locked_evaluation import OPECandidate
 from .ope_evidence_gate import EvidenceGatedOPEProtocol, OPEEvidenceGate
+from .ope_experiment_plan import OPEExperimentPlan, load_ope_experiment_plan
 
 
 _ALLOWED_ESTIMATORS = {
@@ -31,6 +33,22 @@ def _json_cluster_identity(value: Any) -> Any:
     if isinstance(value, list):
         return tuple(_json_cluster_identity(item) for item in value)
     raise ValueError("cluster_id must be a JSON scalar or nested array of scalars")
+
+
+def _load_json_object(path: str | Path, *, label: str) -> dict[str, Any]:
+    resolved = Path(path)
+    try:
+        payload = loads(resolved.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise ValueError(f"invalid {label} JSON: {resolved}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} JSON must be an object")
+    return payload
+
+
+def _json_object_fingerprint(payload: Mapping[str, Any]) -> str:
+    encoded = dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return blake2b(encoded, digest_size=20).hexdigest()
 
 
 def _load_ope_jsonl(path: str | Path) -> tuple[LoggedBanditRecord, ...]:
@@ -114,6 +132,36 @@ def _load_candidates(path: str | Path) -> tuple[OPECandidate, ...]:
     return tuple(candidates)
 
 
+def _load_and_validate_plan(
+    *,
+    experiment_plan_json: str | Path | None,
+    export_manifest_json: str | Path | None,
+    benchmark: str,
+    dataset: str,
+    candidates: Sequence[OPECandidate],
+    support_propensity_floor: float,
+    evidence_gate: OPEEvidenceGate,
+) -> tuple[OPEExperimentPlan | None, dict[str, Any] | None]:
+    if (experiment_plan_json is None) != (export_manifest_json is None):
+        raise ValueError(
+            "experiment_plan_json and export_manifest_json must be provided together"
+        )
+    if experiment_plan_json is None:
+        return None, None
+
+    plan = load_ope_experiment_plan(experiment_plan_json)
+    manifest = _load_json_object(export_manifest_json, label="export manifest")
+    plan.validate_runtime_contract(
+        benchmark=benchmark,
+        dataset=dataset,
+        candidates=candidates,
+        support_propensity_floor=support_propensity_floor,
+        evidence_gate=evidence_gate,
+    )
+    plan.validate_export_manifest(manifest)
+    return plan, manifest
+
+
 def run_locked_ope_benchmark(
     *,
     tuning_jsonl: str | Path,
@@ -128,28 +176,43 @@ def run_locked_ope_benchmark(
     support_propensity_floor: float = 1e-3,
     min_support_coverage: float = 0.0,
     min_effective_sample_ratio: float = 0.0,
+    experiment_plan_json: str | Path | None = None,
+    export_manifest_json: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run evidence-gated validation selection and one frozen holdout reveal.
 
-    The test JSONL is intentionally opened only after validation evidence passes
-    and estimator selection is frozen. The CLI always requires positive supported
-    importance mass; stronger support/ESS thresholds are protocol parameters and
-    are included in the resulting protocol fingerprint/artifact.
+    When a pre-registered experiment plan is supplied, the plan and realized
+    exporter manifest are checked before the validation JSONL is opened. This
+    prevents changing Q/split/policy/candidate/gate settings after evidence has
+    been generated while still preserving backwards-compatible ad-hoc runs.
     """
 
     if not isfinite(tuning_reference) or not isfinite(test_reference):
         raise ValueError("reference values must be finite")
     candidates = _load_candidates(candidates_json)
-    tuning_records = _load_ope_jsonl(tuning_jsonl)
+    evidence_gate = OPEEvidenceGate(
+        min_support_coverage=min_support_coverage,
+        min_effective_sample_ratio=min_effective_sample_ratio,
+        require_positive_importance_mass=True,
+    )
+    plan, export_manifest = _load_and_validate_plan(
+        experiment_plan_json=experiment_plan_json,
+        export_manifest_json=export_manifest_json,
+        benchmark=benchmark,
+        dataset=dataset,
+        candidates=candidates,
+        support_propensity_floor=support_propensity_floor,
+        evidence_gate=evidence_gate,
+    )
 
+    # Plan/runtime/manifest agreement is checked before the validation evidence
+    # itself is read. A mismatched preregistration therefore does not consume a
+    # validation reveal.
+    tuning_records = _load_ope_jsonl(tuning_jsonl)
     protocol = EvidenceGatedOPEProtocol(
         candidates,
         support_propensity_floor=support_propensity_floor,
-        evidence_gate=OPEEvidenceGate(
-            min_support_coverage=min_support_coverage,
-            min_effective_sample_ratio=min_effective_sample_ratio,
-            require_positive_importance_mass=True,
-        ),
+        evidence_gate=evidence_gate,
     )
     protocol.tune(tuning_records, reference_value=float(tuning_reference))
 
@@ -163,10 +226,40 @@ def run_locked_ope_benchmark(
         commit_sha=commit_sha,
     )
 
+    experiment_plan_payload: dict[str, Any] | None = None
+    export_manifest_fingerprint: str | None = None
+    if plan is not None and export_manifest is not None:
+        export_manifest_fingerprint = _json_object_fingerprint(export_manifest)
+        metrics = dict(artifact.metrics)
+        metrics.update(
+            {
+                "experiment_plan_fingerprint": plan.fingerprint,
+                "export_manifest_fingerprint": export_manifest_fingerprint,
+                "dataset_source": plan.dataset_source,
+            }
+        )
+        artifact = replace(
+            artifact,
+            protocol_fingerprint=plan.bind_protocol_fingerprint(
+                artifact.protocol_fingerprint
+            ),
+            metrics=metrics,
+        )
+        experiment_plan_payload = {
+            "fingerprint": plan.fingerprint,
+            "plan": plan.canonical_payload(),
+            "export_manifest_fingerprint": export_manifest_fingerprint,
+        }
+
     bundle: dict[str, Any] = {
-        "schema_version": "growthevo.locked-ope-run.v2",
+        "schema_version": (
+            "growthevo.locked-ope-run.v3"
+            if plan is not None
+            else "growthevo.locked-ope-run.v2"
+        ),
         "artifact": loads(artifact.to_json()),
         "evidence_gate": asdict(protocol.evidence_gate),
+        "experiment_plan": experiment_plan_payload,
         "validation_scores": [
             {
                 "candidate": asdict(score.candidate),
@@ -207,6 +300,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--support-propensity-floor", type=float, default=1e-3)
     parser.add_argument("--min-support-coverage", type=float, default=0.0)
     parser.add_argument("--min-effective-sample-ratio", type=float, default=0.0)
+    parser.add_argument("--experiment-plan-json")
+    parser.add_argument("--export-manifest-json")
     return parser
 
 
@@ -225,6 +320,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         support_propensity_floor=args.support_propensity_floor,
         min_support_coverage=args.min_support_coverage,
         min_effective_sample_ratio=args.min_effective_sample_ratio,
+        experiment_plan_json=args.experiment_plan_json,
+        export_manifest_json=args.export_manifest_json,
     )
     return 0
 
