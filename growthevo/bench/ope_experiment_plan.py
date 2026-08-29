@@ -12,6 +12,10 @@ from .ope_evidence_gate import OPEEvidenceGate
 
 
 _SCHEMA_VERSION = "growthevo.ope-experiment-plan.v1"
+_SUPPORTED_EXPORT_MANIFEST_SCHEMAS = {
+    "growthevo.obd-export.v2",
+    "growthevo.obd-export.v3",
+}
 _ALLOWED_ESTIMATORS = {
     "direct_method",
     "ips",
@@ -38,7 +42,14 @@ class OPEExperimentPlan:
     The plan freezes choices that are otherwise only implicit in exported JSONL:
     dataset/source identity, policy direction, reward, split protocol, Q backend,
     Monte-Carlo policy replication, evidence gates, and the estimator grid.
-    A plan fingerprint is then bound to the locked protocol fingerprint.
+    A plan fingerprint can then be bound to the locked protocol fingerprint.
+
+    Export-manifest schema versions are deliberately not part of the statistical
+    plan fingerprint. A storage/implementation revision (for example replacing a
+    tiled tensor with an exactly equivalent compact representation) may emit a new
+    supported manifest schema without pretending the statistical experiment has
+    changed. Runtime/full-benchmark gates may still require a specific manifest
+    schema when an implementation property itself matters.
     """
 
     benchmark: str
@@ -166,7 +177,7 @@ class OPEExperimentPlan:
 
     def validate_export_manifest(self, manifest: Mapping[str, Any]) -> None:
         schema = manifest.get("schema_version")
-        if schema != "growthevo.obd-export.v2":
+        if schema not in _SUPPORTED_EXPORT_MANIFEST_SCHEMAS:
             raise ValueError(
                 "export manifest does not match pre-registered plan: schema_version"
             )
@@ -229,15 +240,19 @@ def _required_int(payload: Mapping[str, Any], key: str) -> int:
     return value
 
 
-def _optional_number(payload: Mapping[str, Any], key: str) -> float | None:
+def _optional_number(payload: Mapping[str, Any], key: str, *, index: int) -> float | None:
     value = payload.get(key)
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"candidate field {key!r} must be a JSON number")
+        raise ValueError(
+            f"experiment plan candidate {index} field {key!r} must be a JSON number"
+        )
     numeric = float(value)
     if not isfinite(numeric):
-        raise ValueError(f"candidate field {key!r} must be finite")
+        raise ValueError(
+            f"experiment plan candidate {index} field {key!r} must be finite"
+        )
     return numeric
 
 
@@ -258,13 +273,15 @@ def _candidate_from_payload(payload: Mapping[str, Any], index: int) -> OPECandid
         raise ValueError(f"experiment plan candidate {index} has unsupported estimator")
     raw_beta_folds = payload.get("beta_folds", 5)
     if isinstance(raw_beta_folds, bool) or not isinstance(raw_beta_folds, int):
-        raise ValueError(f"experiment plan candidate {index} beta_folds must be a JSON integer")
+        raise ValueError(
+            f"experiment plan candidate {index} beta_folds must be a JSON integer"
+        )
     try:
         return OPECandidate(
             name=raw_name,
             estimator=estimator,
-            switch_threshold=_optional_number(payload, "switch_threshold"),
-            dr_os_lambda=_optional_number(payload, "dr_os_lambda"),
+            switch_threshold=_optional_number(payload, "switch_threshold", index=index),
+            dr_os_lambda=_optional_number(payload, "dr_os_lambda", index=index),
             beta_folds=raw_beta_folds,
         )
     except (TypeError, ValueError) as exc:

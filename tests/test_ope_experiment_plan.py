@@ -51,6 +51,29 @@ def test_plan_rejects_json_bool_as_integer_and_unknown_candidate_fields(tmp_path
         load_ope_experiment_plan(broken)
 
 
+def test_plan_rejects_non_finite_numbers_before_protocol_construction(tmp_path: Path) -> None:
+    payload = json.loads(_SMALL_PLAN.read_text(encoding="utf-8"))
+    payload["validation_fraction"] = float("nan")
+    broken = tmp_path / "nan-plan.json"
+    broken.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="validation_fraction.*finite"):
+        load_ope_experiment_plan(broken)
+
+    payload = json.loads(_SMALL_PLAN.read_text(encoding="utf-8"))
+    payload["support_propensity_floor"] = float("inf")
+    broken = tmp_path / "inf-plan.json"
+    broken.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="support_propensity_floor.*finite"):
+        load_ope_experiment_plan(broken)
+
+    payload = json.loads(_SMALL_PLAN.read_text(encoding="utf-8"))
+    payload["candidates"][4]["switch_threshold"] = float("nan")
+    broken = tmp_path / "nan-candidate.json"
+    broken.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="switch_threshold.*finite"):
+        load_ope_experiment_plan(broken)
+
+
 def test_plan_validates_runtime_and_realized_export_manifest() -> None:
     plan = load_ope_experiment_plan(_SMALL_PLAN)
     manifest = {
@@ -76,9 +99,26 @@ def test_plan_validates_runtime_and_realized_export_manifest() -> None:
         evidence_gate=plan.evidence_gate,
     )
     plan.validate_export_manifest(manifest)
+    # v3 changes storage/materialization semantics but preserves every
+    # pre-registered statistical field above.
+    plan.validate_export_manifest(
+        {
+            **manifest,
+            "schema_version": "growthevo.obd-export.v3",
+            "q_prediction_storage": "compact_factual_and_target",
+        }
+    )
 
     with pytest.raises(ValueError, match="n_sim"):
         plan.validate_export_manifest({**manifest, "n_sim": plan.n_sim + 1})
+
+    with pytest.raises(ValueError, match="validation_fraction"):
+        plan.validate_export_manifest({**manifest, "validation_fraction": True})
+
+    with pytest.raises(ValueError, match="validation_fraction"):
+        plan.validate_export_manifest(
+            {**manifest, "validation_fraction": float("nan")}
+        )
 
     with pytest.raises(ValueError, match="schema_version"):
         plan.validate_export_manifest({**manifest, "schema_version": "legacy"})

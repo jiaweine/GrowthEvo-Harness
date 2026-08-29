@@ -62,6 +62,96 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e '.[obd]'
 
+      - name: Verify compact logistic Q matches OBP tensor predictions
+        run: |
+          python - <<'PY'
+          import importlib.util
+          from pathlib import Path
+
+          import numpy as np
+          from obp.ope import RegressionModel
+          from sklearn.linear_model import LogisticRegression
+
+          script = Path("scripts/export_obd_locked_ope.py")
+          spec = importlib.util.spec_from_file_location("obd_exporter", script)
+          module = importlib.util.module_from_spec(spec)
+          assert spec is not None and spec.loader is not None
+          spec.loader.exec_module(module)
+
+          n = 600
+          index = np.arange(n)
+          context = np.column_stack(
+              [
+                  np.sin(index / 17.0),
+                  np.cos(index / 29.0),
+                  (index % 5) / 5.0,
+              ]
+          )
+          action = index % 3
+          position = index % 2
+          reward = ((index % 7 == 0) | (index % 11 == 0)).astype(float)
+          action_context = np.eye(3)
+          shared_action_dist = np.asarray(
+              [
+                  [0.50, 0.20],
+                  [0.30, 0.30],
+                  [0.20, 0.50],
+              ]
+          )
+          seed = 12345
+          folds = 3
+          feedback = {
+              "n_rounds": n,
+              "n_actions": 3,
+              "action": action,
+              "position": position,
+              "reward": reward,
+              "pscore": np.full(n, 1.0 / 3.0),
+              "context": context,
+              "action_context": action_context,
+          }
+
+          reference_model = RegressionModel(
+              n_actions=3,
+              len_list=2,
+              action_context=action_context,
+              base_model=LogisticRegression(
+                  C=1.0,
+                  max_iter=1000,
+                  random_state=seed,
+              ),
+          )
+          full_q = reference_model.fit_predict(
+              context=context,
+              action=action,
+              reward=reward,
+              position=position,
+              n_folds=folds,
+              random_state=seed,
+          )
+          expected_baseline = full_q[index, action, position]
+          expected_target = np.empty(n)
+          for row in range(n):
+              expected_target[row] = np.dot(
+                  full_q[row, :, position[row]],
+                  shared_action_dist[:, position[row]],
+              )
+
+          compact_baseline, compact_target = module._fit_q_terms(
+              feedback,
+              shared_action_dist,
+              n_actions=3,
+              len_list=2,
+              action_context=action_context,
+              n_folds=folds,
+              random_state=seed,
+              q_model="logistic",
+              prediction_batch_size=37,
+          )
+          np.testing.assert_allclose(compact_baseline, expected_baseline, rtol=1e-12, atol=1e-12)
+          np.testing.assert_allclose(compact_target, expected_target, rtol=1e-12, atol=1e-12)
+          PY
+
       - name: Fetch pinned public small Open Bandit Dataset
         run: |
           git init /tmp/sb-obp
@@ -70,7 +160,7 @@ jobs:
           git -C /tmp/sb-obp checkout --detach FETCH_HEAD
           test "$(git -C /tmp/sb-obp rev-parse HEAD)" = "$SB_OBP_COMMIT"
 
-      - name: Export preregistered OBD evidence with cross-fitted Q
+      - name: Export preregistered OBD evidence with compact cross-fitted Q
         run: |
           python scripts/export_obd_locked_ope.py \
             --campaign all \
@@ -93,9 +183,13 @@ jobs:
           root = "/tmp/growthevo-obd"
           with open(f"{root}/export_manifest.json", encoding="utf-8") as handle:
               manifest = json.load(handle)
+          assert manifest["schema_version"] == "growthevo.obd-export.v3"
           assert manifest["q_model"] == "logistic"
           assert manifest["q_folds"] == 2
           assert manifest["dataset_source"] == os.environ["OBD_DATASET_SOURCE"]
+          assert manifest["action_distribution_storage"] == "shared_context_free"
+          assert manifest["q_prediction_storage"] == "compact_factual_and_target"
+          assert manifest["target_reference_loader"] == "chunked_reward_only"
 
           subprocess.run(
               [
