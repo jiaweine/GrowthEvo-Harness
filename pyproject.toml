@@ -13,6 +13,7 @@ dependencies = []
 
 [project.scripts]
 growthevo-locked-ope = "growthevo.bench.locked_ope_cli:main"
+growthevo-locked-targeting = "growthevo.bench.locked_targeting_cli:main"
 
 [project.optional-dependencies]
 dev = [
