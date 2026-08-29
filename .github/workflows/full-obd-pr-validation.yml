@@ -1,0 +1,92 @@
+name: Full OBD Research Validation
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-obd:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'bench/obd-full-streaming'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Inspect initial runner resources
+        run: |
+          df -h
+          free -h
+
+      - name: Install CPU research environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu 'torch>=2.2,<3'
+          pip install -e '.[obd]'
+          python - <<'PY'
+          import torch
+          assert '+cpu' in torch.__version__ or not torch.cuda.is_available()
+          print('torch', torch.__version__, 'cuda_available=', torch.cuda.is_available())
+          PY
+          df -h
+
+      - name: Run full preregistered Open Bandit benchmark
+        run: |
+          mkdir -p /tmp/growthevo-full-obd
+          python scripts/run_obd_full_locked.py \
+            --cache-dir /tmp/growthevo-full-obd/cache \
+            --output-dir /tmp/growthevo-full-obd/result \
+            --prediction-batch-size 25000 \
+            2>&1 | tee /tmp/growthevo-full-obd/full-run.log
+
+      - name: Inspect final runner resources and result
+        if: always()
+        run: |
+          df -h
+          free -h
+          du -sh /tmp/growthevo-full-obd/* 2>/dev/null || true
+          if test -f /tmp/growthevo-full-obd/result/locked-result.json; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('/tmp/growthevo-full-obd/result')
+          result = json.loads((root / 'locked-result.json').read_text())
+          manifest = json.loads((root / 'export' / 'export_manifest.json').read_text())
+          artifact = result['artifact']
+          print(json.dumps({
+              'manifest': manifest,
+              'selected_candidate': artifact['selected_candidate'],
+              'metrics': artifact['metrics'],
+              'protocol_fingerprint': artifact['protocol_fingerprint'],
+              'tuning_fingerprint': artifact['tuning_fingerprint'],
+              'test_fingerprint': artifact['test_fingerprint'],
+              'experiment_plan': result['experiment_plan'],
+          }, indent=2, sort_keys=True))
+          PY
+          fi
+
+      - name: Upload full OBD research evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: obd-full-preregistered-evidence
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            /tmp/growthevo-full-obd/full-run.log
+            /tmp/growthevo-full-obd/result/source-provenance.json
+            /tmp/growthevo-full-obd/result/obd-full-all-random-to-bts.v1.json
+            /tmp/growthevo-full-obd/result/export/export_manifest.json
+            /tmp/growthevo-full-obd/result/export/ope_candidates.json
+            /tmp/growthevo-full-obd/result/locked-result.json
