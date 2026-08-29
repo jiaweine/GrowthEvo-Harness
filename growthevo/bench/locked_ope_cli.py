@@ -46,9 +46,9 @@ def _load_ope_jsonl(path: str | Path) -> tuple[LoggedBanditRecord, ...]:
             if not isinstance(payload, dict):
                 raise ValueError(f"expected JSON object on {resolved}:{line_number}")
             try:
-                record_id = str(payload["record_id"])
-                if not record_id:
-                    raise ValueError("record_id cannot be empty")
+                raw_record_id = payload["record_id"]
+                if not isinstance(raw_record_id, str) or not raw_record_id:
+                    raise ValueError("record_id must be a non-empty JSON string")
                 rows.append(
                     LoggedBanditRecord(
                         reward=float(payload["reward"]),
@@ -57,7 +57,7 @@ def _load_ope_jsonl(path: str | Path) -> tuple[LoggedBanditRecord, ...]:
                         baseline_q=float(payload["baseline_q"]),
                         target_q=float(payload["target_q"]),
                         cluster_id=_json_cluster_identity(payload.get("cluster_id")),
-                        record_id=record_id,
+                        record_id=raw_record_id,
                     )
                 )
             except KeyError as exc:
@@ -88,9 +88,12 @@ def _load_candidates(path: str | Path) -> tuple[OPECandidate, ...]:
         if estimator not in _ALLOWED_ESTIMATORS:
             raise ValueError(f"candidate {index} has unsupported estimator: {estimator!r}")
         try:
+            raw_name = item["name"]
+            if not isinstance(raw_name, str) or not raw_name:
+                raise ValueError(f"candidate {index} name must be a non-empty string")
             candidates.append(
                 OPECandidate(
-                    name=str(item["name"]),
+                    name=raw_name,
                     estimator=estimator,
                     switch_threshold=(
                         float(item["switch_threshold"])
@@ -176,7 +179,10 @@ def run_locked_ope_benchmark(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Select an OPE estimator on validation, then evaluate the frozen winner once on holdout.",
+        description=(
+            "Select an OPE estimator on validation, then evaluate the frozen winner "
+            "once on holdout."
+        ),
     )
     parser.add_argument("--tuning-jsonl", required=True)
     parser.add_argument("--test-jsonl", required=True)
