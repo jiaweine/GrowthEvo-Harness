@@ -76,6 +76,15 @@ def test_plan_validates_runtime_and_realized_export_manifest() -> None:
         evidence_gate=plan.evidence_gate,
     )
     plan.validate_export_manifest(manifest)
+    # v3 changes storage/materialization semantics but preserves every
+    # pre-registered statistical field above.
+    plan.validate_export_manifest(
+        {
+            **manifest,
+            "schema_version": "growthevo.obd-export.v3",
+            "q_prediction_storage": "compact_factual_and_target",
+        }
+    )
 
     with pytest.raises(ValueError, match="n_sim"):
         plan.validate_export_manifest({**manifest, "n_sim": plan.n_sim + 1})
