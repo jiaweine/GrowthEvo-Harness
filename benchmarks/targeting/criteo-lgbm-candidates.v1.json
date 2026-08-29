@@ -19,6 +19,7 @@
     "exposure"
   ],
   "nuisance_folds": 2,
+  "nuisance_fold_seed_offset": 1009,
   "common_classifier": {
     "objective": "binary",
     "n_estimators": 300,
