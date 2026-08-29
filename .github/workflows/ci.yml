@@ -41,6 +41,7 @@ jobs:
 
   obd-integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -60,16 +61,16 @@ jobs:
       - name: Fetch public small Open Bandit Dataset
         run: git clone --depth 1 https://github.com/sb-ai-lab/sb-obp.git /tmp/sb-obp
 
-      - name: Export real OBD random-to-BTS smoke evidence
+      - name: Export real OBD random-to-BTS evidence with cross-fitted Q
         run: |
           python scripts/export_obd_locked_ope.py \
             --campaign all \
             --data-path /tmp/sb-obp/obd \
             --output-dir /tmp/growthevo-obd \
             --validation-fraction 0.5 \
-            --n-sim 200 \
-            --q-model zero \
-            --q-folds 3 \
+            --n-sim 500 \
+            --q-model logistic \
+            --q-folds 2 \
             --random-state 12345
 
       - name: Run locked OPE selection on exported OBD evidence
@@ -81,6 +82,8 @@ jobs:
           root = "/tmp/growthevo-obd"
           with open(f"{root}/export_manifest.json", encoding="utf-8") as handle:
               manifest = json.load(handle)
+          assert manifest["q_model"] == "logistic"
+          assert manifest["q_folds"] == 2
 
           subprocess.run(
               [
@@ -90,7 +93,7 @@ jobs:
                   "--candidates-json", f"{root}/ope_candidates.json",
                   "--tuning-reference", str(manifest["validation_reference"]),
                   "--test-reference", str(manifest["holdout_reference"]),
-                  "--benchmark", "open-bandit-ope-smoke",
+                  "--benchmark", "open-bandit-ope-small-evidence",
                   "--dataset", "obd-small-all-random-to-bts",
                   "--commit-sha", "${{ github.event.pull_request.head.sha }}",
                   "--output", f"{root}/locked-result.json",
@@ -104,5 +107,20 @@ jobs:
           assert artifact["selected_candidate"]
           assert artifact["metrics"]["candidate_count"] >= 5
           assert artifact["tuning_fingerprint"] != artifact["test_fingerprint"]
-          print(json.dumps(artifact, indent=2, sort_keys=True))
+          print(json.dumps({
+              "manifest": manifest,
+              "validation_scores": result["validation_scores"],
+              "artifact": artifact,
+          }, indent=2, sort_keys=True))
           PY
+
+      - name: Upload locked OBD evidence summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: obd-small-locked-evidence
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            /tmp/growthevo-obd/export_manifest.json
+            /tmp/growthevo-obd/ope_candidates.json
+            /tmp/growthevo-obd/locked-result.json

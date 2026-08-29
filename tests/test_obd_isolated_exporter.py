@@ -120,6 +120,28 @@ def test_build_locked_rows_requires_stable_unique_ids() -> None:
         )
 
 
+def test_regression_model_config_preserves_obd_slate_width() -> None:
+    action_context = [[1.0, 0.0], [0.0, 1.0]]
+    kwargs = _EXPORTER._regression_model_kwargs(
+        n_actions=2,
+        len_list=3,
+        action_context=action_context,
+    )
+
+    assert kwargs == {
+        "n_actions": 2,
+        "len_list": 3,
+        "action_context": action_context,
+    }
+
+    with pytest.raises(ValueError, match="len_list"):
+        _EXPORTER._regression_model_kwargs(
+            n_actions=2,
+            len_list=0,
+            action_context=action_context,
+        )
+
+
 def test_default_candidate_grid_is_predeclared_and_frontier_oriented() -> None:
     candidates = _EXPORTER._default_candidates()
     names = {candidate["name"] for candidate in candidates}
