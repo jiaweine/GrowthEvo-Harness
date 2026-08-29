@@ -9,8 +9,9 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 ![Causal RL](https://img.shields.io/badge/Causal-RL-8A2BE2)
 ![OPE](https://img.shields.io/badge/OPE-Cross--Fitted%20β*--IPS%20%7C%20DR%20%7C%20Robust-0A7EA4)
+![Evidence](https://img.shields.io/badge/Evidence-Pre--Registered%20%7C%20Locked-2E8B57)
 
-`Group-Aware Cross-Fitted DR` · `Calibrated Feasible Safe PI` · `Cross-Fitted β*-IPS` · `Locked Holdout Evaluation` · `Risk-Sensitive MPC` · `Dynamics-Aware GAE`
+`Group-Aware Cross-Fitted DR` · `Calibrated Feasible Safe PI` · `Cross-Fitted β*-IPS` · `Pre-Registered Locked Evaluation` · `Risk-Sensitive MPC` · `Dynamics-Aware GAE`
 
 </div>
 
@@ -56,7 +57,11 @@ final-feasible Support-Anchored Safe PI
         ↓
 cross-fitted β*-IPS + robust OPE estimator panel
         ↓
-locked validation selection → one frozen holdout reveal
+pre-register source / split / Q / candidates / evidence gates
+        ↓
+materialize evidence + validate realized manifest
+        ↓
+evidence eligibility → validation selection → frozen final holdout
         ↓
 conformal verification + risk-sensitive planning
         ↓
@@ -69,8 +74,10 @@ dynamics-aware trajectory credit
 2. **Support before optimization** — function approximator 能外推，不代表数据支持该动作。
 3. **Calibration before confidence** — model residual 不是自动成立的 causal confidence interval。
 4. **Feasibility before ranking** — 比较最终可执行策略，不比较被约束前的 raw action score。
-5. **Validation before holdout** — estimator / hyperparameter 只能在 validation 上选；final test 不用于挑赢家。
-6. **Evidence before promotion** — 没有可审计 artifact 的数字不升级为当前 benchmark claim。
+5. **Evidence eligibility before estimator ranking** — weak-support point estimate 不能因为碰巧接近 reference 就赢。
+6. **Validation before holdout** — estimator / hyperparameter 只能在 validation 上选；final test 不用于挑赢家。
+7. **Pre-registration before validation** — 数据源、split、Q、候选集、gate 必须在 validation 打开前冻结。
+8. **Artifact before promotion** — 没有完整 fingerprint chain 的数字不升级为当前 real-world claim。
 
 ---
 
@@ -96,16 +103,15 @@ e_a(x)
 \frac{(1-A_i)(Y_i-\widehat m_0(x_i))}{1-\widehat e(x_i)}.
 ```
 
-当前实现的关键点：
+当前实现：
 
-- repeated user / cluster 可通过 `group_id` 进行 group-aware fold assignment，减少跨 fold 泄漏；
-- nuisance outcome learner 与 second-stage effect learner 都可替换，dependency-free Ridge 只是 reference backend；
-- **strict positivity**、**practical overlap threshold**、**propensity clipping** 是三个不同概念，不再被一个参数混在一起；
+- repeated user / cluster 可通过 `group_id` 做 group-aware fold assignment；
+- nuisance outcome learner 与 second-stage effect learner 都可替换；
+- dependency-free Ridge 是 auditable reference backend，不是性能上限；
+- **strict positivity**、**practical overlap**、**propensity clipping** 分开建模；
 - 默认不靠隐式 clipping 把缺乏支持的数据伪装成稳定数据。
 
 ### OOF uncertainty
-
-第二阶段 uncertainty 使用 held-out effect predictions，而不是同一批 pseudo-outcome 的 in-sample residual：
 
 ```math
 \widehat\sigma_{OOF}
@@ -119,11 +125,11 @@ e_a(x)
 }.
 ```
 
-它是 model / extrapolation diagnostic，不被自动宣称成 causal confidence interval。
+这是 model / extrapolation diagnostic，不自动宣称成 causal confidence interval。
 
 ### Distributional support
 
-除 feature min/max 外，使用正则化 Mahalanobis distance 检测包围盒内部的低密度区域：
+使用 regularized Mahalanobis distance 检测包围盒内部低密度区域：
 
 ```math
 d_M(x)
@@ -135,7 +141,7 @@ d_M(x)
 }.
 ```
 
-令训练分布 support radius 为 `r_q`，则：
+令训练分布 support radius 为 `r_q`：
 
 ```math
 \xi(x)
@@ -149,23 +155,21 @@ S(x)
 \frac{\mathrm{OverlapCoverage}}{1+\xi(x)}.
 ```
 
-所以“落在 feature min/max 内”不再等于“具有高支持”。
+所以“落在 feature min/max 内”不再等于“具有高数据支持”。
 
 ---
 
 ## 2. Calibrated Final-Feasible Safe Policy Improvement
 
-对每个动作需要 pessimistic value 与 conservative cost。强模式直接接收上游校准 / 推断得到的 bound：
+强模式直接消费上游校准 / 推断得到的 pessimistic value 与 conservative cost：
 
 ```math
 Q_a^- = L_a,
 \qquad
-C_a^+ = U_a,
+C_a^+ = U_a.
 ```
 
-其中 `L_a` / `U_a` 可以来自 conformal、独立统计推断或其他明确的 confidence protocol。
-
-历史 Gaussian heuristic 仍保留为 **reference mode**：
+历史 Gaussian 形式仅保留为 **reference mode**：
 
 ```math
 Q_a^-
@@ -177,13 +181,7 @@ C_a^+
 \widehat C_a+z\widehat\sigma_{C,a}.
 ```
 
-但 generic model uncertainty 不会被默认包装成“真实置信区间”。
-
-### Explicit support
-
-生产 / paper-facing 模式可以直接给每个 treatment 一个 `support_eligible` 决策。缺少 explicit support 时可 fail closed；behavior-probability floor 只作为兼容 reference protocol。
-
-### Per-action feasible update
+Generic model residual 不会默认包装成“真实置信区间”。
 
 从 behavior policy `μ` 向动作 `a` 的 point-mass policy 移动：
 
@@ -192,7 +190,7 @@ C_a^+
 =(1-\eta)\mu+\eta\delta_a.
 ```
 
-TV trust region 给出：
+TV trust region：
 
 ```math
 \eta
@@ -200,7 +198,7 @@ TV trust region 给出：
 \frac{\epsilon_{TV}}{1-\mu(a\mid x)}.
 ```
 
-若该方向增加 conservative expected cost：
+Cost constraint：
 
 ```math
 \eta
@@ -208,9 +206,9 @@ TV trust region 给出：
 \frac{C_{max}-C_\mu^+}{C_a^+-C_\mu^+}.
 ```
 
-最终比较的是每个动作 **截断后的 feasible candidate value**，以及可选的 support-anchored learned proposal，而不是先 raw argmax 再事后裁剪。
+系统比较每个动作 **截断后的 final-feasible policy value**，以及可选的 support-anchored learned proposal，而不是先 raw argmax 再事后裁剪。
 
-若 behavior policy 已违反硬 cost limit，并且 `NO_TREATMENT` 满足 hard bound，则安全 fallback 为：
+若 behavior policy 已违反硬 cost limit 且 `NO_TREATMENT` 可行：
 
 ```math
 \pi(a_0)=1.
@@ -220,7 +218,7 @@ TV trust region 给出：
 
 ## 3. Frontier Off-Policy Evaluation
 
-当前 flagship OPE estimator 是 **cross-fitted β*-IPS**。DM / IPS / SNIPS / DR / SWITCH-DR / DR-OS / Meta-OPE 同时返回，用于 robustness、disagreement 与效率诊断。
+默认 efficient estimator 是 **cross-fitted β*-IPS**。DM / IPS / SNIPS / DR / SWITCH-DR / DR-OS / Meta-OPE 同时暴露，用于 robustness、disagreement 与验证选择。
 
 ### Importance weight
 
@@ -271,36 +269,19 @@ w_i r_i
 \right].
 ```
 
-same-sample β*-IPS 保留为 diagnostic，不是默认 promotion estimator。
+same-sample β*-IPS 保留为 diagnostic，不是默认 policy-evidence estimator。
 
-### Robust panel
-
-同一次 evaluation 可以看到：
-
-- Direct Method；
-- IPS；
-- SNIPS；
-- Doubly Robust；
-- SWITCH-DR；
-- DR optimistic shrinkage / DR-OS；
-- cross-fitted β*-IPS；
-- same-sample β*-IPS diagnostic；
-- Meta-OPE / BLUE-style correlated-estimator diagnostic。
-
-SWITCH threshold 与 DR-OS λ 必须在 validation 上固定，不能看 final-test error 后再调。
-
-### Uncertainty + overlap diagnostics
-
-若实验定义了 defensible clusters，可使用 cluster-robust SE；adapter 不会擅自从 timestamp / user string 猜 cluster。
+### Evidence diagnostics
 
 同时报告：
 
-- estimator-specific SE；
+- estimator-specific standard error；
 - ESS / ESS ratio；
 - target-policy-mass support coverage；
-- max importance weight；
-- weight CV；
-- mean importance weight / normalization error。
+- maximum importance weight；
+- mean importance weight / normalization error；
+- weight coefficient of variation；
+- protocol-defined cluster-robust SE（如果实验真的定义了 cluster）。
 
 ```math
 ESS
@@ -308,56 +289,85 @@ ESS
 \frac{(\sum_i w_i)^2}{\sum_i w_i^2}.
 ```
 
-**High estimated value + weak overlap = insufficient evidence.**
+**High estimated value + weak support is insufficient evidence.**
 
 ---
 
-## 4. Locked Real-World Evaluation
+## 4. Pre-Registered Locked Real-World Evaluation
 
-真正比较“哪个 estimator / model 性能更好”时，不能在 final test 上把所有方法跑一遍再挑最好看的。
+真正回答“哪个 estimator / model 性能更好”时，不能在 final test 上把所有方法跑一遍再挑最好看的。
 
-`growthevo/bench/locked_evaluation.py` 提供：
+### OPE
 
-- `LockedOPEProtocol`
-- `LockedTargetingProtocol`
-- immutable evidence fingerprints
-- `LockedBenchmarkArtifact`
+`OPEExperimentPlan` 在 validation 打开前锁定：
 
-核心约束：
+- dataset source；
+- policy direction；
+- reward；
+- split；
+- Q model / folds；
+- target-policy Monte Carlo count；
+- seed；
+- support floor；
+- evidence gate；
+- estimator/hyperparameter grid。
 
-1. candidates / hyperparameters 预先声明；
-2. validation 上选择；
-3. winner 冻结后才允许 final holdout；
-4. validation/test stable IDs 任意重叠都 fail closed；
-5. 一个 protocol object 只允许一次 holdout reveal；
-6. artifact 绑定 commit SHA、protocol fingerprint、tuning evidence、test evidence 与最终 winner。
+`growthevo-locked-ope` 的顺序是：
 
-OPE fingerprint 绑定 reward、propensity、target-policy probability、Q predictions、record ID 与 cluster ID。Criteo-style targeting fingerprint 还绑定模型 score，因此换模型输出会得到新的 evidence identity。
-
-### Executable Open Bandit-style runner
-
-安装后可使用：
-
-```bash
-growthevo-locked-ope \
-  --tuning-jsonl validation.jsonl \
-  --test-jsonl holdout.jsonl \
-  --candidates-json ope_candidates.json \
-  --tuning-reference 0.01234 \
-  --test-reference 0.01210 \
-  --benchmark open-bandit-ope \
-  --dataset obd-all-random-vs-bts \
-  --commit-sha "$(git rev-parse HEAD)" \
-  --output benchmark-result.json
+```text
+plan + realized manifest agreement
+        ↓
+open validation
+        ↓
+evidence gate
+        ↓
+select winner
+        ↓
+freeze
+        ↓
+open holdout once
 ```
 
-CLI 的代码路径会先完成 validation selection，**之后才打开 test JSONL**。完整输入 schema 与 promotion rule 见 `docs/LOCKED_OPE_RUN.md`。
+当前 OBD plan 的 evidence gate 要求：
+
+- support coverage `>= 0.95`；
+- ESS ratio `>= 0.05`；
+- positive supported importance mass。
+
+### Criteo-style targeting
+
+`TargetingExperimentPlan` 对外部 CATE/model scores 锁定：
+
+- dataset source；
+- outcome；
+- split；
+- treatment；
+- selected top fraction；
+- score-generation protocol；
+- complete candidate-name set。
+
+实际 score 数值仍进入 evidence fingerprint，因此候选名不变但模型预测变了，也不是同一次 evidence。
+
+### Fingerprint chain
+
+最终 artifact 绑定：
+
+```text
+experiment plan
++ realized export manifest
++ validation rows/predictions
++ holdout rows/frozen predictions
++ evidence gate / candidate protocol
++ code commit SHA
+```
+
+这解决的是可审计性与 test-set shopping，不是假装“代码无法被恶意 fork”的密码学承诺。
 
 ---
 
 ## 5. One-Sided Conformal Verification
 
-对需要 lower bound 的量：
+Lower-bound residual：
 
 ```math
 r_i^{lower}
@@ -365,7 +375,7 @@ r_i^{lower}
 \widehat y_i-y_i.
 ```
 
-对需要 upper bound 的量：
+Upper-bound residual：
 
 ```math
 r_i^{upper}
@@ -434,63 +444,86 @@ A_t
 
 ---
 
+## Real-world benchmark status
+
+### Small Open Bandit Dataset
+
+PR CI 使用**真实外部 OBD**，并 pin 到：
+
+```text
+sb-ai-lab/sb-obp@1c6d14677ec6f06094a2f8886a1158bab99c571e
+```
+
+它运行 2-fold logistic Q、真实 BernoulliTS action distribution、evidence gate、validation selection、single holdout，并上传 plan / manifest / candidate grid / locked result。
+
+这属于 **integration evidence**，不是 full-data headline performance。
+
+### Full Open Bandit Dataset
+
+官方 full release 约 26M impressions。仓库提供固定 plan 和一键 runner：
+
+```bash
+pip install -e '.[obd]'
+python scripts/run_obd_full_locked.py
+```
+
+若已经下载 full OBD：
+
+```bash
+python scripts/run_obd_full_locked.py --data-root /path/to/open_bandit_dataset
+```
+
+只有这个 fresh full-data preregistered run 产生完整 locked artifact 后，新的 OBD headline number 才有资格进入 README。
+
+### Historical records
+
+旧的 Criteo `+6.8%` / Open Bandit `-8.4%` 属于 **pre-locked legacy evaluation records**，不是当前 frontier stack 的已确认性能，不用于选择当前算法版本。
+
+---
+
+## CI-reproducible algorithmic gates
+
+| Property | Gate |
+| --- | ---: |
+| GrowthAgentBench CATE RMSE | `< 0.03` |
+| Propensity overlap | coverage `> 0.95` |
+| Learned CATE policy | oracle regret `< 0.015` |
+| Low-support optimistic treatment | cannot increase without support |
+| Unsafe expected cost | `NO_TREATMENT` fallback |
+| Dynamics boundary | stops GAE leakage |
+
+Synthetic / deterministic regression checks validate implementation semantics; they do not replace real-world evidence.
+
+---
+
 ## Implementation map
 
 | Component | Source |
 | --- | --- |
-| Group-aware Cross-Fitted DR / support-aware CATE | `growthevo/causal/dr_learner.py` |
+| Group-aware Cross-Fitted DR | `growthevo/causal/dr_learner.py` |
 | CATE serving bridge | `growthevo/causal/serving.py` |
 | Calibrated feasible Safe PI | `growthevo/rl/safe_policy_improvement.py` |
-| Cross-fitted β*-IPS + robust OPE panel | `growthevo/rl/ope.py` |
-| Locked benchmark protocol | `growthevo/bench/locked_evaluation.py` |
+| Cross-fitted β*-IPS + OPE panel | `growthevo/rl/ope.py` |
+| Evidence-gated locked OPE | `growthevo/bench/ope_evidence_gate.py` |
+| OPE preregistration | `growthevo/bench/ope_experiment_plan.py` |
+| Targeting preregistration | `growthevo/bench/targeting_experiment_plan.py` |
 | Locked OPE CLI | `growthevo/bench/locked_ope_cli.py` |
-| Real-world dataset adapters | `growthevo/bench/real_world.py`, `growthevo/bench/criteo.py` |
-| One-sided conformal verification | `growthevo/rl/conformal.py` |
+| Locked targeting CLI | `growthevo/bench/locked_targeting_cli.py` |
+| Full OBD runner | `scripts/run_obd_full_locked.py` |
+| One-sided conformal | `growthevo/rl/conformal.py` |
 | Risk-sensitive MPC / CVaR | `growthevo/rl/model_based.py` |
-| Process reward | `growthevo/rl/process_reward.py` |
 | Dynamics-aware GAE | `growthevo/training/trajectory.py` |
 
-算法版本选择 rationale：`docs/FRONTIER_ALGORITHM_STACK.md`  
-真实数据证据边界：`docs/REAL_WORLD_BENCHMARKS.md`  
-Locked OPE 执行格式：`docs/LOCKED_OPE_RUN.md`
+算法版本选择：`docs/FRONTIER_ALGORITHM_STACK.md`  
+真实数据协议：`docs/REAL_WORLD_BENCHMARKS.md`  
+OBD workflow：`docs/OBD_ISOLATED_EXPORT.md`  
+Locked OPE schema：`docs/LOCKED_OPE_RUN.md`
 
 ---
 
-## Evaluation status
+## Reproduce
 
-### CI-verified acceptance gates
-
-这些 gate 由仓库测试直接执行；它们是当前代码可以复现的证据：
-
-| Property | Gate |
-| --- | ---: |
-| Synthetic CATE recovery | RMSE `< 0.03` |
-| Logged propensity overlap | coverage `> 0.95` |
-| Synthetic learned CATE policy | oracle regret `< 0.015` |
-| Unsupported optimistic treatment | cannot increase without support |
-| Unsafe expected cost | `NO_TREATMENT` fallback |
-| Dynamics boundary | stops GAE leakage |
-| Locked holdout protocol | validation/test overlap fails closed |
-| Locked OPE runner | only frozen validation winner reaches holdout |
-
-### Real-world benchmark evidence
-
-第三方大数据集不 vendored 到仓库，因此 CI **不会**伪装成已经重跑 Criteo / Open Bandit full benchmark。
-
-之前 README 曾记录：
-
-| Dataset | Historical record | Current status |
-| --- | ---: | --- |
-| Criteo Uplift v2 | Uplift@10% `+6.8%` | **legacy / pre-locked-protocol** |
-| Open Bandit Dataset | OPE Error `-8.4%` | **legacy / pre-frontier-OPE + pre-locked-protocol** |
-
-这两个数字现在只保留 provenance，**不是当前 frontier stack 的确认性能 claim**。下一次 promotion 必须由当前 commit 上的 locked protocol 产生 artifact，并公开 validation scoreboard、唯一 final winner、support diagnostics 与 evidence fingerprints。
-
-换句话说：当前代码的算法栈已经升级，但在真实 full datasets 重新跑完之前，不把旧数字冒充成新算法性能。
-
----
-
-## Reproduce code-level verification
+Core runtime/tests:
 
 ```bash
 git clone https://github.com/jiaweine/GrowthEvo-Harness.git
@@ -501,28 +534,34 @@ pip install -e '.[dev]'
 pytest
 ```
 
-Windows PowerShell:
+Real OBD bridge:
 
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e '.[dev]'
-pytest
+```bash
+pip install -e '.[obd]'
 ```
+
+Full research benchmark:
+
+```bash
+python scripts/run_obd_full_locked.py
+```
+
+Generated full-data caches/results are gitignored; archive the final plan, source provenance, manifest, candidate grid and locked artifact as experiment evidence instead of committing the large third-party data.
 
 ---
 
 ## Method boundaries
 
 - Causal estimates are not trusted outside observed support merely because a function approximator can extrapolate.
-- Strict positivity, practical overlap and propensity clipping are not interchangeable concepts.
-- Model residual diagnostics are not called causal confidence bounds unless calibration/inference gives them that meaning.
+- Practical overlap, strict positivity and propensity clipping are different concepts.
+- Model residual diagnostics are not called causal confidence bounds without an inference/calibration protocol.
 - OPE point estimates are insufficient when ESS/support are weak.
-- Cross-fitted β*-IPS is the flagship efficient OPE estimator; robustness estimators do not authorize final-test shopping.
-- Safe PI ranks final feasible pessimistic policies and can consume externally calibrated bounds.
-- Long-horizon rollout ranks risk; it does not replace causal identification.
+- Cross-fitted β*-IPS is the default policy-evidence estimator; validation can still select another predeclared estimator for a benchmark when legitimate reference evidence supports it.
+- Policy improvement ranks final feasible pessimistic policies and can consume externally calibrated bounds.
+- Long-horizon rollout ranks risk; it does not replace causal estimation.
 - `NO_TREATMENT` remains available whenever positive treatment evidence is insufficient.
-- Dataset adapter availability is not the same thing as a reproduced benchmark result.
+- Small OBD is integration evidence, not a substitute for the official full research release.
+- A changed data source, split, Q protocol, candidate grid or evidence gate is a new experiment plan, not the same benchmark run.
 
 ---
 
@@ -530,6 +569,6 @@ pytest
 
 ### GrowthEvo-Harness
 
-**Causal estimation · Calibrated feasible improvement · Locked counterfactual evaluation · Risk-sensitive learning**
+**Causal estimation · Safe improvement · Counterfactual evaluation · Pre-registered evidence · Risk-sensitive learning**
 
 </div>
