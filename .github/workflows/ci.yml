@@ -17,10 +17,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -39,6 +39,36 @@ jobs:
       - name: Training demo smoke test
         run: python examples/training_demo.py
 
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Install wheel in clean environment
+        run: |
+          python -m venv /tmp/growthevo-wheel
+          /tmp/growthevo-wheel/bin/python -m pip install --upgrade pip
+          /tmp/growthevo-wheel/bin/python -m pip install "$GITHUB_WORKSPACE"/dist/*.whl
+          cd /tmp
+          /tmp/growthevo-wheel/bin/python -c "import growthevo; print(growthevo.__file__)"
+          /tmp/growthevo-wheel/bin/growthevo-locked-ope --help
+          /tmp/growthevo-wheel/bin/growthevo-locked-targeting --help
+
   obd-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -49,10 +79,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -240,7 +270,7 @@ jobs:
           PY
 
       - name: Upload locked OBD evidence summary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: obd-small-locked-evidence
           if-no-files-found: error
