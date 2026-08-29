@@ -1,0 +1,10 @@
+{
+  "candidate_config_fingerprint": "e10eb2fc6552b28109b67cfe075b55fd1d0e8f62",
+  "experiment_plan_fingerprint": "28a0ee4516199f2235bc9d52653cc8ab7ec28f5d",
+  "growth_evo_commit_sha": "7ac26a5aebde2c70e1b43264b89f08dddcff0245",
+  "license": "CC-BY-NC-SA-4.0",
+  "source_bytes": 311422618,
+  "source_commit": "82811785048bb633de2d55c02bab4e57066e6423",
+  "source_sha256": "2716e1bf0fd157a93b5bf86924d9088419dfbac2022c6cd90030220634f616dc",
+  "source_url": "https://huggingface.co/datasets/criteo/criteo-uplift/resolve/82811785048bb633de2d55c02bab4e57066e6423/criteo-research-uplift-v2.1.csv.gz?download=true"
+}

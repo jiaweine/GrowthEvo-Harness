@@ -1,0 +1,32 @@
+{
+  "candidate_config_fingerprint": "e10eb2fc6552b28109b67cfe075b55fd1d0e8f62",
+  "evidence_commit_sha": "7ac26a5aebde2c70e1b43264b89f08dddcff0245",
+  "experiment_plan_fingerprint": "28a0ee4516199f2235bc9d52653cc8ab7ec28f5d",
+  "export_manifest_fingerprint": "f765bf351f6b4e2e11fcc464ebd115fddf77520c",
+  "main_merge_sha": "0e8cfd3cdeed4687b67dc3f8d817bfefa7bc6ee2",
+  "persisted_copy_format": {
+    "criteo-lgbm-candidates.v1.json": "byte-identical source artifact copy",
+    "criteo-v2.1-visit-top10.v1.json": "byte-identical source artifact copy",
+    "environment.txt": "byte-identical source artifact copy",
+    "export-manifest.json": "byte-identical source artifact copy",
+    "full-run.log": "not persisted; artifact digest and source SHA256 retained because the log only contains the result path",
+    "locked-result.json": "byte-identical source artifact copy",
+    "source-provenance.json": "byte-identical source artifact copy"
+  },
+  "protocol_fingerprint": "95a3209a87ad8aa3b7b6d9f3933fade51cb3c9fe",
+  "schema_version": "growthevo.criteo-evidence-record.v1",
+  "source_artifact_file_sha256": {
+    "criteo-lgbm-candidates.v1.json": "sha256:e7802b019a44e24b69901e3539d0da5a921f2f50a8108caf4f32aede9f065b5c",
+    "criteo-v2.1-visit-top10.v1.json": "sha256:6e68c1986283fffa2e5553375502b32d486556f0b4db20ebdad7d271ef7f5a91",
+    "environment.txt": "sha256:b4a5e8d31bd324715dd1e4896d465745b2b71e71e119bbb0a3d2de3864b62657",
+    "export-manifest.json": "sha256:a908020a183f947c0bad4560f0355bfe01bc38fb4e919c90b945ca10738249e4",
+    "full-run.log": "sha256:10b81a9df0045abd68862fc76b3cfa37602183576cde850e4b1061c662fde88f",
+    "locked-result.json": "sha256:ffd0be314fa147e58a4453f49db41f0c4c806e52490014a59f606e8e8ab041e6",
+    "source-provenance.json": "sha256:0b475b29ead2766be8a25236d09d47feb8f28c3acd56aa60cf6bdf8e133b2af6"
+  },
+  "test_fingerprint": "3b187bd143e729b7d2ee60c8f28c5f438ec61709",
+  "tuning_fingerprint": "dedf85dec29c0f6731a81bcb52d1e3e6db379de4",
+  "workflow_artifact_digest": "sha256:bbdc93a306e532ba6f880dadf409808b65c3dea872a7b41032f4b2e09819ada0",
+  "workflow_artifact_id": 9718130078,
+  "workflow_run_id": 33263792683
+}

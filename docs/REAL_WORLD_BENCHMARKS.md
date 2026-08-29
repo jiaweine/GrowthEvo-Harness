@@ -44,6 +44,7 @@ The important property is **ordering**. If plan/runtime/manifest agreement fails
 The artifact chain binds different layers separately:
 
 - experiment-plan fingerprint: intended upstream protocol before evidence;
+- candidate-config fingerprint where a benchmark pre-registers model recipes;
 - export-manifest fingerprint: realized data/model-generation configuration;
 - tuning fingerprint: actual validation rows and predictions;
 - test fingerprint: actual holdout rows and frozen predictions;
@@ -105,6 +106,8 @@ sb-ai-lab/sb-obp@1c6d14677ec6f06094a2f8886a1158bab99c571e
 
 The full plan targets the official ZOZO Research Open Bandit Dataset release. The full dataset is not downloaded on every PR because it contains roughly 26M impressions; use `scripts/run_obd_full_locked.py` for the research run.
 
+The current promoted OBD result is persisted under `benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/`. Nine preregistered estimators were ranked on validation; IPS won that frozen validation cohort and alone saw final holdout. The final relative OPE error is `9.20045%`, with support coverage `1.0` and ESS ratio about `0.16123`. This is a result of that protocol, not a universal claim that IPS dominates cross-fitted β*-IPS or DR.
+
 See `docs/OBD_ISOLATED_EXPORT.md` for the complete workflow.
 
 ---
@@ -115,22 +118,79 @@ See `docs/OBD_ISOLATED_EXPORT.md` for the complete workflow.
 
 `evaluate_randomized_targeting()` measures a top-score treatment policy under randomized inverse weighting. `LockedTargetingProtocol` selects a candidate score vector on validation and accepts only the frozen winner on final holdout.
 
-### Targeting preregistration
+### Targeting preregistration v2
 
-`TargetingExperimentPlan` adds the missing upstream layer for externally produced CATE/model scores. It freezes:
+`TargetingExperimentPlan` v2 freezes the upstream training and score-generation choices before validation is opened:
 
 - benchmark and dataset identity;
-- dataset source;
+- exact dataset source/release;
 - outcome definition;
-- split strategy / validation fraction;
+- training fraction, validation fraction and final holdout remainder;
+- split strategy and split seed;
 - treatment arm;
 - selected top fraction;
+- propensity protocol;
 - score-generation protocol identifier;
-- full candidate-name set.
+- full candidate-name set;
+- candidate-config fingerprint.
 
-A companion `growthevo.targeting-export.v1` manifest must match the plan before validation is opened. The actual score values are then bound by the targeting evidence fingerprint, so changing model predictions changes the evidence identity even when candidate names stay the same.
+The companion `growthevo.targeting-export.v2` manifest must match these fields before validation is opened. Actual score values are bound by the targeting evidence fingerprint, so changing model predictions changes evidence identity even when candidate names are unchanged.
 
-This is backend-neutral on purpose: high-performance external LightGBM, causal forest, EconML/CausalML, or neural uplift pipelines can provide scores without becoming hidden runtime dependencies. Their exact score-generation recipe belongs in the preregistered `score_protocol` and external experiment record.
+The generic locked CLI remains backend-neutral. The full Criteo evidence path deliberately uses an explicit fixed backend/config instead of hiding model training behind a label.
+
+### Current full Criteo v2.1 locked evidence
+
+The promoted Criteo experiment is pre-registered in `benchmarks/targeting/criteo-v2.1-visit-top10.v1.json` and executed by `scripts/run_criteo_full_locked.py`.
+
+Data/protocol identity:
+
+- Criteo Uplift v2.1, `13,979,592` rows;
+- source commit `82811785048bb633de2d55c02bab4e57066e6423`;
+- source SHA256 `2716e1bf0fd157a93b5bf86924d9088419dfbac2022c6cd90030220634f616dc`;
+- outcome `visit`;
+- randomized `treatment` is the assignment variable;
+- `exposure` is explicitly forbidden as treatment or feature;
+- SplitMix64 source-row split, seed `20260830`;
+- `6,990,168` training rows, `3,494,354` validation rows, `3,495,070` holdout rows;
+- top-10% treatment policy;
+- propensity `0.8501983071079264` estimated from the independent training split and then frozen.
+
+Five LightGBM 4.7.0 candidates were fixed before validation: S-, T-, X-, R- and DR-Learner. The candidate-config fingerprint is `e10eb2fc6552b28109b67cfe075b55fd1d0e8f62`. Validation ranking by randomized population incremental visit value was:
+
+```text
+S > X > DR > R > T
+```
+
+S-Learner therefore became the frozen winner. The runner then discarded the multi-candidate validation score set, re-read the source, and produced final holdout scores only for S-Learner.
+
+Final locked holdout result:
+
+| Metric | Value |
+| --- | ---: |
+| Holdout rows | 3,495,070 |
+| Treat-none value | `0.0381058865` |
+| Locked top-10% policy value | `0.0474849889` |
+| Population incremental visit value | **`0.0093791024`** |
+| Population standard error | `0.0002146266` |
+| Population 95% CI | **`[0.0089584420, 0.0097997628]`** |
+| Selected top-10% incremental visit value | **`0.0937910242`** |
+| Selected-group standard error | `0.0021462659` |
+| Selected-group 95% CI | **`[0.0895844204, 0.0979976281]`** |
+| Treat-all value | `0.0483788909` |
+
+`0.0093791024` is an **absolute population visit-probability increment**, about **+0.93791 percentage points**. `0.0937910242` is the corresponding absolute increment within the selected top 10%, about **+9.37910 percentage points**. The policy value is about `24.61%` higher relative to treat-none, but that ratio is not the historical repository metric named `Uplift@10%`.
+
+The top-10% locked policy is a **budgeted targeting** experiment. Treat-all happens to have a slightly higher holdout value in this run; therefore this result must not be described as unconstrained global policy optimality. It answers the preregistered top-10% targeting question.
+
+The historical Criteo `+6.8%` record predates the locked protocol and does not have a sufficiently matching metric/provenance contract. It remains legacy provenance and is **not numerically comparable** to `+0.93791 pp`, `+9.37910 pp`, or the `24.61%` relative policy-value ratio.
+
+Audited compact evidence is persisted under:
+
+```text
+benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/
+```
+
+It records the exact evidence commit `7ac26a5aebde2c70e1b43264b89f08dddcff0245`, plan/config/manifest/protocol/tuning/test fingerprints, source SHA256, exact environment freeze, GitHub Actions run `33263792683`, artifact ID `9718130078`, and artifact digest `sha256:bbdc93a306e532ba6f880dadf409808b65c3dea872a7b41032f4b2e09819ada0`.
 
 ---
 
@@ -153,13 +213,16 @@ KuaiRand is therefore a sequential/offline-RL integration benchmark, not an excu
 
 ### Criteo
 
-- stable row identity;
-- predeclared stratification/split logic;
-- nuisance/CATE fitting only on permitted training folds;
+- exact source release and SHA256 fixed before validation;
+- train / validation / holdout fractions and split seed preregistered;
+- nuisance/CATE fitting only on the training split/folds;
+- propensity learned only from the independent training split and frozen;
+- complete candidate set/config fixed before validation;
 - complete candidate score set on validation;
-- frozen winner before final score vector is accepted;
-- randomized final metric once on untouched holdout;
-- stratified bootstrap if headline intervals are reported.
+- frozen winner before final score vector is generated;
+- winner-only randomized metric once on untouched holdout;
+- analytic Horvitz–Thompson uncertainty for the research-scale frozen policy; inference is conditional on the frozen training-derived propensity;
+- bootstrap remains available for smaller studies where its computation is practical.
 
 ### Open Bandit Dataset
 
@@ -190,7 +253,7 @@ The repository intentionally keeps heavy research stacks optional. Paper-facing 
 - EconML / CausalML meta-learners;
 - gradient-boosted or neural uplift models.
 
-A backend is not called “better” because it is newer. It must win under a preregistered validation protocol and then retain acceptable untouched holdout performance/support.
+A backend is not called “better” because it is newer. It must win under a preregistered validation protocol and then retain acceptable untouched holdout performance/support. The current Criteo result illustrates this rule: S-Learner won the frozen validation cohort over X/DR/R/T despite the latter methods being more sophisticated causal meta-learners.
 
 ---
 
@@ -199,20 +262,23 @@ A backend is not called “better” because it is newer. It must win under a pr
 For any result promoted beyond integration smoke, archive:
 
 - experiment-plan JSON and fingerprint;
-- exact dataset release/source identity;
+- exact dataset release/source identity and digest;
+- candidate-config JSON/fingerprint when model recipes are benchmark inputs;
 - realized export manifest and fingerprint;
 - immutable split definition;
-- stable row IDs with zero validation/test overlap;
+- stable row/source identities with zero validation/test overlap;
 - propensity provenance;
 - reward/outcome definition;
 - Q/model/score-generation protocol;
 - complete candidate set and hyperparameter grid fixed before validation selection;
 - validation selection metric;
-- evidence-gate thresholds and observed diagnostics;
+- evidence-gate thresholds and observed diagnostics where applicable;
 - final frozen candidate only on holdout;
 - random seeds;
-- point estimate and uncertainty;
+- point estimate and uncertainty with metric units stated explicitly;
 - commit SHA;
-- tuning/test/protocol fingerprints from `LockedBenchmarkArtifact`.
+- tuning/test/protocol fingerprints from `LockedBenchmarkArtifact`;
+- exact research environment;
+- workflow artifact ID/digest for promoted full-data runs.
 
-Do not replace missing real-world evidence with a synthetic proxy, a small-data integration result, or a legacy pre-locked headline. If the required full-data artifact does not exist yet, the correct status is **not yet promoted**.
+Do not replace missing real-world evidence with a synthetic proxy, a small-data integration result, or a legacy pre-locked headline. Do not compare percentages across different metric definitions merely because they use the word “uplift”. If a required full-data artifact does not exist yet, the correct status is **not yet promoted**.
