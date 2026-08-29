@@ -1,6 +1,22 @@
-"""Deterministic benchmark fixtures for causal growth-policy research."""
+"""Benchmark fixtures and real-world dataset adapters for growth-policy research."""
 
+from .criteo import CriteoUpliftData, load_criteo_uplift
+from .kuairand_features import load_kuairand_user_features, load_kuairand_video_features
+from .open_bandit_features import load_open_bandit_item_context
+from .open_bandit_ope import open_bandit_to_ope
+from .real_world import (
+    DEFAULT_KUAIRAND_REWARD_WEIGHTS,
+    KuaiRandInteraction,
+    OpenBanditInteraction,
+    RandomizedTargetingResult,
+    evaluate_randomized_targeting,
+    kuairand_reward,
+    load_kuairand,
+    load_open_bandit,
+)
 from .runner import GrowthAgentBench, PolicyBenchmarkResult
+from .splits import DatasetSplit, deterministic_stratified_split, ordered_split
+from .statistics import TargetingBootstrapResult, bootstrap_randomized_targeting
 from .synthetic import (
     CATEBenchmarkResult,
     SyntheticGrowthSample,
@@ -11,10 +27,29 @@ from .synthetic import (
 
 __all__ = [
     "CATEBenchmarkResult",
+    "CriteoUpliftData",
+    "DEFAULT_KUAIRAND_REWARD_WEIGHTS",
+    "DatasetSplit",
     "GrowthAgentBench",
+    "KuaiRandInteraction",
+    "OpenBanditInteraction",
     "PolicyBenchmarkResult",
+    "RandomizedTargetingResult",
     "SyntheticGrowthSample",
+    "TargetingBootstrapResult",
+    "bootstrap_randomized_targeting",
+    "deterministic_stratified_split",
     "evaluate_cate",
+    "evaluate_randomized_targeting",
+    "kuairand_reward",
+    "load_criteo_uplift",
+    "load_kuairand",
+    "load_kuairand_user_features",
+    "load_kuairand_video_features",
+    "load_open_bandit",
+    "load_open_bandit_item_context",
     "make_synthetic_growth_bandit",
+    "open_bandit_to_ope",
     "oracle_policy_value",
+    "ordered_split",
 ]
