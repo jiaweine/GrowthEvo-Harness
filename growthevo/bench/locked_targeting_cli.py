@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
+from hashlib import blake2b
 from json import dumps, loads
 from math import isfinite
 from pathlib import Path
@@ -10,6 +12,26 @@ from growthevo.causal.dr_learner import LoggedTreatmentRecord
 from growthevo.models import Channel
 
 from .locked_evaluation import LockedTargetingProtocol
+from .targeting_experiment_plan import (
+    TargetingExperimentPlan,
+    load_targeting_experiment_plan,
+)
+
+
+def _json_object(path: str | Path, *, label: str) -> dict[str, Any]:
+    resolved = Path(path)
+    try:
+        payload = loads(resolved.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise ValueError(f"invalid {label} JSON: {resolved}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} JSON must be an object")
+    return payload
+
+
+def _fingerprint_json_object(payload: Mapping[str, Any]) -> str:
+    encoded = dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return blake2b(encoded, digest_size=20).hexdigest()
 
 
 def _record_from_payload(payload: Mapping[str, Any], *, source: str) -> LoggedTreatmentRecord:
@@ -140,6 +162,34 @@ def _load_test_jsonl(
     return tuple(records), tuple(scores)
 
 
+def _load_and_validate_plan(
+    *,
+    experiment_plan_json: str | Path | None,
+    export_manifest_json: str | Path | None,
+    benchmark: str,
+    dataset: str,
+    treatment: Channel,
+    selected_fraction: float,
+) -> tuple[TargetingExperimentPlan | None, dict[str, Any] | None]:
+    if (experiment_plan_json is None) != (export_manifest_json is None):
+        raise ValueError(
+            "experiment_plan_json and export_manifest_json must be provided together"
+        )
+    if experiment_plan_json is None:
+        return None, None
+    plan = load_targeting_experiment_plan(experiment_plan_json)
+    manifest = _json_object(export_manifest_json, label="targeting export manifest")
+    plan.validate_runtime_contract(
+        benchmark=benchmark,
+        dataset=dataset,
+        treatment=treatment,
+        selected_fraction=selected_fraction,
+        candidate_names=plan.candidate_names,
+    )
+    plan.validate_export_manifest(manifest)
+    return plan, manifest
+
+
 def run_locked_targeting_benchmark(
     *,
     tuning_jsonl: str | Path,
@@ -150,10 +200,29 @@ def run_locked_targeting_benchmark(
     dataset: str,
     commit_sha: str,
     output: str | Path,
+    experiment_plan_json: str | Path | None = None,
+    export_manifest_json: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Select a targeting model on randomized validation data, then reveal holdout once."""
+    """Select on randomized validation data, then reveal one frozen holdout."""
 
+    plan, manifest = _load_and_validate_plan(
+        experiment_plan_json=experiment_plan_json,
+        export_manifest_json=export_manifest_json,
+        benchmark=benchmark,
+        dataset=dataset,
+        treatment=treatment,
+        selected_fraction=selected_fraction,
+    )
+
+    # Upstream plan/manifest agreement is checked before validation is opened.
     tuning_records, candidate_scores = _load_tuning_jsonl(tuning_jsonl)
+    if plan is not None and tuple(sorted(candidate_scores)) != tuple(
+        sorted(plan.candidate_names)
+    ):
+        raise ValueError(
+            "validation candidate scores do not match the pre-registered candidate set"
+        )
+
     protocol = LockedTargetingProtocol(
         selected_fraction=selected_fraction,
         treatment=treatment,
@@ -173,9 +242,39 @@ def run_locked_targeting_benchmark(
         commit_sha=commit_sha,
     )
 
+    plan_payload: dict[str, Any] | None = None
+    if plan is not None and manifest is not None:
+        manifest_fingerprint = _fingerprint_json_object(manifest)
+        metrics = dict(artifact.metrics)
+        metrics.update(
+            {
+                "experiment_plan_fingerprint": plan.fingerprint,
+                "export_manifest_fingerprint": manifest_fingerprint,
+                "dataset_source": plan.dataset_source,
+                "score_protocol": plan.score_protocol,
+            }
+        )
+        artifact = replace(
+            artifact,
+            protocol_fingerprint=plan.bind_protocol_fingerprint(
+                artifact.protocol_fingerprint
+            ),
+            metrics=metrics,
+        )
+        plan_payload = {
+            "fingerprint": plan.fingerprint,
+            "plan": plan.canonical_payload(),
+            "export_manifest_fingerprint": manifest_fingerprint,
+        }
+
     bundle: dict[str, Any] = {
-        "schema_version": "growthevo.locked-targeting-run.v1",
+        "schema_version": (
+            "growthevo.locked-targeting-run.v2"
+            if plan is not None
+            else "growthevo.locked-targeting-run.v1"
+        ),
         "artifact": loads(artifact.to_json()),
+        "experiment_plan": plan_payload,
         "validation_scores": [
             {
                 "candidate_name": score.candidate_name,
@@ -215,6 +314,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--experiment-plan-json")
+    parser.add_argument("--export-manifest-json")
     return parser
 
 
@@ -229,6 +330,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         dataset=args.dataset,
         commit_sha=args.commit_sha,
         output=args.output,
+        experiment_plan_json=args.experiment_plan_json,
+        export_manifest_json=args.export_manifest_json,
     )
     return 0
 
