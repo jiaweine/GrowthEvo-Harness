@@ -52,15 +52,15 @@ class OPEEstimate:
     can reproduce the lower-variance-but-finitely-biased plug-in estimator.
 
     SWITCH-DR and optimistic DR shrinkage are retained as stress estimators for
-    extreme importance weights. They are older than beta*-IPS and are not the
-    default promotion estimator; their tuning parameters belong on validation
+    extreme importance weights. Their tuning parameters belong on validation
     data, never the final evaluation split.
 
-    ``meta_blue`` is a plug-in correlated fixed-effects combination of IPS, DR,
-    and cross-fitted beta-IPS. It follows the Meta-OPE/BLUE idea as an efficiency
-    diagnostic. Because its combination weights are estimated on the evaluation
-    cohort, promotion should still be guarded by independent calibration rather
-    than treating its plug-in standard error as an exact finite-sample theorem.
+    ``meta_blue`` follows the RecSys 2025 Meta-OPE fixed-effects construction
+    using complementary beta-IPS, SNIPS, and DR inputs. SNIPS contributes its
+    Delta-method influence rather than being treated as an ordinary sample mean,
+    and cluster-aware experiments use the same cluster covariance when deriving
+    BLUE weights. The resulting uncertainty remains asymptotic, especially when
+    nuisance models or ratio estimators dominate finite-sample behaviour.
     """
 
     direct_method: float
@@ -240,40 +240,118 @@ def _solve_linear_system(matrix: list[list[float]], target: list[float]) -> list
     return [augmented[row][-1] for row in range(n)]
 
 
-def _meta_blue(
-    named_terms: tuple[tuple[str, list[float]], ...],
-) -> tuple[float, tuple[tuple[str, float], ...], list[float]]:
-    n = len(named_terms[0][1])
-    width = len(named_terms)
+def _covariance_of_means(
+    named_influences: tuple[tuple[str, list[float]], ...],
+    *,
+    cluster_ids: list[Hashable] | None,
+) -> list[list[float]]:
+    if not named_influences:
+        raise ValueError("meta-OPE requires at least one input estimator")
+    n = len(named_influences[0][1])
+    if n == 0:
+        raise ValueError("meta-OPE influence arrays cannot be empty")
+    if any(len(values) != n for _, values in named_influences):
+        raise ValueError("meta-OPE influence arrays must be aligned")
+
+    width = len(named_influences)
     covariance = [[0.0 for _ in range(width)] for _ in range(width)]
+    if cluster_ids is None:
+        for left in range(width):
+            for right in range(width):
+                covariance[left][right] = _sample_covariance(
+                    named_influences[left][1], named_influences[right][1]
+                ) / n
+        return covariance
+
+    if len(cluster_ids) != n:
+        raise ValueError("cluster ids must align with meta-OPE influences")
+    clusters = set(cluster_ids)
+    cluster_count = len(clusters)
+    if cluster_count < 2:
+        raise ValueError("cluster-aware meta-OPE requires at least two clusters")
+
+    centers = [_mean(values) for _, values in named_influences]
+    cluster_sums = {
+        cluster: [0.0 for _ in range(width)]
+        for cluster in clusters
+    }
+    for row, cluster in enumerate(cluster_ids):
+        for column in range(width):
+            cluster_sums[cluster][column] += (
+                named_influences[column][1][row] - centers[column]
+            )
+
+    factor = cluster_count / (cluster_count - 1) / (n * n)
     for left in range(width):
         for right in range(width):
-            covariance[left][right] = _sample_covariance(
-                named_terms[left][1], named_terms[right][1]
-            ) / max(1, n)
+            covariance[left][right] = factor * fsum(
+                totals[left] * totals[right]
+                for totals in cluster_sums.values()
+            )
+    return covariance
 
-    trace = fsum(covariance[index][index] for index in range(width))
+
+def _blue_weights(covariance: list[list[float]]) -> list[float]:
+    width = len(covariance)
+    if width == 0 or any(len(row) != width for row in covariance):
+        raise ValueError("meta-OPE covariance matrix must be non-empty and square")
+
+    regularized = [list(row) for row in covariance]
+    trace = fsum(regularized[index][index] for index in range(width))
     ridge = max(1e-15, abs(trace) * 1e-12)
     for index in range(width):
-        covariance[index][index] += ridge
+        regularized[index][index] += ridge
 
     try:
-        inverse_times_one = _solve_linear_system(covariance, [1.0] * width)
+        inverse_times_one = _solve_linear_system(regularized, [1.0] * width)
         denominator = fsum(inverse_times_one)
         if abs(denominator) <= 1e-15:
             raise ValueError("degenerate BLUE normalization")
-        weights = [value / denominator for value in inverse_times_one]
+        return [value / denominator for value in inverse_times_one]
     except ValueError:
-        weights = [1.0 / width for _ in range(width)]
+        return [1.0 / width for _ in range(width)]
 
-    combined_terms = [
-        fsum(weights[column] * named_terms[column][1][row] for column in range(width))
+
+def _meta_blue(
+    named_estimators: tuple[tuple[str, float, list[float]], ...],
+    *,
+    cluster_ids: list[Hashable] | None,
+) -> tuple[float, tuple[tuple[str, float], ...], list[float]]:
+    if not named_estimators:
+        raise ValueError("meta-OPE requires at least one input estimator")
+    n = len(named_estimators[0][2])
+    if n == 0:
+        raise ValueError("meta-OPE influence arrays cannot be empty")
+    if any(len(influence) != n for _, _, influence in named_estimators):
+        raise ValueError("meta-OPE influence arrays must be aligned")
+
+    named_influences = tuple(
+        (name, influence)
+        for name, _, influence in named_estimators
+    )
+    covariance = _covariance_of_means(
+        named_influences,
+        cluster_ids=cluster_ids,
+    )
+    weights = _blue_weights(covariance)
+    value = fsum(
+        weights[index] * named_estimators[index][1]
+        for index in range(len(named_estimators))
+    )
+    combined_influence = [
+        fsum(
+            weights[column] * named_estimators[column][2][row]
+            for column in range(len(named_estimators))
+        )
         for row in range(n)
     ]
     return (
-        _mean(combined_terms),
-        tuple((named_terms[index][0], weights[index]) for index in range(width)),
-        combined_terms,
+        value,
+        tuple(
+            (named_estimators[index][0], weights[index])
+            for index in range(len(named_estimators))
+        ),
+        combined_influence,
     )
 
 
@@ -289,8 +367,8 @@ def evaluate_policy(
     """Evaluate a target policy from logged contextual-bandit feedback.
 
     The default flagship estimator is cross-fitted beta*-IPS. Plain IPS, DR,
-    SNIPS, SWITCH-DR, DR-OS and a plug-in BLUE meta-estimator are returned for
-    robustness analysis rather than silently hiding estimator disagreement.
+    SNIPS, SWITCH-DR, DR-OS and RecSys-style correlated BLUE Meta-OPE are
+    returned together so estimator disagreement remains visible.
     """
 
     if not 0 < support_propensity_floor <= 1:
@@ -398,6 +476,7 @@ def evaluate_policy(
         snips_standard_error = standard_error(snips_influence)
     else:
         snips = float("nan")
+        snips_influence = []
         snips_standard_error = float("nan")
 
     weight_std = sqrt(max(0.0, _sample_variance(weights))) if n > 1 else 0.0
@@ -418,22 +497,39 @@ def evaluate_policy(
         supported_target_mass / weight_sum if weight_sum > 1e-15 else 0.0
     )
 
-    meta_value, meta_weights, meta_terms = _meta_blue(
+    beta_value = _mean(beta_terms)
+    dr_value = _mean(dr_terms)
+    meta_inputs: list[tuple[str, float, list[float]]] = [
         (
-            ("ips", ips_terms),
-            ("doubly_robust", dr_terms),
-            ("beta_ips", beta_terms),
+            "beta_ips",
+            beta_value,
+            [value - beta_value for value in beta_terms],
         )
+    ]
+    if isfinite(snips):
+        meta_inputs.append(
+            ("self_normalized_ips", snips, snips_influence)
+        )
+    meta_inputs.append(
+        (
+            "doubly_robust",
+            dr_value,
+            [value - dr_value for value in dr_terms],
+        )
+    )
+    meta_value, meta_weights, meta_influence = _meta_blue(
+        tuple(meta_inputs),
+        cluster_ids=cluster_ids if cluster_ids else None,
     )
 
     return OPEEstimate(
         direct_method=_mean(dm_terms),
         ips=_mean(ips_terms),
         self_normalized_ips=snips,
-        doubly_robust=_mean(dr_terms),
+        doubly_robust=dr_value,
         switch_dr=_mean(switch_terms),
         dr_os=_mean(dr_os_terms),
-        beta_ips=_mean(beta_terms),
+        beta_ips=beta_value,
         beta_ips_same_sample=_mean(beta_same_sample_terms),
         beta_star=beta_star,
         beta_mode=beta_mode,
@@ -449,7 +545,7 @@ def evaluate_policy(
         dr_os_standard_error=standard_error(dr_os_terms),
         beta_ips_standard_error=standard_error(beta_terms),
         beta_ips_same_sample_standard_error=standard_error(beta_same_sample_terms),
-        meta_blue_standard_error=standard_error(meta_terms),
+        meta_blue_standard_error=standard_error(meta_influence),
         standard_error_method=standard_error_method,
         cluster_count=cluster_count,
         switch_threshold=switch_threshold,
@@ -487,9 +583,9 @@ def policy_evidence_from_ope(
 ) -> PolicyEvidence:
     """Compile OPE output into the verifier's evidence contract.
 
-    Cross-fitted beta*-IPS is the default. ``meta_blue`` is deliberately opt-in
-    because its covariance-combination weights are plug-in estimates and should
-    be independently calibrated before promotion decisions.
+    Cross-fitted beta*-IPS is the default. ``meta_blue`` remains opt-in because
+    its covariance combination and SNIPS component rely on asymptotic inference;
+    locked validation should establish its finite-sample suitability before use.
     """
 
     if estimator == "meta_blue":
