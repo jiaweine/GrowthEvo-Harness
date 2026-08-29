@@ -458,9 +458,29 @@ sb-ai-lab/sb-obp@1c6d14677ec6f06094a2f8886a1158bab99c571e
 
 这属于 **integration evidence**，不是 full-data headline performance。
 
-### Full Open Bandit Dataset
+### Full Open Bandit Dataset — current locked evidence
 
-官方 full release 约 26M impressions。仓库提供固定 plan 和一键 runner：
+当前可审计的 full-data result 来自预注册 `all/random → BernoulliTS` 实验，evidence commit 为 `7d538cea9698b5f0a48c585eed85e3ae526e5af6`。完整证据保存在 [`benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/`](benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/README.md)。
+
+| Metric | Locked result |
+| --- | ---: |
+| Random-policy evidence rows | 1,374,327 |
+| BTS on-policy reference rows | 12,357,200 |
+| Predeclared estimator configurations | 9 |
+| Validation winner | **IPS** |
+| Validation absolute error | `0.0000599942` |
+| Final estimate | `0.0045295435` |
+| Final on-policy reference | `0.0049885087` |
+| **Final relative estimation error** | **9.20045%** |
+| Final standard error | `0.0002042614` |
+| Validation support / ESS ratio | `1.0 / 0.16144` |
+| Final support / ESS ratio | `1.0 / 0.16123` |
+
+IPS 是这个**冻结 validation cohort** 上的赢家，因此只有 IPS 被允许看到 final holdout。它并不推翻 cross-fitted β*-IPS / DR 等 frontier estimators 的方法学价值，也不表示 IPS 在其他数据集上普遍更好；这里遵守的是“validation evidence 优先于 novelty”。
+
+这次 full run 使用 `n_sim=100000`、3-fold logistic Q、support `>= 0.95`、ESS ratio `>= 0.05` 和 positive supported importance mass gates。validation / final support 都为 `1.0`，所有预声明 evidence gates 均通过，且 tuning / test fingerprints 不同。
+
+复现入口：
 
 ```bash
 pip install -e '.[obd]'
@@ -473,11 +493,9 @@ python scripts/run_obd_full_locked.py
 python scripts/run_obd_full_locked.py --data-root /path/to/open_bandit_dataset
 ```
 
-只有这个 fresh full-data preregistered run 产生完整 locked artifact 后，新的 OBD headline number 才有资格进入 README。
-
 ### Historical records
 
-旧的 Criteo `+6.8%` / Open Bandit `-8.4%` 属于 **pre-locked legacy evaluation records**，不是当前 frontier stack 的已确认性能，不用于选择当前算法版本。
+旧的 Criteo `+6.8%` / Open Bandit `-8.4%` 属于 **pre-locked legacy evaluation records**。它们的协议与当前 full-data locked result 不同，因此不与 `9.20045%` 做数值优劣比较，也不用于选择当前 estimator。
 
 ---
 
@@ -492,7 +510,7 @@ python scripts/run_obd_full_locked.py --data-root /path/to/open_bandit_dataset
 | Unsafe expected cost | `NO_TREATMENT` fallback |
 | Dynamics boundary | stops GAE leakage |
 
-Synthetic / deterministic regression checks validate implementation semantics; they do not replace real-world evidence.
+Synthetic / deterministic regression checks validate implementation semantics; they do not replace real-world evidence。
 
 ---
 
@@ -547,7 +565,7 @@ Full research benchmark:
 python scripts/run_obd_full_locked.py
 ```
 
-Generated full-data caches/results are gitignored; archive the final plan, source provenance, manifest, candidate grid and locked artifact as experiment evidence instead of committing the large third-party data.
+Generated full-data caches and raw validation/holdout JSONL are gitignored. Compact accepted evidence is persisted under `benchmarks/ope/results/`; archive the final plan, source provenance, manifest, environment and locked artifact, but do not commit the large third-party OBD files.
 
 ---
 
