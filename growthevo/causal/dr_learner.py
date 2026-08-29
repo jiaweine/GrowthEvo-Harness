@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import blake2b
-from math import ceil, fsum, sqrt
-from typing import Iterable, Mapping, Sequence
+from math import ceil, fsum, isfinite, sqrt
+from typing import Callable, Iterable, Mapping, Protocol, Sequence
 
 from growthevo.models import Channel
 
@@ -15,6 +15,8 @@ def _validate_features(features: Sequence[float], expected_dim: int | None = Non
     values = tuple(float(value) for value in features)
     if not values:
         raise ValueError("features cannot be empty")
+    if any(not isfinite(value) for value in values):
+        raise ValueError("features must be finite")
     if expected_dim is not None and len(values) != expected_dim:
         raise ValueError(f"expected {expected_dim} features, got {len(values)}")
     return values
@@ -70,11 +72,31 @@ def _mahalanobis_distance(
         fsum(weight * value for weight, value in zip(row, delta, strict=True))
         for row in precision
     ]
-    squared = fsum(value * transformed_value for value, transformed_value in zip(delta, transformed, strict=True))
+    squared = fsum(
+        value * transformed_value
+        for value, transformed_value in zip(delta, transformed, strict=True)
+    )
     return sqrt(max(0.0, squared))
 
 
+class Regressor(Protocol):
+    """Minimal backend contract for nuisance and second-stage CATE models."""
+
+    def fit(
+        self,
+        features: Iterable[Sequence[float]],
+        targets: Iterable[float],
+    ) -> "Regressor": ...
+
+    def predict_one(self, features: Sequence[float]) -> float: ...
+
+
+RegressorFactory = Callable[[], Regressor]
+
+
 class RidgeRegressor:
+    """Dependency-free auditable reference backend, not a performance ceiling."""
+
     def __init__(self, ridge: float = 1e-3) -> None:
         if ridge <= 0:
             raise ValueError("ridge must be positive")
@@ -87,6 +109,8 @@ class RidgeRegressor:
         ys = [float(value) for value in targets]
         if not rows or len(rows) != len(ys):
             raise ValueError("features and targets must be non-empty and aligned")
+        if any(not isfinite(target) for target in ys):
+            raise ValueError("targets must be finite")
         dim = len(rows[0])
         if dim == 0 or any(len(row) != dim for row in rows):
             raise ValueError("all feature rows must have one consistent non-zero dimension")
@@ -127,16 +151,21 @@ class LoggedTreatmentRecord:
     action: Channel
     outcome: float
     action_propensities: Mapping[Channel, float]
+    group_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.unit_id:
             raise ValueError("unit_id cannot be empty")
+        if self.group_id is not None and not self.group_id:
+            raise ValueError("group_id cannot be empty when provided")
         _validate_features(self.features)
+        if not isfinite(self.outcome):
+            raise ValueError("outcome must be finite")
         if self.action not in self.action_propensities:
             raise ValueError("logged action must have a propensity")
         probabilities = [float(value) for value in self.action_propensities.values()]
-        if any(value < 0.0 or value > 1.0 for value in probabilities):
-            raise ValueError("action propensities must be in [0, 1]")
+        if any(not isfinite(value) or value < 0.0 or value > 1.0 for value in probabilities):
+            raise ValueError("action propensities must be finite and in [0, 1]")
         if abs(fsum(probabilities) - 1.0) > 1e-6:
             raise ValueError("action propensities must sum to 1")
         if self.action_propensities[self.action] <= 0.0:
@@ -155,13 +184,27 @@ class CATEEstimate:
 
 @dataclass(frozen=True, slots=True)
 class FittedTreatmentEffect:
+    """Cross-fitted DR CATE with explicit overlap and distributional support.
+
+    ``uncertainty`` is a second-stage out-of-fold residual diagnostic inflated by
+    extrapolation distance. It is intentionally not labelled a causal confidence
+    interval. Calibrated/inferential lower bounds should be produced by a separate
+    inference or conformal layer before safe policy improvement consumes them.
+
+    ``overlap_coverage`` records strict pairwise positivity. A practical overlap
+    threshold, when configured, is reported separately. Propensity clipping is a
+    numerical experiment choice and its empirical frequency is also separate.
+    """
+
     treatment: Channel
     control: Channel
-    model: RidgeRegressor
+    model: Regressor
     residual_scale: float
     sample_size: int
     overlap_coverage: float
     feature_bounds: tuple[tuple[float, float], ...]
+    practical_overlap_coverage: float | None = None
+    propensity_clip_fraction: float = 0.0
     feature_center: FeatureVector = ()
     feature_precision: tuple[tuple[float, ...], ...] = ()
     support_radius: float = 1.0
@@ -194,7 +237,12 @@ class FittedTreatmentEffect:
 
         extrapolation = max(bound_extrapolation, radial_extrapolation)
         uncertainty = self.residual_scale * (1.0 + extrapolation)
-        support_score = self.overlap_coverage / (1.0 + extrapolation)
+        base_support = (
+            self.practical_overlap_coverage
+            if self.practical_overlap_coverage is not None
+            else self.overlap_coverage
+        )
+        support_score = base_support / (1.0 + extrapolation)
         return CATEEstimate(
             treatment=self.treatment,
             control=self.control,
@@ -206,32 +254,162 @@ class FittedTreatmentEffect:
 
 
 class CrossFittedDRLearner:
-    """Cross-fitted one-vs-control doubly-robust treatment-effect learner."""
+    """Group-aware, backend-pluggable, support-aware DR CATE learner.
+
+    The default path does not silently clip propensity scores. Exact pairwise
+    positivity is required for identification. ``practical_overlap_floor`` is a
+    diagnostic/support protocol, while ``propensity_clip_floor`` is an explicit
+    numerical stabilizer; keeping them separate prevents clipping from being
+    mistaken for evidence.
+
+    ``propensity_floor`` is retained only as a backwards-compatibility alias. If
+    explicitly supplied, it reproduces the older behavior by setting both the
+    practical overlap threshold and clipping floor to that value.
+    """
 
     def __init__(
         self,
         *,
         n_folds: int = 5,
         ridge: float = 1e-3,
-        propensity_floor: float = 0.02,
+        practical_overlap_floor: float | None = 0.02,
+        propensity_clip_floor: float | None = None,
         support_quantile: float = 0.95,
+        outcome_model_factory: RegressorFactory | None = None,
+        effect_model_factory: RegressorFactory | None = None,
+        propensity_floor: float | None = None,
     ) -> None:
         if n_folds < 2:
             raise ValueError("n_folds must be at least 2")
         if ridge <= 0:
             raise ValueError("ridge must be positive")
-        if not 0 < propensity_floor < 0.5:
-            raise ValueError("propensity_floor must be in (0, 0.5)")
         if not 0.5 <= support_quantile < 1.0:
             raise ValueError("support_quantile must be in [0.5, 1)")
+
+        if propensity_floor is not None:
+            if not 0 < propensity_floor < 0.5:
+                raise ValueError("propensity_floor must be in (0, 0.5)")
+            if practical_overlap_floor != 0.02 or propensity_clip_floor is not None:
+                raise ValueError(
+                    "propensity_floor compatibility alias cannot be combined with explicit "
+                    "practical_overlap_floor or propensity_clip_floor"
+                )
+            practical_overlap_floor = propensity_floor
+            propensity_clip_floor = propensity_floor
+
+        for name, value in (
+            ("practical_overlap_floor", practical_overlap_floor),
+            ("propensity_clip_floor", propensity_clip_floor),
+        ):
+            if value is not None and not 0 < value < 0.5:
+                raise ValueError(f"{name} must be in (0, 0.5) when provided")
+
         self.n_folds = n_folds
         self.ridge = ridge
-        self.propensity_floor = propensity_floor
+        self.practical_overlap_floor = practical_overlap_floor
+        self.propensity_clip_floor = propensity_clip_floor
         self.support_quantile = support_quantile
+        self.outcome_model_factory = outcome_model_factory or (lambda: RidgeRegressor(self.ridge))
+        self.effect_model_factory = effect_model_factory or (lambda: RidgeRegressor(self.ridge))
 
     @staticmethod
-    def _stable_key(unit_id: str) -> bytes:
-        return blake2b(unit_id.encode("utf-8"), digest_size=16).digest()
+    def _stable_key(value: str) -> bytes:
+        return blake2b(value.encode("utf-8"), digest_size=16).digest()
+
+    def _group_fold_assignments(
+        self,
+        rows: list[LoggedTreatmentRecord],
+        treatment: Channel,
+        control: Channel,
+    ) -> list[int]:
+        groups: dict[str, list[int]] = {}
+        for index, row in enumerate(rows):
+            key = row.group_id or row.unit_id
+            groups.setdefault(key, []).append(index)
+        if len(groups) < self.n_folds:
+            raise ValueError(
+                f"need at least {self.n_folds} distinct groups for group-aware cross-fitting; "
+                f"got {len(groups)}"
+            )
+
+        actions = (treatment, control)
+        action_totals = {action: sum(row.action is action for row in rows) for action in actions}
+        if any(total == 0 for total in action_totals.values()):
+            raise ValueError("group-aware cross-fitting requires treatment and control rows")
+
+        group_counts: dict[str, dict[Channel, int]] = {}
+        for key, indices in groups.items():
+            group_counts[key] = {
+                action: sum(rows[index].action is action for index in indices)
+                for action in actions
+            }
+
+        ordered_groups = sorted(
+            groups,
+            key=lambda key: (
+                -len(groups[key]),
+                -max(group_counts[key].values()),
+                self._stable_key(key),
+            ),
+        )
+        fold_counts = [dict.fromkeys(actions, 0) for _ in range(self.n_folds)]
+        fold_sizes = [0 for _ in range(self.n_folds)]
+        group_to_fold: dict[str, int] = {}
+        target_share = 1.0 / self.n_folds
+
+        def global_imbalance(
+            candidate_fold: int,
+            counts: Mapping[Channel, int],
+            size: int,
+        ) -> tuple[float, float]:
+            class_deviation = 0.0
+            size_deviation = 0.0
+            for fold in range(self.n_folds):
+                fold_size = fold_sizes[fold] + (size if fold == candidate_fold else 0)
+                size_deviation += (fold_size / len(rows) - target_share) ** 2
+                for action in actions:
+                    count = fold_counts[fold][action] + (
+                        counts[action] if fold == candidate_fold else 0
+                    )
+                    class_deviation += (count / action_totals[action] - target_share) ** 2
+            return class_deviation, size_deviation
+
+        for position, key in enumerate(ordered_groups):
+            counts = group_counts[key]
+            size = len(groups[key])
+            empty_folds = [fold for fold, fold_size in enumerate(fold_sizes) if fold_size == 0]
+            remaining_groups = len(ordered_groups) - position
+            if empty_folds and remaining_groups <= len(empty_folds):
+                eligible_folds = empty_folds
+            elif position < self.n_folds:
+                eligible_folds = empty_folds
+            else:
+                eligible_folds = list(range(self.n_folds))
+
+            candidates: list[tuple[float, float, int, int]] = []
+            for fold in eligible_folds:
+                class_deviation, size_deviation = global_imbalance(fold, counts, size)
+                candidates.append((class_deviation, size_deviation, fold_sizes[fold], fold))
+            _, _, _, selected_fold = min(candidates)
+            group_to_fold[key] = selected_fold
+            fold_sizes[selected_fold] += size
+            for action in actions:
+                fold_counts[selected_fold][action] += counts[action]
+
+        assignments = [group_to_fold[row.group_id or row.unit_id] for row in rows]
+        for fold in range(self.n_folds):
+            held_indices = [index for index, assigned in enumerate(assignments) if assigned == fold]
+            if not held_indices:
+                raise RuntimeError("group-aware fold assignment produced an empty holdout fold")
+            train_actions = {
+                row.action for index, row in enumerate(rows) if assignments[index] != fold
+            }
+            if treatment not in train_actions or control not in train_actions:
+                raise ValueError(
+                    "group-aware folds leave a training split without treatment/control rows; "
+                    "reduce n_folds or provide more groups"
+                )
+        return assignments
 
     def _fold_assignments(
         self,
@@ -239,6 +417,9 @@ class CrossFittedDRLearner:
         treatment: Channel,
         control: Channel,
     ) -> list[int]:
+        if any(row.group_id is not None for row in rows):
+            return self._group_fold_assignments(rows, treatment, control)
+
         assignments = [-1] * len(rows)
         for action in (treatment, control):
             indices = [index for index, row in enumerate(rows) if row.action is action]
@@ -252,6 +433,12 @@ class CrossFittedDRLearner:
         if any(fold < 0 for fold in assignments):
             raise RuntimeError("failed to assign every treatment/control row to a fold")
         return assignments
+
+    def _new_outcome_model(self) -> Regressor:
+        return self.outcome_model_factory()
+
+    def _new_effect_model(self) -> Regressor:
+        return self.effect_model_factory()
 
     def fit(
         self,
@@ -271,7 +458,9 @@ class CrossFittedDRLearner:
 
         folds = self._fold_assignments(rows, treatment, control)
         pseudo_outcomes = [0.0] * len(rows)
-        supported = 0
+        strict_supported = 0
+        practical_supported = 0
+        clipped = 0
 
         for fold in range(self.n_folds):
             train = [row for index, row in enumerate(rows) if folds[index] != fold]
@@ -281,11 +470,11 @@ class CrossFittedDRLearner:
             if not treatment_train or not control_train:
                 raise ValueError("every training split must contain treatment and control rows")
 
-            treatment_model = RidgeRegressor(self.ridge).fit(
+            treatment_model = self._new_outcome_model().fit(
                 (row.features for row in treatment_train),
                 (row.outcome for row in treatment_train),
             )
-            control_model = RidgeRegressor(self.ridge).fit(
+            control_model = self._new_outcome_model().fit(
                 (row.features for row in control_train),
                 (row.outcome for row in control_train),
             )
@@ -300,9 +489,29 @@ class CrossFittedDRLearner:
                 if pair_probability <= 0.0:
                     raise ValueError("treatment/control propensity mass must be positive")
                 raw_e = p1 / pair_probability
-                if self.propensity_floor <= raw_e <= 1.0 - self.propensity_floor:
-                    supported += 1
-                e = max(self.propensity_floor, min(1.0 - self.propensity_floor, raw_e))
+                if not 0.0 < raw_e < 1.0:
+                    raise ValueError(
+                        "pairwise positivity violated: treatment and control must both have "
+                        "positive logging probability for every fitted record"
+                    )
+                strict_supported += 1
+
+                if self.practical_overlap_floor is not None and (
+                    self.practical_overlap_floor
+                    <= raw_e
+                    <= 1.0 - self.practical_overlap_floor
+                ):
+                    practical_supported += 1
+
+                e = raw_e
+                if self.propensity_clip_floor is not None:
+                    clipped_e = max(
+                        self.propensity_clip_floor,
+                        min(1.0 - self.propensity_clip_floor, raw_e),
+                    )
+                    if abs(clipped_e - raw_e) > 1e-15:
+                        clipped += 1
+                    e = clipped_e
 
                 if row.action is treatment:
                     pseudo_outcomes[index] = m1 - m0 + (row.outcome - m1) / e
@@ -313,7 +522,7 @@ class CrossFittedDRLearner:
         for fold in range(self.n_folds):
             train_indices = [index for index in range(len(rows)) if folds[index] != fold]
             held_indices = [index for index in range(len(rows)) if folds[index] == fold]
-            effect_fold_model = RidgeRegressor(self.ridge).fit(
+            effect_fold_model = self._new_effect_model().fit(
                 (rows[index].features for index in train_indices),
                 (pseudo_outcomes[index] for index in train_indices),
             )
@@ -335,7 +544,7 @@ class CrossFittedDRLearner:
             )
         )
 
-        effect_model = RidgeRegressor(self.ridge).fit(
+        effect_model = self._new_effect_model().fit(
             (row.features for row in rows),
             pseudo_outcomes,
         )
@@ -371,6 +580,11 @@ class CrossFittedDRLearner:
             max(0, ceil(len(training_distances) * self.support_quantile) - 1),
         )
         support_radius = max(1e-9, training_distances[radius_index])
+        practical_coverage = (
+            practical_supported / len(rows)
+            if self.practical_overlap_floor is not None
+            else None
+        )
 
         return FittedTreatmentEffect(
             treatment=treatment,
@@ -378,7 +592,9 @@ class CrossFittedDRLearner:
             model=effect_model,
             residual_scale=residual_scale,
             sample_size=len(rows),
-            overlap_coverage=supported / len(rows),
+            overlap_coverage=strict_supported / len(rows),
+            practical_overlap_coverage=practical_coverage,
+            propensity_clip_fraction=clipped / len(rows),
             feature_bounds=bounds,
             feature_center=center,
             feature_precision=precision,
