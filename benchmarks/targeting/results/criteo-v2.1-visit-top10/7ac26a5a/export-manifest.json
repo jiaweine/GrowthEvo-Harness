@@ -1,0 +1,38 @@
+{
+  "candidate_config_fingerprint": "e10eb2fc6552b28109b67cfe075b55fd1d0e8f62",
+  "candidate_names": [
+    "s-lgbm",
+    "t-lgbm",
+    "x-lgbm",
+    "r-lgbm",
+    "dr-lgbm"
+  ],
+  "dataset_source": "huggingface:criteo/criteo-uplift@82811785048bb633de2d55c02bab4e57066e6423:criteo-research-uplift-v2.1.csv.gz:sha256:2716e1bf0fd157a93b5bf86924d9088419dfbac2022c6cd90030220634f616dc",
+  "forbidden_feature_columns": [
+    "exposure"
+  ],
+  "holdout_rows": 3495070,
+  "holdout_score_policy": "winner-only-after-validation-freeze",
+  "lightgbm_version": "4.7.0",
+  "numpy_version": "1.26.4",
+  "outcome_definition": "visit",
+  "pandas_version": "2.3.3",
+  "propensity_protocol": "pooled-training-assignment-share-v1",
+  "schema_version": "growthevo.targeting-export.v2",
+  "score_protocol": "fixed-lightgbm-4.7.0-cate-v1",
+  "sklearn_version": "1.9.0",
+  "source_bytes": 311422618,
+  "source_commit": "82811785048bb633de2d55c02bab4e57066e6423",
+  "source_rows": 13979592,
+  "source_sha256": "2716e1bf0fd157a93b5bf86924d9088419dfbac2022c6cd90030220634f616dc",
+  "source_url": "https://huggingface.co/datasets/criteo/criteo-uplift/resolve/82811785048bb633de2d55c02bab4e57066e6423/criteo-research-uplift-v2.1.csv.gz?download=true",
+  "split_seed": 20260830,
+  "split_strategy": "splitmix64_source_row_v1",
+  "training_fraction": 0.5,
+  "training_rows": 6990168,
+  "training_treatment_share": 0.8501983071079264,
+  "treatment": "ads",
+  "validation_fraction": 0.25,
+  "validation_rows": 3494354,
+  "validation_treatment_share": 0.8499239058206467
+}
