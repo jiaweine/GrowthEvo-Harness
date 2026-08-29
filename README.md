@@ -517,7 +517,8 @@ Synthetic / deterministic regression checks validate implementation semantics; t
 算法版本选择：`docs/FRONTIER_ALGORITHM_STACK.md`  
 真实数据协议：`docs/REAL_WORLD_BENCHMARKS.md`  
 OBD workflow：`docs/OBD_ISOLATED_EXPORT.md`  
-Locked OPE schema：`docs/LOCKED_OPE_RUN.md`
+Locked OPE schema：`docs/LOCKED_OPE_RUN.md`  
+Locked targeting schema：`docs/LOCKED_TARGETING_RUN.md`
 
 ---
 
