@@ -2,6 +2,19 @@
 
 from .criteo import CriteoUpliftData, load_criteo_uplift
 from .kuairand_features import load_kuairand_user_features, load_kuairand_video_features
+from .locked_evaluation import (
+    LockedBenchmarkArtifact,
+    LockedOPEProtocol,
+    LockedTargetingProtocol,
+    OPECandidate,
+    OPEHoldoutResult,
+    OPEValidationScore,
+    TargetingHoldoutResult,
+    TargetingValidationScore,
+    ope_records_fingerprint,
+    targeting_evidence_fingerprint,
+    treatment_records_fingerprint,
+)
 from .offline_rl import (
     HistorySummary,
     OfflineRLDataset,
@@ -49,6 +62,12 @@ __all__ = [
     "KuaiRandHistory",
     "KuaiRandInteraction",
     "KuaiRandPlannerRecord",
+    "LockedBenchmarkArtifact",
+    "LockedOPEProtocol",
+    "LockedTargetingProtocol",
+    "OPECandidate",
+    "OPEHoldoutResult",
+    "OPEValidationScore",
     "OfflineRLDataset",
     "OfflineRLTransition",
     "OpenBanditInteraction",
@@ -56,6 +75,8 @@ __all__ = [
     "RandomizedTargetingResult",
     "SyntheticGrowthSample",
     "TargetingBootstrapResult",
+    "TargetingHoldoutResult",
+    "TargetingValidationScore",
     "bootstrap_randomized_targeting",
     "default_kuairand_state_builder",
     "default_planner_observation",
@@ -73,7 +94,10 @@ __all__ = [
     "load_open_bandit",
     "load_open_bandit_item_context",
     "make_synthetic_growth_bandit",
+    "ope_records_fingerprint",
     "open_bandit_to_ope",
     "oracle_policy_value",
     "ordered_split",
+    "targeting_evidence_fingerprint",
+    "treatment_records_fingerprint",
 ]
