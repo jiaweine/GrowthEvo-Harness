@@ -23,6 +23,12 @@ dev = [
 obd = [
   "sb-obp==0.5.10; python_version < '3.13'",
 ]
+criteo = [
+  "lightgbm==4.7.0",
+  "numpy==1.26.4",
+  "pandas==2.3.3",
+  "scikit-learn==1.9.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["growthevo*"]
