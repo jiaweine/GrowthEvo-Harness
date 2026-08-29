@@ -1,33 +1,36 @@
 name: Full OBD Research Validation
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      experiment_reason:
+        description: "New preregistered experiment or explicit evidence rerun reason"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: full-obd-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: full-obd-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   full-obd:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'bench/obd-full-streaming'
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
-      EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      EXPECTED_GIT_SHA: ${{ github.sha }}
+      EXPERIMENT_REASON: ${{ inputs.experiment_reason }}
 
     steps:
       - name: Checkout exact evidence commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -35,6 +38,8 @@ jobs:
       - name: Inspect initial runner resources
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
+          test -n "$EXPERIMENT_REASON"
+          printf 'experiment_reason=%s\n' "$EXPERIMENT_REASON"
           df -h
           free -h
 
@@ -102,7 +107,7 @@ jobs:
 
       - name: Upload full OBD research evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: obd-full-preregistered-evidence
           if-no-files-found: warn
