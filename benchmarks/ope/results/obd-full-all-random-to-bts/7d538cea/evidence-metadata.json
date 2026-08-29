@@ -1,0 +1,19 @@
+{
+  "schema_version": "growthevo.obd-evidence-record.v1",
+  "evidence_commit_sha": "7d538cea9698b5f0a48c585eed85e3ae526e5af6",
+  "main_merge_sha": "075124fc11cfa8181715f27338afe9fef54b4af9",
+  "workflow_run_id": 33254728121,
+  "workflow_artifact_id": 9715504478,
+  "workflow_artifact_digest": "sha256:b7dbd5afbb331de40b73b5657f7ccdd753ac4c894921dc08dc5d6373c082cc83",
+  "experiment_plan_fingerprint": "4466cd81502843a349e52fc00f1e834e1a28b98b",
+  "export_manifest_fingerprint": "9c377a8a69bd158c477c1f789f0e57b150abdbfa",
+  "protocol_fingerprint": "b9206804bde8752a88b2a03bbda4b648f648f891",
+  "tuning_fingerprint": "3f4698265dc1e1f77003788e8b48e2347b826cf5",
+  "test_fingerprint": "d93bdd9361bd9d5d7d6e8552f67b0134600474c1",
+  "files": {
+    "locked-result.json": "sha256:2cac986d25877d079f5d094799ce89098892977dca4f78a266388cf5ea918317",
+    "export-manifest.json": "sha256:a030b5e529436eef87c38a90c7f57743efe95b3bf629d7345c9c4ea35ece6ff4",
+    "source-provenance.json": "sha256:7453e6c759cc2d78b227708392476d164c556872b7899a4d996efc520ab6309b",
+    "environment.txt": "sha256:9458c23ad75a88a3df5856204a2c487d82dcb9f623f2adeac268ab87ad51eaea"
+  }
+}
