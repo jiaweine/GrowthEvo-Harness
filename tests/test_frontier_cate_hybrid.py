@@ -181,16 +181,23 @@ def test_nuisance_and_effect_backends_are_pluggable() -> None:
 
 
 def test_exact_pairwise_positivity_violation_fails_closed() -> None:
-    rows = [
-        LoggedTreatmentRecord(
-            unit_id=f"u-{index}",
-            features=(float(index),),
-            action=Channel.ADS if index % 2 == 0 else Channel.NO_TREATMENT,
-            outcome=float(index % 2),
-            action_propensities={Channel.ADS: 1.0, Channel.NO_TREATMENT: 0.0},
+    rows = []
+    for index in range(6):
+        action = Channel.ADS if index % 2 == 0 else Channel.NO_TREATMENT
+        propensities = (
+            {Channel.ADS: 1.0, Channel.NO_TREATMENT: 0.0}
+            if action is Channel.ADS
+            else {Channel.ADS: 0.0, Channel.NO_TREATMENT: 1.0}
         )
-        for index in range(6)
-    ]
+        rows.append(
+            LoggedTreatmentRecord(
+                unit_id=f"u-{index}",
+                features=(float(index),),
+                action=action,
+                outcome=float(index % 2),
+                action_propensities=propensities,
+            )
+        )
 
     with pytest.raises(ValueError, match="positivity violated"):
         CrossFittedDRLearner(n_folds=2).fit(rows, treatment=Channel.ADS)
