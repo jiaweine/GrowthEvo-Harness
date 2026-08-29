@@ -336,17 +336,17 @@ open holdout once
 
 ### Criteo-style targeting
 
-`TargetingExperimentPlan` 对外部 CATE/model scores 锁定：
+`TargetingExperimentPlan` v2 在 validation 打开前锁定：
 
-- dataset source；
-- outcome；
-- split；
-- treatment；
-- selected top fraction；
+- dataset source 与 outcome；
+- train / validation / final holdout split、split seed；
+- treatment 与 selected top fraction；
+- propensity protocol；
 - score-generation protocol；
-- complete candidate-name set。
+- complete candidate-name set；
+- candidate-config fingerprint。
 
-实际 score 数值仍进入 evidence fingerprint，因此候选名不变但模型预测变了，也不是同一次 evidence。
+实际 score 数值仍进入 evidence fingerprint，因此候选名不变但模型预测变了，也不是同一次 evidence。Full Criteo runner 只在 training split 拟合候选；validation 选出赢家后，第二遍读取数据并且只给赢家生成 final holdout score。
 
 ### Fingerprint chain
 
@@ -354,6 +354,7 @@ open holdout once
 
 ```text
 experiment plan
++ candidate config
 + realized export manifest
 + validation rows/predictions
 + holdout rows/frozen predictions
@@ -446,6 +447,40 @@ A_t
 
 ## Real-world benchmark status
 
+### Full Criteo Uplift v2.1 — current locked targeting evidence
+
+当前可审计的 Criteo full-data targeting result 来自预注册 `visit` / top-10% 实验，evidence commit 为 `7ac26a5aebde2c70e1b43264b89f08dddcff0245`。完整证据保存在 [`benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/`](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md)。
+
+五个候选 `S / T / X / R / DR + LightGBM 4.7.0` 在 50% training split 上固定训练；25% randomized validation 只用于选赢家；只有赢家被允许看到 25% final holdout。`exposure` 是 post-assignment 字段，明确禁止作为 treatment 或 feature。
+
+| Metric | Locked result |
+| --- | ---: |
+| Source rows | 13,979,592 |
+| Training / validation / holdout rows | `6,990,168 / 3,494,354 / 3,495,070` |
+| Predeclared CATE candidates | 5 |
+| Validation winner | **S-Learner** |
+| Validation population increment | `0.0096579179` |
+| Final treat-none value | `0.0381058865` |
+| Final locked-policy value | `0.0474849889` |
+| **Final population incremental visit value** | **`0.0093791024` (+0.93791 pp)** |
+| Population 95% CI | **`[0.0089584420, 0.0097997628]`** |
+| **Selected top-10% incremental visit value** | **`0.0937910242` (+9.37910 pp)** |
+| Selected-group 95% CI | **`[0.0895844204, 0.0979976281]`** |
+
+Validation ranking by population incremental visit value was `S > X > DR > R > T`. S-Learner 是这个**冻结 validation cohort** 上的赢家；这不表示 S-Learner 在其他数据集上普遍优于 DR/R/X。这里遵守的是“locked validation evidence 优先于 estimator novelty”。
+
+`0.0093791024` 是相对 treat-none 的**绝对 population visit-probability 增量**，不是相对百分比；对应约 +0.93791 个百分点。top-10% 的 `0.0937910242` 也是绝对概率增量，对应约 +9.37910 个百分点。locked policy value 相对 treat-none 约高 24.61%，但这个比率与历史 `Uplift@10% +6.8%` 不是同一指标，不能直接比较。
+
+复现该 evidence commit：
+
+```bash
+git checkout 7ac26a5aebde2c70e1b43264b89f08dddcff0245
+pip install -e '.[criteo]'
+python scripts/run_criteo_full_locked.py
+```
+
+精确环境以 evidence 目录中的 `environment.txt` 为准。
+
 ### Small Open Bandit Dataset
 
 PR CI 使用**真实外部 OBD**，并 pin 到：
@@ -495,7 +530,7 @@ python scripts/run_obd_full_locked.py --data-root /path/to/open_bandit_dataset
 
 ### Historical records
 
-旧的 Criteo `+6.8%` / Open Bandit `-8.4%` 属于 **pre-locked legacy evaluation records**。它们的协议与当前 full-data locked result 不同，因此不与 `9.20045%` 做数值优劣比较，也不用于选择当前 estimator。
+旧的 Criteo `+6.8%` / Open Bandit `-8.4%` 属于 **pre-locked legacy evaluation records**。它们的协议与当前 locked results 不同，因此既不与 Criteo `+0.93791 pp / +9.37910 pp` 直接比较，也不与 OBD `9.20045%` 直接比较，更不用于选择当前 estimator / model。
 
 ---
 
@@ -527,6 +562,7 @@ Synthetic / deterministic regression checks validate implementation semantics; t
 | Targeting preregistration | `growthevo/bench/targeting_experiment_plan.py` |
 | Locked OPE CLI | `growthevo/bench/locked_ope_cli.py` |
 | Locked targeting CLI | `growthevo/bench/locked_targeting_cli.py` |
+| Full Criteo runner | `scripts/run_criteo_full_locked.py` |
 | Full OBD runner | `scripts/run_obd_full_locked.py` |
 | One-sided conformal | `growthevo/rl/conformal.py` |
 | Risk-sensitive MPC / CVaR | `growthevo/rl/model_based.py` |
@@ -553,19 +589,26 @@ pip install -e '.[dev]'
 pytest
 ```
 
+Full Criteo research bridge:
+
+```bash
+pip install -e '.[criteo]'
+python scripts/run_criteo_full_locked.py
+```
+
 Real OBD bridge:
 
 ```bash
 pip install -e '.[obd]'
 ```
 
-Full research benchmark:
+Full OBD research benchmark:
 
 ```bash
 python scripts/run_obd_full_locked.py
 ```
 
-Generated full-data caches and raw validation/holdout JSONL are gitignored. Compact accepted evidence is persisted under `benchmarks/ope/results/`; archive the final plan, source provenance, manifest, environment and locked artifact, but do not commit the large third-party OBD files.
+Generated full-data caches and raw score/evidence arrays are gitignored. Compact accepted evidence is persisted under `benchmarks/targeting/results/` and `benchmarks/ope/results/`; archive the final plan, source provenance, manifest, environment and locked artifact, but do not commit the large third-party datasets.
 
 ---
 
@@ -580,7 +623,7 @@ Generated full-data caches and raw validation/holdout JSONL are gitignored. Comp
 - Long-horizon rollout ranks risk; it does not replace causal estimation.
 - `NO_TREATMENT` remains available whenever positive treatment evidence is insufficient.
 - Small OBD is integration evidence, not a substitute for the official full research release.
-- A changed data source, split, Q protocol, candidate grid or evidence gate is a new experiment plan, not the same benchmark run.
+- A changed data source, split, propensity/Q protocol, candidate grid/config or evidence gate is a new experiment plan, not the same benchmark run.
 
 ---
 
