@@ -2,7 +2,7 @@
 
 GrowthEvo uses different public datasets for different causal questions. A dataset is not treated as proof of components it cannot identify, and dataset plumbing is kept separate from headline experimental evidence.
 
-> **Evidence boundary:** the repository contains dataset adapters, deterministic split utilities, locked holdout protocols, offline-RL export contracts and planner-sequence export. It does not vendor the large third-party datasets. A real-world number may be promoted into the README only when it has a reproducible locked benchmark artifact tying the result to code, protocol and evaluation evidence.
+> **Promotion boundary:** a real-world number may enter the README only when a fresh evaluation produces a preregistered locked artifact tying the result to code, upstream protocol, realized data/model outputs, validation selection, evidence diagnostics, and a single final holdout reveal.
 
 ## Benchmark matrix
 
@@ -15,169 +15,204 @@ GrowthEvo uses different public datasets for different causal questions. A datas
 
 ---
 
-## Locked holdout rule
+## Evidence lifecycle
 
-`growthevo/bench/locked_evaluation.py` is the canonical promotion path for Criteo targeting and Open Bandit OPE results.
+A promotable real-world experiment follows this order:
 
-The rule is deliberately stricter than “we used train/test”:
+```text
+pre-register upstream protocol
+        ↓
+materialize model/policy outputs
+        ↓
+validate realized manifest against plan
+        ↓
+open validation evidence
+        ↓
+pass evidence/support gates where applicable
+        ↓
+select and freeze one candidate
+        ↓
+open final holdout once
+        ↓
+emit locked artifact with all fingerprints
+```
 
-1. all estimator/model candidates and tuning hyperparameters are declared before final evaluation;
-2. candidates are compared only on validation evidence;
-3. the winning candidate is frozen before test records are accepted;
-4. stable row identities must be disjoint between tuning and test — even partial overlap fails closed;
-5. the protocol object exposes only one holdout reveal;
-6. OPE fingerprints bind rewards, propensities, target-policy probabilities, Q predictions and cluster identity;
-7. targeting fingerprints bind randomized rows **and model scores**, so changing model predictions changes the evidence identity;
-8. the emitted `LockedBenchmarkArtifact` records commit SHA, protocol fingerprint, tuning fingerprint, test fingerprint, selected candidate and final metrics.
+The important property is **ordering**. If plan/runtime/manifest agreement fails, validation must not be read. If validation fails an evidence gate, a new cohort cannot be substituted. After a winner is frozen, only that winner reaches final holdout.
 
-The in-memory single-reveal guard is not presented as cryptographic protection against a researcher creating a fresh Python object. The durable protection is the committed protocol plus evidence fingerprints and the rule that only the pre-selected candidate's test artifact is admissible as headline evidence.
+### Durable identities
 
-### Why this matters
+The artifact chain binds different layers separately:
 
-Running IPS, DR, β*-IPS, SWITCH-DR, DR-OS and Meta-OPE on the final test reference and then reporting whichever happens to have the smallest error is **test-set estimator shopping**. The same problem occurs when many CATE models are ranked by final Criteo uplift. A better estimator can only be claimed from a protocol that selected it without observing its final-test performance.
+- experiment-plan fingerprint: intended upstream protocol before evidence;
+- export-manifest fingerprint: realized data/model-generation configuration;
+- tuning fingerprint: actual validation rows and predictions;
+- test fingerprint: actual holdout rows and frozen predictions;
+- protocol fingerprint: candidate/evidence-gate/selection contract, bound to the experiment plan;
+- commit SHA: code identity.
+
+This is not claimed to be cryptographic enforcement against a researcher deliberately forking the repository and inventing a new experiment. It is an auditable definition of which run is admissible as the result of a named protocol.
 
 ---
 
-## What is implemented on `main`
+## Open Bandit Dataset
 
-### Criteo Uplift
+### Data and adapter semantics
 
-`growthevo/bench/criteo.py` provides a randomized-treatment loader with explicit propensity provenance.
+`growthevo/bench/real_world.py` preserves logged action probabilities from `propensity_score` (or the historical `action_prob` alias). `open_bandit_to_ope()` does not replace observed propensities and only accepts cluster/record identity semantics supplied by the experiment.
 
-Key invariants:
-
-- `treatment` defines assignment; post-assignment `exposure` is never substituted for treatment;
-- callers may provide the experiment design propensity explicitly;
-- if no design propensity is supplied, the empirical loaded-arm share is marked as an `empirical` fallback rather than silently presented as a design fact;
-- row identities are content-derived so deterministic splits remain stable under source-file reordering;
-- exact duplicate rows receive deterministic occurrence suffixes.
-
-`evaluate_randomized_targeting()` evaluates a top-score treatment policy with randomized inverse weighting. `bootstrap_randomized_targeting()` provides treatment/control-stratified bootstrap intervals.
-
-For model selection, `LockedTargetingProtocol` compares candidate score vectors on validation randomized uplift, freezes the winner, and accepts only that winner's score vector for the untouched test split.
-
-### Open Bandit Dataset
-
-`growthevo/bench/real_world.py` loads Open Bandit interactions while preserving the logged action probability from `propensity_score` or the historical `action_prob` alias.
-
-`growthevo/bench/open_bandit_features.py` keeps anonymized item features in their raw representation instead of inventing ordinal semantics.
-
-`open_bandit_to_ope()` maps interactions into the current `LoggedBanditRecord` contract without replacing observed propensities. Experiment-defined cluster IDs and stable record identities can be propagated into the OPE layer; the adapter never guesses either semantic.
-
-The current OPE panel includes:
+The OPE panel exposes:
 
 - Direct Method;
 - IPS;
-- self-normalized IPS;
+- SNIPS;
 - Doubly Robust;
 - SWITCH-DR;
-- optimistic DR shrinkage (DR-OS);
-- cross-fitted β*-IPS as the flagship additive-control-variate estimator;
+- DR-OS;
+- cross-fitted β*-IPS as the default efficient estimator;
 - same-sample β*-IPS only as a diagnostic;
-- Meta-OPE/BLUE-style correlated estimator combination as an efficiency diagnostic;
-- estimator-specific IID or protocol-defined cluster-robust standard errors;
+- Meta-OPE/BLUE-style combination as an opt-in efficiency diagnostic/candidate;
+- IID or protocol-defined cluster-robust standard errors;
 - ESS / ESS ratio;
 - target-policy-mass support coverage;
-- maximum importance weight, mean weight, normalization error and weight coefficient of variation.
+- maximum/mean importance weight, normalization error and weight CV.
 
-`LockedOPEProtocol` allows SWITCH thresholds, DR-OS shrinkage values, β cross-fit folds and estimator choice to compete on a validation cohort with a legitimate reference value. Only the frozen winner is evaluated against final holdout reference data.
+### Evidence gate before estimator ranking
 
-### KuaiRand
+`EvidenceGatedOPEProtocol` applies predeclared support/ESS requirements **before** validation error ranking. A point estimate that accidentally matches the reference does not qualify when its logged evidence is inadequate.
 
-`load_kuairand()` preserves sequential interactions and records `is_rand` only as intervention provenance. `is_rand` is **not** converted into an action propensity because it does not provide the probability of the logged item or the full decision set.
+The current checked-in OBD protocols require:
 
-User/video feature loaders preserve mixed numeric/categorical metadata and support filtering to entities present in an experiment split.
+- support coverage `>= 0.95`;
+- ESS ratio `>= 0.05`;
+- positive supported importance mass.
 
-Two mainline export paths are implemented:
+These are benchmark-specific acceptance thresholds, not universal statistical constants.
 
-1. `kuairand_to_offline_rl()` produces backend-neutral `(state, action, reward, next_state)` transitions.
-2. `kuairand_to_planner_records()` / `kuairand_to_planner_transitions()` produce current `PlannerTransition`-compatible sequences for the trajectory trainer.
+### Pre-registered OBD plans
 
-Both paths require reward scalarization to be explicit. Candidate action sets are exported only when the experiment protocol can provide a defensible set that contains the logged action.
+The repository contains two explicit plans:
 
-### Offline-RL transition semantics
+- `benchmarks/ope/obd-small-all-random-to-bts.v1.json` — pinned real-data integration protocol;
+- `benchmarks/ope/obd-full-all-random-to-bts.v1.json` — research-scale promotion protocol.
 
-Artificial sequence segments are **truncations, not environment terminals**. The offline-RL export therefore keeps Bellman bootstrap available across an export/window boundary when a valid `next_state` exists.
+`OPEExperimentPlan` freezes dataset source, campaign, policy direction, reward, split, Q backend/folds, BernoulliTS simulation count, seed, support floor, evidence gates, and complete candidate grid.
 
-Stable user IDs, random-intervention provenance and raw feedback remain metadata by default rather than policy-state features. This prevents a policy from exploiting logging mechanism details that would not normally exist at deployment time.
+The small CI source is pinned to:
 
-### Planner-sequence semantics
+```text
+sb-ai-lab/sb-obp@1c6d14677ec6f06094a2f8886a1158bab99c571e
+```
 
-A real KuaiRand user remains one planner trajectory with a globally increasing `step_index`.
+The full plan targets the official ZOZO Research Open Bandit Dataset release. The full dataset is not downloaded on every PR because it contains roughly 26M impressions; use `scripts/run_obd_full_locked.py` for the research run.
 
-Optional export segments are metadata only. A window boundary does **not** automatically become `PlannerTransition.credit_boundary`, because the current `TrajectoryTrainerAdapter` uses `credit_boundary` to zero both bootstrap and recursive GAE propagation.
-
-Only an explicit experiment `credit_boundary_predicate` may mark a genuine dynamics discontinuity. Tests verify both cases:
-
-- ordinary export windowing leaves trainer advantages unchanged;
-- an explicit dynamics boundary stops GAE credit propagation.
+See `docs/OBD_ISOLATED_EXPORT.md` for the complete workflow.
 
 ---
 
-## Split protocol
+## Criteo randomized targeting
 
-Use `growthevo/bench/splits.py` rather than source-file position as an implicit split rule.
+`growthevo/bench/criteo.py` treats randomized `treatment` as assignment and never substitutes post-assignment `exposure`. Propensity provenance is explicit; stable content-derived row identity supports deterministic disjoint splits.
+
+`evaluate_randomized_targeting()` measures a top-score treatment policy under randomized inverse weighting. `LockedTargetingProtocol` selects a candidate score vector on validation and accepts only the frozen winner on final holdout.
+
+### Targeting preregistration
+
+`TargetingExperimentPlan` adds the missing upstream layer for externally produced CATE/model scores. It freezes:
+
+- benchmark and dataset identity;
+- dataset source;
+- outcome definition;
+- split strategy / validation fraction;
+- treatment arm;
+- selected top fraction;
+- score-generation protocol identifier;
+- full candidate-name set.
+
+A companion `growthevo.targeting-export.v1` manifest must match the plan before validation is opened. The actual score values are then bound by the targeting evidence fingerprint, so changing model predictions changes the evidence identity even when candidate names stay the same.
+
+This is backend-neutral on purpose: high-performance external LightGBM, causal forest, EconML/CausalML, or neural uplift pipelines can provide scores without becoming hidden runtime dependencies. Their exact score-generation recipe belongs in the preregistered `score_protocol` and external experiment record.
+
+---
+
+## KuaiRand
+
+`load_kuairand()` preserves sequential interactions and records `is_rand` only as intervention provenance. `is_rand` is **not** converted into an action propensity because it does not provide the probability of the logged item or full candidate set.
+
+Two mainline export paths remain available:
+
+1. `kuairand_to_offline_rl()` → backend-neutral `(state, action, reward, next_state)` transitions;
+2. `kuairand_to_planner_records()` / `kuairand_to_planner_transitions()` → current planner/GAE sequences.
+
+Artificial export windows are truncations, not environment terminals, and do not automatically become planner credit boundaries. Only an explicit dynamics-boundary predicate can stop bootstrap/GAE propagation.
+
+KuaiRand is therefore a sequential/offline-RL integration benchmark, not an excuse to fabricate IPS/OPE propensity evidence.
+
+---
+
+## Split rules
 
 ### Criteo
 
-- use stable row identity;
-- stratify by a pre-declared experiment factor such as treatment arm;
-- fit nuisance/CATE models only on training folds;
-- produce candidate scores on validation and select with `LockedTargetingProtocol`;
-- freeze the winner before any test score vector is evaluated;
-- report randomized targeting metrics once on the untouched test split;
-- bootstrap treatment and control observations separately for headline intervals.
+- stable row identity;
+- predeclared stratification/split logic;
+- nuisance/CATE fitting only on permitted training folds;
+- complete candidate score set on validation;
+- frozen winner before final score vector is accepted;
+- randomized final metric once on untouched holdout;
+- stratified bootstrap if headline intervals are reported.
 
 ### Open Bandit Dataset
 
-- preserve behavior-policy identity and logged propensities;
-- never estimate over the top of a supplied logged action probability;
-- use a validation policy/reference cohort to select estimator and hyperparameters;
-- keep final test reference hidden until `LockedOPEProtocol.evaluate_once()`;
-- provide stable `record_id` values for cross-fitting and evidence fingerprints;
-- provide `cluster_id` only when the experiment has a defensible repeated-unit/campaign/time cluster definition;
-- report point estimates together with ESS, support and importance-weight tail diagnostics.
+- preserve policy identity and logged propensity;
+- paired chronological validation/final windows as defined by the checked-in GrowthEvo plan;
+- independently cross-fitted Q predictions inside validation and holdout windows;
+- stable `record_id` values;
+- `cluster_id` only when a defensible repeated-unit/block definition exists;
+- estimator ranking only after support/ESS evidence gates;
+- one frozen final-holdout estimator.
 
 ### KuaiRand
 
-- prefer chronological splits for future-policy questions;
-- preserve each user's temporal ordering;
-- current feedback may affect reward and the **next** state, never the current state;
-- fix candidate-set generation across compared offline-RL methods;
-- keep random-intervention analyses separate from unsupported IPS claims.
+- chronological ordering for future-policy questions;
+- current feedback may affect reward and next state, never current state;
+- candidate-set generation fixed across compared offline-RL methods;
+- random-intervention analyses kept separate from unsupported propensity claims.
 
 ---
 
-## Recommended external baselines
+## External algorithm backends
 
-The repository intentionally stops at backend-neutral training contracts for several large research stacks. Paper-facing experiments can plug in:
+The repository intentionally keeps heavy research stacks optional. Paper-facing experiments may plug in:
 
-- Behavior Cloning;
-- Conservative Q-Learning (CQL);
-- Implicit Q-Learning (IQL);
-- Decision Transformer or another sequence-model baseline;
-- external nonlinear CATE learners such as causal forests, EconML/CausalML learners or neural uplift models.
+- CQL / IQL / Behavior Cloning;
+- Decision Transformer or another sequence baseline;
+- causal forests;
+- EconML / CausalML meta-learners;
+- gradient-boosted or neural uplift models.
 
-These are comparison/training backends, not hidden dependencies of the reference runtime.
+A backend is not called “better” because it is newer. It must win under a preregistered validation protocol and then retain acceptable untouched holdout performance/support.
 
 ---
 
 ## Reporting checklist
 
-For any result promoted beyond a smoke test, record:
+For any result promoted beyond integration smoke, archive:
 
-- exact dataset release and source file identity;
-- immutable train/validation/test split definition;
-- stable row identities with zero validation/test overlap;
+- experiment-plan JSON and fingerprint;
+- exact dataset release/source identity;
+- realized export manifest and fingerprint;
+- immutable split definition;
+- stable row IDs with zero validation/test overlap;
 - propensity provenance;
-- reward definition and candidate-set construction;
-- complete candidate set and hyperparameter grid fixed before final test;
+- reward/outcome definition;
+- Q/model/score-generation protocol;
+- complete candidate set and hyperparameter grid fixed before validation selection;
 - validation selection metric;
-- final selected candidate only on test;
-- random seed(s);
+- evidence-gate thresholds and observed diagnostics;
+- final frozen candidate only on holdout;
+- random seeds;
 - point estimate and uncertainty;
-- support/overlap diagnostics;
 - commit SHA;
-- protocol, tuning-evidence and test-evidence fingerprints from `LockedBenchmarkArtifact`.
+- tuning/test/protocol fingerprints from `LockedBenchmarkArtifact`.
 
-Do not replace missing real-world evidence with a synthetic proxy. If a dataset cannot validate a component, mark that component as not identified by that dataset.
+Do not replace missing real-world evidence with a synthetic proxy, a small-data integration result, or a legacy pre-locked headline. If the required full-data artifact does not exist yet, the correct status is **not yet promoted**.
