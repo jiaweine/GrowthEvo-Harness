@@ -10,6 +10,7 @@ from growthevo.bench.locked_evaluation import (
     LockedTargetingProtocol,
     OPECandidate,
     ope_records_fingerprint,
+    targeting_evidence_fingerprint,
     treatment_records_fingerprint,
 )
 from growthevo.causal.dr_learner import LoggedTreatmentRecord
@@ -59,6 +60,14 @@ def _targeting_rows(prefix: str) -> tuple[LoggedTreatmentRecord, ...]:
     )
 
 
+def _good_scores() -> tuple[float, ...]:
+    return (8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0)
+
+
+def _bad_scores() -> tuple[float, ...]:
+    return tuple(reversed(_good_scores()))
+
+
 def test_locked_ope_selects_on_validation_then_reveals_only_winner_once() -> None:
     protocol = LockedOPEProtocol(
         [
@@ -87,6 +96,7 @@ def test_locked_ope_selects_on_validation_then_reveals_only_winner_once() -> Non
     payload = loads(artifact.to_json())
     assert payload["selected_candidate"] == "dm"
     assert payload["metrics"]["estimator"] == "direct_method"
+    assert payload["metrics"]["candidate_count"] == 3
     assert payload["tuning_fingerprint"] != payload["test_fingerprint"]
 
     with pytest.raises(RuntimeError, match="already been revealed"):
@@ -106,22 +116,27 @@ def test_locked_ope_fingerprint_is_order_invariant_but_evidence_sensitive() -> N
         ope_records_fingerprint((missing_identity, *rows[1:]))
 
 
-def test_locked_ope_rejects_test_equal_to_tuning_evidence() -> None:
-    rows = _ope_rows("same", target_q=0.6)
+def test_locked_ope_rejects_even_partial_tuning_test_overlap() -> None:
+    tuning = _ope_rows("tune", target_q=0.6)
+    test = list(_ope_rows("test", target_q=0.7))
+    test[0] = replace(test[0], record_id="tune-0")
+
     protocol = LockedOPEProtocol([OPECandidate("dm", "direct_method")])
-    protocol.tune(rows, reference_value=0.6)
+    protocol.tune(tuning, reference_value=0.6)
 
-    with pytest.raises(ValueError, match="must differ"):
-        protocol.evaluate_once(reversed(rows), reference_value=0.6)
+    with pytest.raises(ValueError, match="identities overlap"):
+        protocol.evaluate_once(test, reference_value=0.7)
 
 
-def test_ope_candidate_hyperparameters_are_predeclared_and_typed() -> None:
+def test_ope_candidate_hyperparameters_are_predeclared_and_finite() -> None:
     with pytest.raises(ValueError, match="switch_threshold"):
         OPECandidate("switch", "switch_dr")
     with pytest.raises(ValueError, match="only valid"):
         OPECandidate("ips", "ips", switch_threshold=5.0)
     with pytest.raises(ValueError, match="dr_os_lambda"):
         OPECandidate("shrink", "dr_os")
+    with pytest.raises(ValueError, match="finite"):
+        OPECandidate("switch", "switch_dr", switch_threshold=float("nan"))
 
     assert OPECandidate("switch", "switch_dr", switch_threshold=10.0).switch_threshold == 10.0
     assert OPECandidate("shrink", "dr_os", dr_os_lambda=2.0).dr_os_lambda == 2.0
@@ -133,8 +148,8 @@ def test_locked_targeting_selects_candidate_on_validation_and_test_is_single_win
     selected = protocol.tune(
         tuning,
         {
-            "good": (8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0),
-            "bad": (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0),
+            "good": _good_scores(),
+            "bad": _bad_scores(),
         },
     )
 
@@ -143,10 +158,7 @@ def test_locked_targeting_selects_candidate_on_validation_and_test_is_single_win
     assert by_name["good"].incremental_value_vs_none == pytest.approx(0.5)
     assert by_name["bad"].incremental_value_vs_none == pytest.approx(-0.5)
 
-    holdout = protocol.evaluate_once(
-        _targeting_rows("test"),
-        (8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0),
-    )
+    holdout = protocol.evaluate_once(_targeting_rows("test"), _good_scores())
     assert holdout.candidate_name == "good"
     assert holdout.result.incremental_value_vs_none == pytest.approx(0.5)
 
@@ -156,19 +168,49 @@ def test_locked_targeting_selects_candidate_on_validation_and_test_is_single_win
         dataset="criteo-test-fixture",
         commit_sha="cafebabe",
     )
-    assert loads(artifact.to_json())["metrics"]["incremental_value_vs_none"] == pytest.approx(0.5)
+    payload = loads(artifact.to_json())
+    assert payload["metrics"]["incremental_value_vs_none"] == pytest.approx(0.5)
+    assert payload["metrics"]["candidate_count"] == 2
 
     with pytest.raises(RuntimeError, match="already been revealed"):
-        protocol.evaluate_once(
-            _targeting_rows("test-2"),
-            (8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0),
-        )
+        protocol.evaluate_once(_targeting_rows("test-2"), _good_scores())
 
 
-def test_targeting_fingerprint_is_order_invariant_and_score_free() -> None:
+def test_targeting_fingerprints_bind_data_and_model_predictions() -> None:
     rows = _targeting_rows("stable")
-    assert treatment_records_fingerprint(rows) == treatment_records_fingerprint(reversed(rows))
+    reversed_rows = tuple(reversed(rows))
 
-    changed = list(rows)
-    changed[0] = replace(changed[0], outcome=0.0)
-    assert treatment_records_fingerprint(rows) != treatment_records_fingerprint(changed)
+    assert treatment_records_fingerprint(rows) == treatment_records_fingerprint(reversed_rows)
+    assert targeting_evidence_fingerprint(
+        rows,
+        {"model": _good_scores()},
+    ) == targeting_evidence_fingerprint(
+        reversed_rows,
+        {"model": tuple(reversed(_good_scores()))},
+    )
+
+    changed_scores = list(_good_scores())
+    changed_scores[0] = 8.5
+    assert targeting_evidence_fingerprint(
+        rows,
+        {"model": _good_scores()},
+    ) != targeting_evidence_fingerprint(
+        rows,
+        {"model": changed_scores},
+    )
+
+    changed_rows = list(rows)
+    changed_rows[0] = replace(changed_rows[0], outcome=0.0)
+    assert treatment_records_fingerprint(rows) != treatment_records_fingerprint(changed_rows)
+
+
+def test_locked_targeting_rejects_partial_tuning_test_overlap() -> None:
+    tuning = _targeting_rows("tune")
+    test = list(_targeting_rows("test"))
+    test[0] = replace(test[0], unit_id="tune-0")
+
+    protocol = LockedTargetingProtocol(selected_fraction=0.5)
+    protocol.tune(tuning, {"good": _good_scores()})
+
+    with pytest.raises(ValueError, match="identities overlap"):
+        protocol.evaluate_once(test, _good_scores())
