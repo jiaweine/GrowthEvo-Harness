@@ -516,7 +516,9 @@ def _target_reference_from_csv(
     ):
         if chunk.empty:
             continue
-        parsed = pd.to_datetime(chunk["timestamp"], utc=True, errors="raise")
+        parsed = pd.to_datetime(
+            chunk["timestamp"], format="ISO8601", utc=True, errors="raise"
+        )
         timestamps.append(parsed.astype("int64").to_numpy(copy=True))
         reward_chunk = chunk["click"].to_numpy(dtype=np.uint8, copy=True)
         if not np.isin(reward_chunk, [0, 1]).all():
