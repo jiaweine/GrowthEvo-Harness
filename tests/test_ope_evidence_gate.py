@@ -63,6 +63,9 @@ def test_default_gate_rejects_model_only_zero_importance_mass() -> None:
     assert protocol.selected_candidate is None
     assert protocol.validation_scores == ()
 
+    with pytest.raises(RuntimeError, match="validation split has already been revealed"):
+        protocol.tune(_well_supported("replacement-validation"), reference_value=0.3)
+
 
 def test_explicit_support_and_ess_thresholds_gate_before_error_selection() -> None:
     weak_support = tuple(
