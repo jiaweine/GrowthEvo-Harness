@@ -38,3 +38,71 @@ jobs:
 
       - name: Training demo smoke test
         run: python examples/training_demo.py
+
+  obd-integration:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install GrowthEvo with optional OBD bridge
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[obd]'
+
+      - name: Fetch public small Open Bandit Dataset
+        run: git clone --depth 1 https://github.com/sb-ai-lab/sb-obp.git /tmp/sb-obp
+
+      - name: Export real OBD random-to-BTS smoke evidence
+        run: |
+          python scripts/export_obd_locked_ope.py \
+            --campaign all \
+            --data-path /tmp/sb-obp/obd \
+            --output-dir /tmp/growthevo-obd \
+            --validation-fraction 0.5 \
+            --n-sim 200 \
+            --q-model zero \
+            --q-folds 3 \
+            --random-state 12345
+
+      - name: Run locked OPE selection on exported OBD evidence
+        run: |
+          python - <<'PY'
+          import json
+          import subprocess
+
+          root = "/tmp/growthevo-obd"
+          with open(f"{root}/export_manifest.json", encoding="utf-8") as handle:
+              manifest = json.load(handle)
+
+          subprocess.run(
+              [
+                  "growthevo-locked-ope",
+                  "--tuning-jsonl", f"{root}/validation.jsonl",
+                  "--test-jsonl", f"{root}/holdout.jsonl",
+                  "--candidates-json", f"{root}/ope_candidates.json",
+                  "--tuning-reference", str(manifest["validation_reference"]),
+                  "--test-reference", str(manifest["holdout_reference"]),
+                  "--benchmark", "open-bandit-ope-smoke",
+                  "--dataset", "obd-small-all-random-to-bts",
+                  "--commit-sha", "${{ github.event.pull_request.head.sha }}",
+                  "--output", f"{root}/locked-result.json",
+              ],
+              check=True,
+          )
+
+          with open(f"{root}/locked-result.json", encoding="utf-8") as handle:
+              result = json.load(handle)
+          artifact = result["artifact"]
+          assert artifact["selected_candidate"]
+          assert artifact["metrics"]["candidate_count"] >= 5
+          assert artifact["tuning_fingerprint"] != artifact["test_fingerprint"]
+          print(json.dumps(artifact, indent=2, sort_keys=True))
+          PY
