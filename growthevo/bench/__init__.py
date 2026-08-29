@@ -15,6 +15,7 @@ from .locked_evaluation import (
     targeting_evidence_fingerprint,
     treatment_records_fingerprint,
 )
+from .ope_evidence_gate import EvidenceGatedOPEProtocol, OPEEvidenceGate
 from .offline_rl import (
     HistorySummary,
     OfflineRLDataset,
@@ -57,6 +58,7 @@ __all__ = [
     "CriteoUpliftData",
     "DEFAULT_KUAIRAND_REWARD_WEIGHTS",
     "DatasetSplit",
+    "EvidenceGatedOPEProtocol",
     "GrowthAgentBench",
     "HistorySummary",
     "KuaiRandHistory",
@@ -66,6 +68,7 @@ __all__ = [
     "LockedOPEProtocol",
     "LockedTargetingProtocol",
     "OPECandidate",
+    "OPEEvidenceGate",
     "OPEHoldoutResult",
     "OPEValidationScore",
     "OfflineRLDataset",
