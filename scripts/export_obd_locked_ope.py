@@ -2,9 +2,10 @@ from __future__ import annotations
 
 """Export official Open Bandit Dataset evidence into GrowthEvo locked-OPE JSONL.
 
-This script is intentionally standalone. Run it in a separate environment that
-can install the official ``obp`` stack; it does not import GrowthEvo itself.
-The output contract is then consumed by GrowthEvo's Python 3.11+ locked runner.
+This script stays outside the core runtime dependency surface. It can run from a
+GrowthEvo environment installed with the optional ``obd`` extra, or from another
+environment exposing the compatible ``obp`` API. The output contract is consumed
+by GrowthEvo's locked OPE runner.
 """
 
 import argparse
@@ -147,21 +148,45 @@ def _record_ids(dataset: Any, behavior_policy: str, campaign: str) -> List[str]:
     return ids
 
 
+def _regression_model_kwargs(
+    *,
+    n_actions: int,
+    len_list: int,
+    action_context: Any,
+) -> Dict[str, Any]:
+    """Keep the OBP slate width explicit instead of relying on len_list=1 default."""
+
+    if n_actions <= 0:
+        raise ValueError("n_actions must be positive")
+    if len_list <= 0:
+        raise ValueError("len_list must be positive")
+    return {
+        "n_actions": n_actions,
+        "len_list": len_list,
+        "action_context": action_context,
+    }
+
+
 def _fit_q(
     feedback: Mapping[str, Any],
     *,
     n_actions: int,
+    len_list: int,
     action_context: Any,
     n_folds: int,
     random_state: int,
     q_model: str,
 ) -> Any:
-    import numpy as np
+    if len_list <= 0:
+        raise ValueError("len_list must be positive")
 
     if q_model == "zero":
-        positions = feedback.get("position")
-        len_list = 1 if positions is None else int(np.max(positions)) + 1
-        return np.zeros((int(feedback["n_rounds"]), n_actions, len_list), dtype=float)
+        import numpy as np
+
+        return np.zeros(
+            (int(feedback["n_rounds"]), n_actions, len_list),
+            dtype=float,
+        )
 
     if q_model != "logistic":
         raise ValueError("q_model must be either 'logistic' or 'zero'")
@@ -170,8 +195,11 @@ def _fit_q(
     from sklearn.linear_model import LogisticRegression
 
     model = RegressionModel(
-        n_actions=n_actions,
-        action_context=action_context,
+        **_regression_model_kwargs(
+            n_actions=n_actions,
+            len_list=len_list,
+            action_context=action_context,
+        ),
         base_model=LogisticRegression(
             C=1.0,
             max_iter=1000,
@@ -230,8 +258,9 @@ def export_obd_pair(
         from obp.policy import BernoulliTS
     except ImportError as exc:
         raise RuntimeError(
-            "This exporter must run in an isolated environment with the official "
-            "Open Bandit Pipeline installed."
+            "Open Bandit support is not installed. Install GrowthEvo with the "
+            "optional 'obd' extra or run this script in another environment "
+            "that exposes a compatible obp API."
         ) from exc
 
     dataset_kwargs: Dict[str, Any] = {"campaign": campaign}
@@ -277,6 +306,7 @@ def export_obd_pair(
         q_hat = _fit_q(
             feedback_slice,
             n_actions=behavior_dataset.n_actions,
+            len_list=behavior_dataset.len_list,
             action_context=behavior_feedback["action_context"],
             n_folds=q_folds,
             random_state=random_state + (0 if name == "validation" else 1),
@@ -314,6 +344,7 @@ def export_obd_pair(
         "n_sim": n_sim,
         "q_model": q_model,
         "q_folds": q_folds,
+        "slate_len": int(behavior_dataset.len_list),
         "random_state": random_state,
         "protocol_note": (
             "paired chronological windows: random-policy evidence and BTS on-policy "
