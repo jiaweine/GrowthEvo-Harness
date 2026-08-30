@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -13,6 +14,7 @@ SCRIPT = ROOT / "scripts" / "evaluate_beta_dr_dev.py"
 spec = importlib.util.spec_from_file_location("beta_dr_dev", SCRIPT)
 assert spec is not None and spec.loader is not None
 beta_dr_dev = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = beta_dr_dev
 spec.loader.exec_module(beta_dr_dev)
 
 
