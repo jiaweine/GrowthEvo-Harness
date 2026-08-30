@@ -94,13 +94,20 @@ jobs:
             --index-url https://download.pytorch.org/whl/cpu \
             --extra-index-url https://pypi.org/simple \
             'torch==2.13.0+cpu'
+          pip install --no-deps 'obp==0.4.1'
           pip install -e '.[obd]'
           python - <<'PY'
+          from importlib.metadata import version
           import torch
 
           assert torch.__version__ == "2.13.0+cpu"
           assert not torch.cuda.is_available()
-          print("torch", torch.__version__, "cuda_available=", torch.cuda.is_available())
+          assert version("obp") == "0.4.1"
+          print(
+              "torch", torch.__version__,
+              "cuda_available=", torch.cuda.is_available(),
+              "obp_distribution=", version("obp"),
+          )
           PY
 
       - name: Verify compact logistic Q matches OBP tensor predictions
