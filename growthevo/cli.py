@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
 
 from . import __version__
 
 
-def _dispatch(program: str, main: Callable[[], int]) -> int:
-    if sys.argv[1:] == ["--version"]:
-        print(f"{program} {__version__}")
-        return 0
-    return main()
+def _print_version_if_requested(program: str) -> bool:
+    if sys.argv[1:] != ["--version"]:
+        return False
+    print(f"{program} {__version__}")
+    return True
 
 
 def locked_ope_main() -> int:
-    if sys.argv[1:] == ["--version"]:
-        print(f"growthevo-locked-ope {__version__}")
+    if _print_version_if_requested("growthevo-locked-ope"):
         return 0
     from .bench.locked_ope_cli import main
 
@@ -23,8 +21,7 @@ def locked_ope_main() -> int:
 
 
 def locked_targeting_main() -> int:
-    if sys.argv[1:] == ["--version"]:
-        print(f"growthevo-locked-targeting {__version__}")
+    if _print_version_if_requested("growthevo-locked-targeting"):
         return 0
     from .bench.locked_targeting_cli import main
 
