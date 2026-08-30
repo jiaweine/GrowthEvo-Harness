@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use GrowthEvo-Harness in research, please cite this software."
+title: "GrowthEvo-Harness"
+type: software
+authors:
+  - name: "GrowthEvo contributors"
+repository-code: "https://github.com/jiaweine/GrowthEvo-Harness"
+abstract: >-
+  Causal reinforcement learning runtime and evaluation harness for incremental
+  user growth, with group-aware cross-fitted CATE, safe policy improvement,
+  off-policy evaluation, locked real-world benchmark protocols, conformal
+  verification, and risk-sensitive planning.
+keywords:
+  - causal inference
+  - reinforcement learning
+  - off-policy evaluation
+  - uplift modeling
+  - safe policy improvement
+  - research software
