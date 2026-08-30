@@ -1,0 +1,125 @@
+name: MRDR Q development validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  mrdr-q-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SB_OBP_COMMIT: 1c6d14677ec6f06094a2f8886a1158bab99c571e
+      OBD_DATASET_SOURCE: github:sb-ai-lab/sb-obp@1c6d14677ec6f06094a2f8886a1158bab99c571e:obd-small
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install GrowthEvo with optional OBD bridge
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[obd]'
+
+      - name: Fetch pinned public small Open Bandit Dataset
+        run: |
+          git init /tmp/sb-obp
+          git -C /tmp/sb-obp remote add origin https://github.com/sb-ai-lab/sb-obp.git
+          git -C /tmp/sb-obp fetch --depth 1 origin "$SB_OBP_COMMIT"
+          git -C /tmp/sb-obp checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/sb-obp rev-parse HEAD)" = "$SB_OBP_COMMIT"
+
+      - name: Export fixed normal-logistic validation evidence
+        run: |
+          python scripts/export_obd_locked_ope.py \
+            --campaign all \
+            --data-path /tmp/sb-obp/obd \
+            --dataset-source "$OBD_DATASET_SOURCE" \
+            --output-dir /tmp/growthevo-mrdr-q \
+            --validation-fraction 0.5 \
+            --n-sim 500 \
+            --q-model logistic \
+            --q-folds 2 \
+            --random-state 12345
+
+      - name: Seal workspace to validation-only evidence
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('/tmp/growthevo-mrdr-q')
+          manifest = json.loads((root / 'export_manifest.json').read_text(encoding='utf-8'))
+          assert manifest['schema_version'] == 'growthevo.obd-export.v3'
+          assert manifest['dataset_source'] == '${{ env.OBD_DATASET_SOURCE }}'
+          assert manifest['q_model'] == 'logistic'
+          assert manifest['q_folds'] == 2
+          assert manifest['n_sim'] == 500
+          (root / 'validation_reference.json').write_text(
+              json.dumps({'validation_reference': manifest['validation_reference']}, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          PY
+          rm /tmp/growthevo-mrdr-q/holdout.jsonl
+          rm /tmp/growthevo-mrdr-q/export_manifest.json
+          rm -rf /tmp/sb-obp/obd/bts
+          test ! -e /tmp/growthevo-mrdr-q/holdout.jsonl
+          test ! -e /tmp/growthevo-mrdr-q/export_manifest.json
+          test ! -e /tmp/sb-obp/obd/bts
+
+      - name: Compare normal and MRDR logistic Q
+        run: |
+          REFERENCE=$(python - <<'PY'
+          import json
+          with open('/tmp/growthevo-mrdr-q/validation_reference.json', encoding='utf-8') as handle:
+              print(json.load(handle)['validation_reference'])
+          PY
+          )
+          python scripts/evaluate_obd_mrdr_q_dev.py \
+            --baseline-validation-jsonl /tmp/growthevo-mrdr-q/validation.jsonl \
+            --data-path /tmp/sb-obp/obd \
+            --campaign all \
+            --reference "$REFERENCE" \
+            --n-sim 500 \
+            --random-state 12345 \
+            --output /tmp/growthevo-mrdr-q/mrdr-q-validation-result.json
+          python - <<'PY'
+          import json
+          import math
+
+          with open('/tmp/growthevo-mrdr-q/mrdr-q-validation-result.json', encoding='utf-8') as handle:
+              result = json.load(handle)
+          assert result['schema_version'] == 'growthevo.obd-mrdr-q-development.v1'
+          assert result['sample_size'] == 5000
+          assert result['fixed_logged_evidence_verified'] is True
+          assert result['normal_logistic']['winner'] == 'switch-5'
+          assert result['mrdr_logistic']['q_folds'] == 2
+          assert result['mrdr_logistic']['fitting_method'] == 'mrdr'
+          assert result['mrdr_logistic']['sample_weight_min'] >= 0.0
+          assert result['mrdr_logistic']['sample_weight_max'] >= result['mrdr_logistic']['sample_weight_mean']
+          assert math.isfinite(result['mrdr_logistic']['winner_absolute_error'])
+          assert math.isfinite(result['mrdr_logistic']['winner_standard_error'])
+          assert 0.0 <= result['mrdr_logistic']['q_hat_min'] <= 1.0
+          assert 0.0 <= result['mrdr_logistic']['q_hat_max'] <= 1.0
+          print(json.dumps(result, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload validation-only development result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mrdr-q-validation-development
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            /tmp/growthevo-mrdr-q/validation_reference.json
+            /tmp/growthevo-mrdr-q/mrdr-q-validation-result.json
