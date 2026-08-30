@@ -35,8 +35,8 @@ Documentation = "https://github.com/jiaweine/GrowthEvo-Harness/tree/main/docs"
 Changelog = "https://github.com/jiaweine/GrowthEvo-Harness/blob/main/CHANGELOG.md"
 
 [project.scripts]
-growthevo-locked-ope = "growthevo.bench.locked_ope_cli:main"
-growthevo-locked-targeting = "growthevo.bench.locked_targeting_cli:main"
+growthevo-locked-ope = "growthevo.cli:locked_ope_main"
+growthevo-locked-targeting = "growthevo.cli:locked_targeting_main"
 
 [project.optional-dependencies]
 dev = [
