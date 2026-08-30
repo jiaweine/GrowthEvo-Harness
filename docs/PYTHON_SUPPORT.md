@@ -33,6 +33,8 @@ The `criteo` optional dependency group remains an evidence-reproduction stack. C
 
 The maintained `sb-obp==0.5.10` bridge is explicitly marked for `python_version < '3.13'`. Small-OBD integration and accepted full OBD evidence therefore remain on the compatible research interpreter line rather than being forced onto the newest core Python.
 
+The normal small-OBD CI job preinstalls `torch==2.13.0+cpu` from the official PyTorch CPU index before installing the `obd` extra. The Open Bandit exporter and regression-model integration exercised by that job do not require CUDA, so this avoids downloading an unused GPU/CUDA stack while preserving the same `sb-obp` API and the existing Q-equivalence/locked-OPE checks. This is a CI resource optimization, not a change to the accepted full-data evidence environment or to the public `obd` extra contract.
+
 This distinction is deliberate: package/runtime modernization and scientific evidence reproduction have different stability requirements.
 
 ## New Python releases
