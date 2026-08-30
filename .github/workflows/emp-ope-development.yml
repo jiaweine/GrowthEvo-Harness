@@ -1,0 +1,97 @@
+name: EMP OPE development validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  emp-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SB_OBP_COMMIT: 1c6d14677ec6f06094a2f8886a1158bab99c571e
+      OBD_DATASET_SOURCE: github:sb-ai-lab/sb-obp@1c6d14677ec6f06094a2f8886a1158bab99c571e:obd-small
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install GrowthEvo with optional OBD bridge
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[obd]'
+
+      - name: Fetch pinned public small Open Bandit Dataset
+        run: |
+          git init /tmp/sb-obp
+          git -C /tmp/sb-obp remote add origin https://github.com/sb-ai-lab/sb-obp.git
+          git -C /tmp/sb-obp fetch --depth 1 origin "$SB_OBP_COMMIT"
+          git -C /tmp/sb-obp checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/sb-obp rev-parse HEAD)" = "$SB_OBP_COMMIT"
+
+      - name: Export fixed validation evidence
+        run: |
+          python scripts/export_obd_locked_ope.py \
+            --campaign all \
+            --data-path /tmp/sb-obp/obd \
+            --dataset-source "$OBD_DATASET_SOURCE" \
+            --output-dir /tmp/emp-obd \
+            --validation-fraction 0.5 \
+            --n-sim 500 \
+            --q-model logistic \
+            --q-folds 2 \
+            --random-state 12345
+
+      - name: Compare EMP against the current validation grid
+        run: |
+          python - <<'PY'
+          import json
+          import subprocess
+
+          root = "/tmp/emp-obd"
+          with open(f"{root}/export_manifest.json", encoding="utf-8") as handle:
+              manifest = json.load(handle)
+          subprocess.run(
+              [
+                  "python",
+                  "scripts/evaluate_emp_ope_dev.py",
+                  "--validation-jsonl", f"{root}/validation.jsonl",
+                  "--reference", str(manifest["validation_reference"]),
+                  "--output", f"{root}/emp_validation.json",
+              ],
+              check=True,
+          )
+          with open(f"{root}/emp_validation.json", encoding="utf-8") as handle:
+              result = json.load(handle)
+          assert result["schema_version"] == "growthevo.emp-ope-development.v1"
+          assert result["sample_size"] > 0
+          assert result["converged"] is True
+          assert result["min_denominator"] > 0.0
+          assert abs(result["weight_moment_residual"]) < 1e-7
+          assert abs(result["q_moment_residual"]) < 1e-7
+          assert result["reward_min"] <= result["estimate"] <= result["reward_max"]
+          assert len(result["existing_candidates"]) == 9
+          print(json.dumps(result, indent=2, sort_keys=True))
+          PY
+
+      - name: Remove holdout evidence from development workspace
+        run: rm -f /tmp/emp-obd/holdout.jsonl /tmp/emp-obd/ope_candidates.json
+
+      - name: Upload validation-only development result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: emp-ope-validation-development
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            /tmp/emp-obd/export_manifest.json
+            /tmp/emp-obd/emp_validation.json
