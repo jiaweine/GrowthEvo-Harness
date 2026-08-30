@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -13,6 +14,7 @@ SCRIPT = ROOT / "scripts" / "evaluate_sndr_dev.py"
 spec = importlib.util.spec_from_file_location("sndr_dev", SCRIPT)
 assert spec is not None and spec.loader is not None
 sndr_dev = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = sndr_dev
 spec.loader.exec_module(sndr_dev)
 
 
