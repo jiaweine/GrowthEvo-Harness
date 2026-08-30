@@ -117,8 +117,8 @@ def _cluster_standard_error(
 
 def sndr_estimate(
     rows: Sequence[LoggedBanditRecord],
-) -> tuple[float, float, float, float, str, int | None]:
-    """Return SNDR estimate, SE, mean weight, residual correction and SE metadata."""
+) -> tuple[float, float, float, float, float, str, int | None]:
+    """Return SNDR estimate, SE, normalization diagnostics, and SE metadata."""
 
     if not rows:
         raise ValueError("at least one logged record is required")
