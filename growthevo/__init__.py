@@ -1,5 +1,6 @@
 """GrowthEvo-Harness public package surface."""
 
+from ._version import __version__
 from .models import (
     CausalBelief,
     Channel,
@@ -26,6 +27,5 @@ __all__ = [
     "UserObservation",
     "VerificationResult",
     "VerificationStatus",
+    "__version__",
 ]
-
-__version__ = "0.1.0"
