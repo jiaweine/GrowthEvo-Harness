@@ -3,13 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 import tomllib
 
+import growthevo
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_package_has_discovery_urls_and_research_keywords() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    assert project["version"] == "0.1.0"
+    assert "version" not in project
+    assert "version" in project["dynamic"]
+    assert growthevo.__version__ == "0.1.0"
     assert set(project["urls"]) == {"Repository", "Issues", "Documentation", "Changelog"}
     assert project["urls"]["Repository"] == "https://github.com/jiaweine/GrowthEvo-Harness"
     assert project["urls"]["Issues"].endswith("/GrowthEvo-Harness/issues")
