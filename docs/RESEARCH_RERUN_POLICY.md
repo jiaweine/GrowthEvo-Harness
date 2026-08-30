@@ -21,6 +21,16 @@ Therefore:
 - accepted full-data workflows do not run automatically for ordinary PRs;
 - ordinary PR CI instead runs unit/regression tests, package-build/install checks, persisted-evidence integrity checks, and the pinned small-OBD integration benchmark.
 
+## Development validation exhaustion
+
+Validation evidence can also be overused. Repeatedly proposing new methods after observing the same validation reference creates adaptive overfitting even if the final holdout remains untouched.
+
+The small-OBD cohort described by `benchmarks/ope/obd-small-all-random-to-bts.v1.json` is therefore marked **exhausted for promotion research** in `benchmarks/ope/development/obd-small-all-random-to-bts.v1.json`.
+
+It may continue to serve as a regression/integration fixture and may reproduce an already recorded attempt. It must not justify promotion of a newly proposed estimator, Q backend, hyperparameter choice, or candidate grid. Future empirical OPE promotion research requires a fresh preregistered development identity before its validation evidence is opened. See `docs/OPE_DEVELOPMENT_GOVERNANCE.md`.
+
+Development comparisons should recompute their baseline inside the same run. Tiny floating-point differences across hosted hardware are not evidence that a method improved and must not be converted into a rerun-until-winning process.
+
 ## When a manual full-data run is admissible
 
 A manual run is appropriate for one of two purposes.
