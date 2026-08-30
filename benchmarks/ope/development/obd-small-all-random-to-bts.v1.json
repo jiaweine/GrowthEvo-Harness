@@ -1,0 +1,78 @@
+{
+  "schema_version": "growthevo.ope-development-cohort.v1",
+  "cohort_id": "obd-small-all-random-to-bts.v1.validation-half",
+  "benchmark": "open-bandit-ope-small-evidence",
+  "dataset": "obd-small-all-random-to-bts",
+  "base_plan": "benchmarks/ope/obd-small-all-random-to-bts.v1.json",
+  "base_plan_fingerprint": "d8ac714101799258f5202723ca3490e3b6b3c600",
+  "validation_reference": 0.005,
+  "status": "exhausted",
+  "promotion_eligible": false,
+  "exhausted_reason": "The revealed validation cohort has been reused for sequential adaptive estimator and nuisance-model screening. Further promotion decisions on this same cohort would create validation-shopping risk even without opening the final holdout.",
+  "allowed_future_uses": [
+    "regression_testing",
+    "integration_testing",
+    "reproduction_of_recorded_attempts"
+  ],
+  "prohibited_future_uses": [
+    "new_estimator_promotion",
+    "new_q_backend_promotion",
+    "new_hyperparameter_promotion",
+    "new_candidate_grid_promotion"
+  ],
+  "comparison_rule": "Development attempts must be interpreted against a baseline recomputed inside the same run. Small cross-run floating-point differences on hosted hardware must not be treated as method improvements.",
+  "attempts": [
+    {
+      "method_id": "recsys2025-meta-blue-alignment",
+      "prs": [25],
+      "decision": "rejected",
+      "holdout_used_for_decision": false,
+      "summary": "RecSys-style beta-IPS + SNIPS + DR BLUE reduced Meta SE but worsened Meta validation absolute error from about 0.002108 to about 0.002460; SWITCH-DR threshold 5 remained the validation winner."
+    },
+    {
+      "method_id": "cross-fitted-beta-dr",
+      "prs": [43],
+      "decision": "rejected",
+      "holdout_used_for_decision": false,
+      "candidate_absolute_error": 0.0020216953417283366,
+      "comparison_absolute_error": 0.001970724798398843,
+      "summary": "Cross-fitted additive normalization control on DR reduced SE by only about 0.014% while worsening DR point error."
+    },
+    {
+      "method_id": "empirical-likelihood-emp-1q",
+      "prs": [44],
+      "decision": "rejected",
+      "holdout_used_for_decision": false,
+      "candidate_absolute_error": 0.0021072457250876815,
+      "comparison_absolute_error": 0.001283038336017913,
+      "summary": "The one-Q empirical-likelihood specialization converged cleanly but materially underperformed the same-run SWITCH-DR threshold-5 winner."
+    },
+    {
+      "method_id": "self-normalized-doubly-robust",
+      "prs": [45, 48],
+      "decision": "rejected",
+      "holdout_used_for_decision": false,
+      "candidate_absolute_error": 0.0019787540572859083,
+      "comparison_absolute_error": 0.001282521969647588,
+      "summary": "SNDR was worse than both the same-run SWITCH-DR threshold-5 winner and ordinary DR. PR 48 only repaired negative-result artifact preservation for the same method/cohort."
+    },
+    {
+      "method_id": "meta-ope-author-random-forest-q",
+      "prs": [46],
+      "decision": "rejected",
+      "holdout_used_for_decision": false,
+      "candidate_absolute_error": 0.0013348296743425745,
+      "comparison_absolute_error": 0.001282521969647588,
+      "summary": "Author-code RandomForest Q reduced the selected estimator SE by about 2.61% but worsened validation point error."
+    },
+    {
+      "method_id": "mrdr-logistic-q",
+      "prs": [47],
+      "decision": "rejected",
+      "holdout_used_for_decision": false,
+      "candidate_absolute_error": 0.0015719848659348722,
+      "comparison_absolute_error": 0.001282521969647588,
+      "summary": "MRDR-trained logistic Q changed the validation winner to DR-OS lambda 1 but materially worsened validation point error."
+    }
+  ]
+}

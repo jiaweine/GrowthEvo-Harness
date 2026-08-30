@@ -49,6 +49,8 @@ Do **not** automatically rerun the promoted full Criteo or full OBD workflows on
 
 If a contribution changes any material benchmark input—including source release, outcome/reward, split, propensity/Q protocol, candidate configuration, support/evidence gate, target-policy simulation protocol, or selection objective—it creates a **new experiment identity**. Follow `docs/RESEARCH_RERUN_POLICY.md` and `docs/REAL_WORLD_BENCHMARKS.md`.
 
+The existing small-OBD validation cohort is **exhausted for promotion research** after repeated sequential method screening. Its status and attempt ledger are recorded in `benchmarks/ope/development/obd-small-all-random-to-bts.v1.json`; see `docs/OPE_DEVELOPMENT_GOVERNANCE.md`. It may remain in CI as an integration/regression check, but a new estimator, Q backend, hyperparameter set, or candidate grid must not use that revealed cohort to justify promotion. Such research requires a new preregistered development identity before validation evidence is opened.
+
 A promotable new result requires:
 
 - a preregistered plan before validation evidence is opened;
