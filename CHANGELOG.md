@@ -46,7 +46,9 @@ The project has not assigned a new release tag as part of this maintenance work.
 - Fixed GitHub README display mathematics by using fenced `math` blocks.
 - Added tests that continuously validate persisted accepted evidence and README promotion boundaries.
 - Made accepted full-data Criteo/OBD research workflows manual-only with a required experiment reason, preventing unrelated PRs from automatically reopening final holdouts.
-- Migrated official GitHub Actions to Node-24-native `checkout@v7`, `setup-python@v7`, and `upload-artifact@v7`.
+- Migrated official GitHub Actions to Node-24-native v7 releases and pinned every external action to its verified full-length commit SHA.
+- Added weekly Dependabot updates for GitHub Actions while intentionally excluding frozen research-package pins.
+- Added a security reporting policy with private-reporting guidance and an explicit locked-evidence boundary.
 - Added wheel/sdist build, `twine check`, clean-wheel installation, and installed CLI smoke tests.
 - Expanded the tested core Python matrix to Python 3.11, 3.12, 3.13, and 3.14 while keeping frozen research environments separate.
 
