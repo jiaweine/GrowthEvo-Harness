@@ -40,17 +40,20 @@ def test_regular_ci_uses_immutable_node24_native_actions_and_builds_distribution
     assert "growthevo-locked-targeting --help" in ci
 
 
-def test_small_obd_ci_preinstalls_cpu_only_torch_before_obd_extra() -> None:
+def test_small_obd_ci_preinstalls_cpu_only_torch_and_known_obp_resolution() -> None:
     ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
     cpu_index = "https://download.pytorch.org/whl/cpu"
     cpu_torch = "torch==2.13.0+cpu"
+    obp_resolution = "pip install --no-deps 'obp==0.4.1'"
     obd_install = "pip install -e '.[obd]'"
 
     assert "Install GrowthEvo with CPU-only OBD bridge" in ci
     assert cpu_index in ci
     assert cpu_torch in ci
+    assert obp_resolution in ci
     assert "assert not torch.cuda.is_available()" in ci
-    assert ci.index(cpu_torch) < ci.index(obd_install)
+    assert 'version("obp") == "0.4.1"' in ci
+    assert ci.index(cpu_torch) < ci.index(obp_resolution) < ci.index(obd_install)
 
 
 def test_accepted_full_data_workflows_are_manual_only_and_sha_pinned() -> None:
