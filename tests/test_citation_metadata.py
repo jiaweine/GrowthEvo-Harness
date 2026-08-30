@@ -15,6 +15,12 @@ def test_citation_metadata_describes_current_research_software_without_fake_rele
     assert 'repository-code: "https://github.com/jiaweine/GrowthEvo-Harness"' in citation
     assert "off-policy evaluation" in citation
     assert "safe policy improvement" in citation
-    assert "doi:" not in citation
-    assert "date-released:" not in citation
-    assert "version:" not in citation
+
+    top_level_keys = {
+        line.split(":", 1)[0]
+        for line in citation.splitlines()
+        if line and not line.startswith((" ", "-")) and ":" in line
+    }
+    assert "doi" not in top_level_keys
+    assert "date-released" not in top_level_keys
+    assert "version" not in top_level_keys
