@@ -16,11 +16,14 @@ Before a release candidate is tagged, mainline should have all of the following 
 - [x] pinned real small-OBD integration with compact-Q equivalence and locked selection;
 - [x] persisted full Criteo/OBD evidence integrity tests;
 - [x] README math rendering regression tests;
-- [x] accepted full-data workflows are manual-only and require an experiment reason.
+- [x] accepted full-data workflows are manual-only and require an experiment reason;
+- [x] every external GitHub Action reference is pinned to a verified 40-character commit SHA;
+- [x] Dependabot tracks GitHub Actions weekly without automatically changing frozen research-package pins;
+- [x] `SECURITY.md` provides non-public vulnerability-reporting guidance and preserves the locked-evidence boundary.
 
 These gates prove repository/package behavior. They do not choose legal terms, a release version, or a GitHub governance policy.
 
-## Owner decisions required before public package/release publication
+## Owner/admin decisions required before public package/release publication
 
 ### 1. Choose and add a LICENSE
 
@@ -45,7 +48,21 @@ Recommended minimum policy before a public release:
 - require the GrowthEvo CI checks to pass;
 - prevent force pushes and branch deletion;
 - require branches to be up to date before merge when practical;
+- require external Actions to be pinned to full-length commit SHAs if the repository setting is available;
 - preserve manual-only full-data research workflows rather than making final holdouts required PR checks.
+
+### 3. Verify repository security features
+
+GitHub recommends Dependabot alerts, secret scanning / push protection, and code scanning for public repositories. The repository files can configure version updates and reporting policy, but this maintenance connector cannot reliably verify or mutate every Security setting.
+
+Before a public release, an administrator should verify in **Settings → Advanced Security / Code security** that the intended controls are enabled, especially:
+
+- dependency graph and Dependabot alerts;
+- secret scanning and push protection;
+- CodeQL/default code scanning, or an intentionally chosen equivalent;
+- private vulnerability reporting if the repository should expose a direct **Report a vulnerability** flow.
+
+Do not add a second advanced CodeQL workflow merely to satisfy this checklist if GitHub default setup is already enabled; choose one coherent code-scanning configuration.
 
 ## Version and tag decision
 
@@ -73,6 +90,7 @@ If a release intends to promote a new Criteo/OBD headline instead, follow `docs/
 
 - [ ] LICENSE choice completed by owner;
 - [ ] `main` protection/ruleset configured by admin;
+- [ ] repository security features verified by admin;
 - [ ] release version chosen;
 - [ ] changelog version section created;
 - [ ] exact release commit CI is green;
