@@ -1,0 +1,76 @@
+{
+  "evidence_sets": [
+    {
+      "files": [
+        {
+          "git_blob_sha": "75bd1f8b55b1b1d292d56e5a225fbf680b0c38e2",
+          "path": "benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/criteo-lgbm-candidates.v1.json",
+          "size_bytes": 1823
+        },
+        {
+          "git_blob_sha": "3ac7306276c6ea3eb8fd4880556a47b2775fb66c",
+          "path": "benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/criteo-v2.1-visit-top10.v1.json",
+          "size_bytes": 868
+        },
+        {
+          "git_blob_sha": "df4cc3e611cb0fadc27c23588848a6f71e032a00",
+          "path": "benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/environment.txt",
+          "size_bytes": 321
+        },
+        {
+          "git_blob_sha": "f70b0a0441a79069f310cd9cda225e120424b636",
+          "path": "benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/evidence-metadata.json",
+          "size_bytes": 2154
+        },
+        {
+          "git_blob_sha": "4d3fb31f355278531e712c615713777abf207dae",
+          "path": "benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/export-manifest.json",
+          "size_bytes": 1540
+        },
+        {
+          "git_blob_sha": "78d466574b4fdf22f5dacd575df72da767860249",
+          "path": "benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/locked-result.json",
+          "size_bytes": 7090
+        },
+        {
+          "git_blob_sha": "974a2fb5d3a2e3db5588f733301ebbb0b3cafec5",
+          "path": "benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/source-provenance.json",
+          "size_bytes": 610
+        }
+      ],
+      "name": "criteo-v2.1-visit-top10/7ac26a5a"
+    },
+    {
+      "files": [
+        {
+          "git_blob_sha": "709f941a9e6206392d29a6e9ce58a799f96643fc",
+          "path": "benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/environment.txt",
+          "size_bytes": 875
+        },
+        {
+          "git_blob_sha": "03a959ca71620f342a7fa1e774179080523dc48f",
+          "path": "benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/evidence-metadata.json",
+          "size_bytes": 1656
+        },
+        {
+          "git_blob_sha": "59d34c7cfb38f341c13af0642d552e2f3a0a1f65",
+          "path": "benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/export-manifest.json",
+          "size_bytes": 1134
+        },
+        {
+          "git_blob_sha": "26e48927dfb20a4682046139452114c4298128e9",
+          "path": "benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/locked-result.json",
+          "size_bytes": 6595
+        },
+        {
+          "git_blob_sha": "a27c984ae4ab781ac090f1b8a833aa678428a1b2",
+          "path": "benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/source-provenance.json",
+          "size_bytes": 1493
+        }
+      ],
+      "name": "obd-full-all-random-to-bts/7d538cea"
+    }
+  ],
+  "git_object_format": "sha1",
+  "schema_version": "growthevo.accepted-evidence-integrity.v1"
+}

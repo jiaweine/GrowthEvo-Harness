@@ -52,6 +52,9 @@ jobs:
           python-version: "3.14"
           cache: pip
 
+      - name: Verify accepted full-data evidence seal
+        run: python scripts/verify_accepted_evidence_integrity.py
+
       - name: Build wheel and sdist
         run: |
           python -m pip install --upgrade pip
