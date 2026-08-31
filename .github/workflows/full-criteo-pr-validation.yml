@@ -223,6 +223,22 @@ jobs:
             test -s "$path"
           done
 
+      - name: Hash full Criteo core evidence bundle
+        if: success()
+        run: |
+          python scripts/write_evidence_integrity_manifest.py \
+            --root /tmp/growthevo-full-criteo \
+            --output /tmp/growthevo-full-criteo/evidence-integrity.json \
+            dispatch-provenance.json \
+            accepted-constraints.txt \
+            runner-environment.txt \
+            result/source-provenance.json \
+            result/criteo-v2.1-visit-top10.v1.json \
+            result/criteo-lgbm-candidates.v1.json \
+            result/export-manifest.json \
+            result/locked-result.json \
+            result/environment.txt
+
       - name: Upload full Criteo research evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -234,6 +250,7 @@ jobs:
             /tmp/growthevo-full-criteo/dispatch-provenance.json
             /tmp/growthevo-full-criteo/accepted-constraints.txt
             /tmp/growthevo-full-criteo/runner-environment.txt
+            /tmp/growthevo-full-criteo/evidence-integrity.json
             /tmp/growthevo-full-criteo/full-run.log
             /tmp/growthevo-full-criteo/result/source-provenance.json
             /tmp/growthevo-full-criteo/result/criteo-v2.1-visit-top10.v1.json
