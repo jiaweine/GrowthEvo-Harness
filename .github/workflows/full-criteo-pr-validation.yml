@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     env:
+      EXPERIMENT_REASON: ${{ inputs.experiment_reason }}
       ACCEPTED_ENVIRONMENT: benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/environment.txt
 
     steps:
@@ -38,10 +39,15 @@ jobs:
             pyproject.toml
             benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/environment.txt
 
+      - name: Verify reviewed main-history dispatch
+        run: |
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          python scripts/verify_research_dispatch.py \
+            --output /tmp/growthevo-full-criteo/dispatch-provenance.json
+
       - name: Inspect initial runner resources
         env:
           EXPECTED_SHA: ${{ github.sha }}
-          EXPERIMENT_REASON: ${{ inputs.experiment_reason }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -n "$EXPERIMENT_REASON"
@@ -61,6 +67,7 @@ jobs:
             cat /etc/os-release
           } > /tmp/growthevo-full-criteo/runner-environment.txt
           printf 'experiment_reason=%s\n' "$EXPERIMENT_REASON"
+          cat /tmp/growthevo-full-criteo/dispatch-provenance.json
           cat /tmp/growthevo-full-criteo/runner-environment.txt
           df -h
           free -h
@@ -206,6 +213,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
           path: |
+            /tmp/growthevo-full-criteo/dispatch-provenance.json
             /tmp/growthevo-full-criteo/accepted-constraints.txt
             /tmp/growthevo-full-criteo/runner-environment.txt
             /tmp/growthevo-full-criteo/full-run.log
