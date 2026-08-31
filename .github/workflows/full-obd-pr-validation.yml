@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   full-obd:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 300
     env:
       EXPECTED_GIT_SHA: ${{ github.sha }}
@@ -44,7 +44,21 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
           test -n "$EXPERIMENT_REASON"
           test -f "$ACCEPTED_ENVIRONMENT"
+          test "${RUNNER_OS:-}" = "Linux"
+          grep -q '^VERSION_ID="24.04"$' /etc/os-release
+          mkdir -p /tmp/growthevo-full-obd
+          {
+            printf 'runner_os=%s\n' "${RUNNER_OS:-unknown}"
+            printf 'runner_arch=%s\n' "${RUNNER_ARCH:-unknown}"
+            printf 'image_os=%s\n' "${ImageOS:-unknown}"
+            printf 'image_version=%s\n' "${ImageVersion:-unknown}"
+            printf 'uname=%s\n' "$(uname -a)"
+            printf 'libc=%s\n' "$(ldd --version | head -n 1)"
+            printf '%s\n' '--- /etc/os-release ---'
+            cat /etc/os-release
+          } > /tmp/growthevo-full-obd/runner-environment.txt
           printf 'experiment_reason=%s\n' "$EXPERIMENT_REASON"
+          cat /tmp/growthevo-full-obd/runner-environment.txt
           df -h
           free -h
 
@@ -129,6 +143,7 @@ jobs:
           retention-days: 30
           path: |
             /tmp/growthevo-full-obd/accepted-constraints.txt
+            /tmp/growthevo-full-obd/runner-environment.txt
             /tmp/growthevo-full-obd/pip-freeze.txt
             /tmp/growthevo-full-obd/full-run.log
             /tmp/growthevo-full-obd/result/source-provenance.json
