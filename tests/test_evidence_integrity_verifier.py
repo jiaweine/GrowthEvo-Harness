@@ -88,7 +88,7 @@ def test_verifier_rejects_missing_evidence_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    (mutation, expected_message),
+    "mutation,expected_message",
     [
         (lambda payload: payload.__setitem__("schema_version", "growthevo.evidence-integrity.v0"), "unsupported integrity manifest schema"),
         (lambda payload: payload.__setitem__("unexpected", True), "keys mismatch"),
