@@ -67,3 +67,35 @@ def test_find_mismatches_reports_missing_and_wrong_versions() -> None:
         "obp: missing (expected 0.4.1)",
         "torch: installed 2.12.0+cpu, expected 2.13.0+cpu",
     ]
+
+
+def test_find_unexpected_distributions_rejects_only_external_extras() -> None:
+    module = _load_module()
+
+    unexpected = module.find_unexpected_distributions(
+        {
+            "numpy": "1.26.4",
+            "PyYAML": "6.0.3",
+        },
+        installed_names={
+            "NumPy",
+            "pyyaml",
+            "pip",
+            "growthevo_harness",
+            "rogue_pkg",
+        },
+    )
+
+    assert unexpected == ["rogue-pkg"]
+
+
+def test_find_unexpected_distributions_can_extend_explicit_allowlist() -> None:
+    module = _load_module()
+
+    unexpected = module.find_unexpected_distributions(
+        {"numpy": "1.26.4"},
+        installed_names={"numpy", "pip", "build-helper"},
+        allowed_extra={"pip", "growthevo-harness", "build_helper"},
+    )
+
+    assert unexpected == []
