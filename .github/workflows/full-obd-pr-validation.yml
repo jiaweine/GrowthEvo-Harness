@@ -144,6 +144,23 @@ jobs:
           PY
           fi
 
+      - name: Verify complete full OBD evidence bundle
+        if: success()
+        shell: bash
+        run: |
+          for path in \
+            /tmp/growthevo-full-obd/dispatch-provenance.json \
+            /tmp/growthevo-full-obd/accepted-constraints.txt \
+            /tmp/growthevo-full-obd/runner-environment.txt \
+            /tmp/growthevo-full-obd/pip-freeze.txt \
+            /tmp/growthevo-full-obd/result/source-provenance.json \
+            /tmp/growthevo-full-obd/result/obd-full-all-random-to-bts.v1.json \
+            /tmp/growthevo-full-obd/result/export/export_manifest.json \
+            /tmp/growthevo-full-obd/result/export/ope_candidates.json \
+            /tmp/growthevo-full-obd/result/locked-result.json; do
+            test -s "$path"
+          done
+
       - name: Upload full OBD research evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
