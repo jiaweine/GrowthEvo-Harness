@@ -8,27 +8,28 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 RUNTIME_CAPTURE = ROOT / "scripts" / "capture_numeric_runtime.py"
 
 
-def test_obd_regression_and_trusted_cache_seed_share_ubuntu_2404() -> None:
+def test_obd_regression_and_default_branch_cache_producer_use_ubuntu_2404() -> None:
     ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
-    seed = (WORKFLOWS / "obd-cache-seed.yml").read_text(encoding="utf-8")
-
+    trigger = ci.split("permissions:\n", maxsplit=1)[0]
     core_ci, obd_ci = ci.split("  obd-integration:\n", maxsplit=1)
 
     # Compatibility/package jobs intentionally follow GitHub's latest Linux image.
     assert core_ci.count("runs-on: ubuntu-latest") == 2
 
-    # The regression-only evidence path and its trusted cache producer are stable.
+    # Every main landing runs this same stable OBD job, so it is also the trusted
+    # default-branch cache producer for the frozen regression environment.
+    assert "  push:\n    branches: [main]\n" in trigger
+    assert "paths:" not in trigger
+    assert "paths-ignore:" not in trigger
     assert "runs-on: ubuntu-24.04" in obd_ci
     assert "runs-on: ubuntu-latest" not in obd_ci
-    assert "runs-on: ubuntu-24.04" in seed
-    assert "runs-on: ubuntu-latest" not in seed
 
     cache_identity = ".github/cache/obd-pip-cache-v1.txt"
     bootstrap = "scripts/bootstrap_obd_ci_environment.py"
-    for workflow in (obd_ci, seed):
-        assert 'python-version: "3.12"' in workflow
-        assert cache_identity in workflow
-        assert bootstrap in workflow
+    assert 'python-version: "3.12"' in obd_ci
+    assert cache_identity in obd_ci
+    assert bootstrap in obd_ci
+    assert not (WORKFLOWS / "obd-cache-seed.yml").exists()
 
 
 def test_small_obd_persists_host_numeric_runtime_before_data_access() -> None:

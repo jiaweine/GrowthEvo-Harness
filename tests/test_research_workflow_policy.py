@@ -109,29 +109,24 @@ def test_small_obd_ci_uses_a_cache_identity_separate_from_core_python_312() -> N
     )
 
 
-def test_obd_cache_seed_is_trusted_main_only_and_matches_integration_identity() -> None:
+def test_main_push_obd_job_is_the_trusted_default_branch_cache_producer() -> None:
     ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
-    seed = (WORKFLOWS / "obd-cache-seed.yml").read_text(encoding="utf-8")
+    trigger = ci.split("permissions:\n", maxsplit=1)[0]
+    obd_ci = ci.split("  obd-integration:\n", maxsplit=1)[1]
     cache_identity = ".github/cache/obd-pip-cache-v1.txt"
     bootstrap_path = "scripts/bootstrap_obd_ci_environment.py"
-    bootstrap_command = f"python {bootstrap_path}"
 
-    _assert_external_actions_are_immutable(seed)
-    assert "  push:\n    branches: [main]\n" in seed
-    assert "  workflow_dispatch:\n" in seed
-    assert "pull_request:" not in seed
-    assert "permissions:\n  contents: read\n" in seed
-    assert f"actions/checkout@{CHECKOUT_SHA} # v7" in seed
-    assert f"actions/setup-python@{SETUP_PYTHON_SHA} # v7" in seed
-    assert "cache-dependency-path: |\n            pyproject.toml\n" in seed
-    assert cache_identity in seed
-    assert bootstrap_path in seed
-    assert f"      - {bootstrap_path}\n" in seed
-    assert ".github/workflows/obd-cache-seed.yml" in seed
-    assert bootstrap_command in seed
-    assert bootstrap_command in ci
-    assert "growthevo-locked-ope" not in seed
-    assert "export_obd_locked_ope.py" not in seed
+    assert "  push:\n    branches: [main]\n" in trigger
+    assert "paths:" not in trigger
+    assert "paths-ignore:" not in trigger
+    assert "runs-on: ubuntu-24.04" in obd_ci
+    assert 'python-version: "3.12"' in obd_ci
+    assert "cache: pip" in obd_ci
+    assert "cache-dependency-path: |\n            pyproject.toml\n" in obd_ci
+    assert cache_identity in obd_ci
+    assert bootstrap_path in obd_ci
+    assert "python scripts/bootstrap_obd_ci_environment.py" in obd_ci
+    assert not (WORKFLOWS / "obd-cache-seed.yml").exists()
 
 
 def test_accepted_full_data_workflows_are_manual_only_and_sha_pinned() -> None:
