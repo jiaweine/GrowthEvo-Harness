@@ -89,36 +89,10 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             .github/cache/obd-pip-cache-v1.txt
+            scripts/bootstrap_obd_ci_environment.py
 
       - name: Install GrowthEvo with CPU-only OBD bridge
-        run: |
-          python -m pip install --upgrade pip
-          pip install \
-            --index-url https://download.pytorch.org/whl/cpu \
-            --extra-index-url https://pypi.org/simple \
-            'torch==2.13.0+cpu'
-          pip install --no-deps 'obp==0.4.1'
-          pip install -e '.[obd]'
-          python - <<'PY'
-          from importlib.metadata import version
-
-          import obp
-          import torch
-
-          assert torch.__version__ == "2.13.0+cpu"
-          assert not torch.cuda.is_available()
-          assert obp.__version__ == "0.5.5"
-          assert version("sb-obp") == "0.5.10"
-          assert version("obp") == "0.4.1"
-          print(
-              "torch", torch.__version__,
-              "cuda_available=", torch.cuda.is_available(),
-              "obp_module_version=", obp.__version__,
-              "sb_obp_distribution=", version("sb-obp"),
-              "legacy_obp_distribution=", version("obp"),
-          )
-          PY
-          python -m pip freeze > /tmp/growthevo-obd-environment.txt
+        run: python scripts/bootstrap_obd_ci_environment.py --freeze-output /tmp/growthevo-obd-environment.txt
 
       - name: Verify compact logistic Q matches OBP tensor predictions
         run: |
