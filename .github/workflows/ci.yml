@@ -76,6 +76,7 @@ jobs:
       SB_OBP_COMMIT: 1c6d14677ec6f06094a2f8886a1158bab99c571e
       OBD_DATASET_SOURCE: github:sb-ai-lab/sb-obp@1c6d14677ec6f06094a2f8886a1158bab99c571e:obd-small
       OBD_PLAN: benchmarks/ope/obd-small-all-random-to-bts.v1.json
+      OBD_REGRESSION_CONTRACT: benchmarks/ope/obd-small-regression-contract.v1.json
 
     steps:
       - name: Checkout
@@ -274,6 +275,12 @@ jobs:
           }, indent=2, sort_keys=True))
           PY
 
+      - name: Enforce small OBD regression contract
+        run: |
+          python scripts/validate_obd_regression_contract.py \
+            --contract "$OBD_REGRESSION_CONTRACT" \
+            --result /tmp/growthevo-obd/locked-result.json
+
       - name: Upload locked OBD evidence summary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -282,6 +289,7 @@ jobs:
           retention-days: 14
           path: |
             benchmarks/ope/obd-small-all-random-to-bts.v1.json
+            benchmarks/ope/obd-small-regression-contract.v1.json
             /tmp/growthevo-obd-environment.txt
             /tmp/growthevo-obd-runtime.json
             /tmp/growthevo-obd/export_manifest.json
