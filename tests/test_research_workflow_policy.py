@@ -52,8 +52,22 @@ def test_small_obd_ci_preinstalls_cpu_only_torch_and_known_obp_resolution() -> N
     assert cpu_torch in ci
     assert obp_resolution in ci
     assert "assert not torch.cuda.is_available()" in ci
+    assert 'obp.__version__ == "0.5.5"' in ci
+    assert 'version("sb-obp") == "0.5.10"' in ci
     assert 'version("obp") == "0.4.1"' in ci
+    assert "obp_module_version=" in ci
+    assert "sb_obp_distribution=" in ci
+    assert "legacy_obp_distribution=" in ci
     assert ci.index(cpu_torch) < ci.index(obp_resolution) < ci.index(obd_install)
+
+
+def test_small_obd_ci_persists_resolved_environment_with_evidence() -> None:
+    ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+    environment_path = "/tmp/growthevo-obd-environment.txt"
+
+    assert f"python -m pip freeze > {environment_path}" in ci
+    assert "Upload locked OBD evidence summary" in ci
+    assert environment_path in ci.split("Upload locked OBD evidence summary", maxsplit=1)[1]
 
 
 def test_small_obd_ci_uses_a_cache_identity_separate_from_core_python_312() -> None:

@@ -101,17 +101,24 @@ jobs:
           pip install -e '.[obd]'
           python - <<'PY'
           from importlib.metadata import version
+
+          import obp
           import torch
 
           assert torch.__version__ == "2.13.0+cpu"
           assert not torch.cuda.is_available()
+          assert obp.__version__ == "0.5.5"
+          assert version("sb-obp") == "0.5.10"
           assert version("obp") == "0.4.1"
           print(
               "torch", torch.__version__,
               "cuda_available=", torch.cuda.is_available(),
-              "obp_distribution=", version("obp"),
+              "obp_module_version=", obp.__version__,
+              "sb_obp_distribution=", version("sb-obp"),
+              "legacy_obp_distribution=", version("obp"),
           )
           PY
+          python -m pip freeze > /tmp/growthevo-obd-environment.txt
 
       - name: Verify compact logistic Q matches OBP tensor predictions
         run: |
@@ -298,6 +305,7 @@ jobs:
           retention-days: 14
           path: |
             benchmarks/ope/obd-small-all-random-to-bts.v1.json
+            /tmp/growthevo-obd-environment.txt
             /tmp/growthevo-obd/export_manifest.json
             /tmp/growthevo-obd/ope_candidates.json
             /tmp/growthevo-obd/locked-result.json
