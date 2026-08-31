@@ -17,14 +17,15 @@ def test_regular_ci_verifies_pull_requests_and_every_push_to_main() -> None:
     assert "paths-ignore:" not in trigger
 
 
-def test_regular_ci_cancels_stale_prs_but_queues_every_main_push() -> None:
+def test_regular_ci_cancels_stale_prs_without_grouping_main_commits_together() -> None:
     ci = CI.read_text(encoding="utf-8")
     concurrency = ci.split("concurrency:\n", maxsplit=1)[1].split("\njobs:\n", maxsplit=1)[0]
 
     assert "github.workflow" in concurrency
     assert "github.event_name" in concurrency
-    assert "github.event.pull_request.number || github.ref" in concurrency
-    assert "queue: max" in concurrency
+    assert "github.event.pull_request.number || github.sha" in concurrency
+    assert "github.event.pull_request.number || github.ref" not in concurrency
+    assert "queue:" not in concurrency
     assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in concurrency
     assert "cancel-in-progress: true" not in concurrency
 
