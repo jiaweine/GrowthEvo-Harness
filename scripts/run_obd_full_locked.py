@@ -29,6 +29,16 @@ _HF_DATASET = "zozonext/open-bandit"
 _HF_DATA_REVISION = "57a688e"
 _HF_BASE = f"https://huggingface.co/datasets/{_HF_DATASET}/resolve/{_HF_DATA_REVISION}"
 _MIN_FREE_BYTES_AFTER_DOWNLOAD = 2 * 1024**3
+_EXPECTED_SOURCE_BYTES = {
+    "behavior": 695_501_426,
+    "target_reference": 6_321_017_454,
+    "item_context": 10_041,
+}
+_EXPECTED_SOURCE_SHA256 = {
+    "behavior": "f24fdf91e38de41dcd15f2482279358766556be04155b35882e327b465d104b7",
+    "target_reference": "05ba8416e6626be0dc16ee09a434d736eca1c4c274e10eabe3931521c4aeede2",
+    "item_context": "88345bc52dea9965cf148f02c661d03ce566f278b2b870ec0c70c5d3da1c2d1c",
+}
 
 
 def _sha256(path: Path) -> str:
@@ -40,6 +50,24 @@ def _sha256(path: Path) -> str:
                 break
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _verify_pinned_source_file(path: Path, *, identity: str) -> tuple[int, str]:
+    expected_bytes = _EXPECTED_SOURCE_BYTES[identity]
+    expected_sha256 = _EXPECTED_SOURCE_SHA256[identity]
+    actual_bytes = path.stat().st_size
+    if actual_bytes != expected_bytes:
+        raise RuntimeError(
+            f"full OBD {identity} size mismatch for {path}: "
+            f"got {actual_bytes}, expected {expected_bytes}"
+        )
+    actual_sha256 = _sha256(path)
+    if actual_sha256 != expected_sha256:
+        raise RuntimeError(
+            f"full OBD {identity} SHA256 mismatch for {path}: "
+            f"got {actual_sha256}, expected {expected_sha256}"
+        )
+    return actual_bytes, actual_sha256
 
 
 def _campaign_file(root: Path, policy: str, campaign: str) -> Path:
@@ -184,6 +212,15 @@ def _download_campaign_pair(
     if not _looks_like_full_root(root, campaign):
         raise RuntimeError("downloaded OBD mirror does not satisfy OBP campaign layout")
 
+    behavior_bytes, behavior_sha256 = _verify_pinned_source_file(
+        behavior_csv, identity="behavior"
+    )
+    target_bytes, target_sha256 = _verify_pinned_source_file(
+        target_csv, identity="target_reference"
+    )
+    item_context_bytes, item_context_sha256 = _verify_pinned_source_file(
+        item_context, identity="item_context"
+    )
     provenance: dict[str, object] = {
         "canonical_release_url": _CANONICAL_RELEASE,
         "transport": "huggingface-zozonext-pinned-campaign-files",
@@ -192,17 +229,17 @@ def _download_campaign_pair(
         "disk_reserve_bytes": _MIN_FREE_BYTES_AFTER_DOWNLOAD,
         "behavior_url": behavior_url,
         "behavior_advertised_bytes": advertised[behavior_url],
-        "behavior_sha256": _sha256(behavior_csv),
-        "behavior_bytes": behavior_csv.stat().st_size,
+        "behavior_sha256": behavior_sha256,
+        "behavior_bytes": behavior_bytes,
         "target_reference_url": target_url,
         "target_reference_advertised_bytes": advertised[target_url],
-        "target_reference_sha256": _sha256(target_csv),
-        "target_reference_bytes": target_csv.stat().st_size,
+        "target_reference_sha256": target_sha256,
+        "target_reference_bytes": target_bytes,
         "target_reference_storage": "local-pinned-campaign-file",
         "item_context_url": item_context_url,
         "item_context_advertised_bytes": advertised[item_context_url],
-        "item_context_sha256": _sha256(item_context),
-        "item_context_bytes": item_context.stat().st_size,
+        "item_context_sha256": item_context_sha256,
+        "item_context_bytes": item_context_bytes,
     }
     return root, provenance
 
@@ -247,15 +284,24 @@ def run_full_obd(
         item_context = _item_context_file(
             resolved_data_root, "random", plan.campaign
         )
+        behavior_bytes, behavior_sha256 = _verify_pinned_source_file(
+            behavior_csv, identity="behavior"
+        )
+        target_bytes, target_sha256 = _verify_pinned_source_file(
+            target_csv, identity="target_reference"
+        )
+        item_context_bytes, item_context_sha256 = _verify_pinned_source_file(
+            item_context, identity="item_context"
+        )
         source_provenance = {
             "canonical_release_url": _CANONICAL_RELEASE,
             "transport": "preexisting-full-data-root",
-            "behavior_sha256": _sha256(behavior_csv),
-            "behavior_bytes": behavior_csv.stat().st_size,
-            "target_reference_sha256": _sha256(target_csv),
-            "target_reference_bytes": target_csv.stat().st_size,
-            "item_context_sha256": _sha256(item_context),
-            "item_context_bytes": item_context.stat().st_size,
+            "behavior_sha256": behavior_sha256,
+            "behavior_bytes": behavior_bytes,
+            "target_reference_sha256": target_sha256,
+            "target_reference_bytes": target_bytes,
+            "item_context_sha256": item_context_sha256,
+            "item_context_bytes": item_context_bytes,
         }
 
     output_dir.mkdir(parents=True, exist_ok=True)
