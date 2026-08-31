@@ -64,3 +64,26 @@ def test_evidence_integrity_manifest_rejects_empty_files(tmp_path: Path) -> None
     (tmp_path / "empty.txt").write_bytes(b"")
     with pytest.raises(ValueError, match="empty"):
         module.build_manifest(root=tmp_path, files=["empty.txt"])
+
+
+def test_evidence_integrity_manifest_rejects_duplicate_paths(tmp_path: Path) -> None:
+    module = _load_module()
+    (tmp_path / "result.json").write_text('{"ok": true}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate"):
+        module.build_manifest(root=tmp_path, files=["result.json", "./result.json"])
+
+
+def test_evidence_integrity_writer_rejects_output_collision(tmp_path: Path) -> None:
+    module = _load_module()
+    evidence = tmp_path / "result.json"
+    evidence.write_text('{"ok": true}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="must not overwrite"):
+        module.write_manifest(root=tmp_path, output=evidence, files=["result.json"])
+
+
+def test_evidence_integrity_writer_rejects_output_outside_root(tmp_path: Path) -> None:
+    module = _load_module()
+    (tmp_path / "result.json").write_text('{"ok": true}\n', encoding="utf-8")
+    outside = tmp_path.parent / f"{tmp_path.name}-integrity.json"
+    with pytest.raises(ValueError, match="must stay under root"):
+        module.write_manifest(root=tmp_path, output=outside, files=["result.json"])
