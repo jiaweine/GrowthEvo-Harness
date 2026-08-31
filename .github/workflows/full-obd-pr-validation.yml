@@ -22,6 +22,7 @@ jobs:
     env:
       EXPECTED_GIT_SHA: ${{ github.sha }}
       EXPERIMENT_REASON: ${{ inputs.experiment_reason }}
+      ACCEPTED_ENVIRONMENT: benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/environment.txt
 
     steps:
       - name: Checkout exact evidence commit
@@ -29,31 +30,45 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - name: Set up Python
+      - name: Set up Python and frozen OBD cache
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/environment.txt
 
       - name: Inspect initial runner resources
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
           test -n "$EXPERIMENT_REASON"
+          test -f "$ACCEPTED_ENVIRONMENT"
           printf 'experiment_reason=%s\n' "$EXPERIMENT_REASON"
           df -h
           free -h
 
-      - name: Install CPU research environment
+      - name: Install frozen CPU research environment
         run: |
-          python -m pip install --upgrade pip
-          pip install --index-url https://download.pytorch.org/whl/cpu 'torch>=2.2,<3'
-          pip install -e '.[obd]'
-          python - <<'PY'
-          import torch
-          assert '+cpu' in torch.__version__ or not torch.cuda.is_available()
-          print('torch', torch.__version__, 'cuda_available=', torch.cuda.is_available())
-          PY
           mkdir -p /tmp/growthevo-full-obd
+          grep -E '^[[:alnum:]_.-]+==' "$ACCEPTED_ENVIRONMENT" \
+            > /tmp/growthevo-full-obd/accepted-constraints.txt
+          test -s /tmp/growthevo-full-obd/accepted-constraints.txt
+
+          python -m pip install --upgrade pip
+          python -m pip install \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple \
+            --constraint /tmp/growthevo-full-obd/accepted-constraints.txt \
+            'torch==2.13.0+cpu'
+          python -m pip install \
+            --no-deps \
+            --constraint /tmp/growthevo-full-obd/accepted-constraints.txt \
+            'obp==0.4.1'
+          python -m pip install \
+            --constraint /tmp/growthevo-full-obd/accepted-constraints.txt \
+            -e '.[obd]'
+          python scripts/verify_frozen_environment.py "$ACCEPTED_ENVIRONMENT"
           python -m pip freeze > /tmp/growthevo-full-obd/pip-freeze.txt
           df -h
 
@@ -113,6 +128,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
           path: |
+            /tmp/growthevo-full-obd/accepted-constraints.txt
             /tmp/growthevo-full-obd/pip-freeze.txt
             /tmp/growthevo-full-obd/full-run.log
             /tmp/growthevo-full-obd/result/source-provenance.json
