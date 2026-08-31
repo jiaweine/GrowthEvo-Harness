@@ -12,7 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: full-obd-${{ github.ref }}
+  group: full-obd-research-validation
+  queue: max
   cancel-in-progress: false
 
 jobs:
