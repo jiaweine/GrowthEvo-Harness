@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   full-criteo:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 300
     env:
       ACCEPTED_ENVIRONMENT: benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/environment.txt
@@ -46,7 +46,21 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -n "$EXPERIMENT_REASON"
           test -f "$ACCEPTED_ENVIRONMENT"
+          test "${RUNNER_OS:-}" = "Linux"
+          grep -q '^VERSION_ID="24.04"$' /etc/os-release
+          mkdir -p /tmp/growthevo-full-criteo
+          {
+            printf 'runner_os=%s\n' "${RUNNER_OS:-unknown}"
+            printf 'runner_arch=%s\n' "${RUNNER_ARCH:-unknown}"
+            printf 'image_os=%s\n' "${ImageOS:-unknown}"
+            printf 'image_version=%s\n' "${ImageVersion:-unknown}"
+            printf 'uname=%s\n' "$(uname -a)"
+            printf 'libc=%s\n' "$(ldd --version | head -n 1)"
+            printf '%s\n' '--- /etc/os-release ---'
+            cat /etc/os-release
+          } > /tmp/growthevo-full-criteo/runner-environment.txt
           printf 'experiment_reason=%s\n' "$EXPERIMENT_REASON"
+          cat /tmp/growthevo-full-criteo/runner-environment.txt
           df -h
           free -h
 
@@ -192,6 +206,7 @@ jobs:
           retention-days: 30
           path: |
             /tmp/growthevo-full-criteo/accepted-constraints.txt
+            /tmp/growthevo-full-criteo/runner-environment.txt
             /tmp/growthevo-full-criteo/full-run.log
             /tmp/growthevo-full-criteo/result/source-provenance.json
             /tmp/growthevo-full-criteo/result/criteo-v2.1-visit-top10.v1.json
