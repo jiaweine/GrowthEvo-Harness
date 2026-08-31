@@ -7,7 +7,11 @@ import sys
 from importlib.metadata import version
 from pathlib import Path
 
-from verify_frozen_environment import find_mismatches, load_exact_pins
+from verify_frozen_environment import (
+    find_mismatches,
+    find_unexpected_distributions,
+    load_exact_pins,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,9 +99,13 @@ def verify_environment(*, snapshot: Path = ACCEPTED_OBD_ENVIRONMENT) -> None:
 
     pins = load_exact_pins(snapshot)
     mismatches = find_mismatches(pins)
-    if mismatches:
-        detail = "\n".join(f"- {mismatch}" for mismatch in mismatches)
-        raise RuntimeError(f"Frozen OBD environment mismatch:\n{detail}")
+    unexpected = find_unexpected_distributions(pins)
+    if mismatches or unexpected:
+        lines = [*(f"- {mismatch}" for mismatch in mismatches)]
+        lines.extend(
+            f"- {name}: unexpected installed distribution" for name in unexpected
+        )
+        raise RuntimeError("Frozen OBD environment mismatch:\n" + "\n".join(lines))
 
     print(
         "torch", torch.__version__,
@@ -106,6 +114,7 @@ def verify_environment(*, snapshot: Path = ACCEPTED_OBD_ENVIRONMENT) -> None:
         "sb_obp_distribution=", sb_obp_distribution,
         "legacy_obp_distribution=", legacy_obp_distribution,
         "frozen_distribution_pins=", len(pins),
+        "unexpected_distributions=", len(unexpected),
     )
 
 
