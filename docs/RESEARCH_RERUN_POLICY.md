@@ -39,7 +39,12 @@ A manual run is appropriate for one of two purposes.
 
 A replication may rerun the exact frozen source, plan, candidate configuration, split, seeds, selection contract, and dependency environment to test reproducibility.
 
-For the currently accepted full OBD result, `.github/workflows/full-obd-pr-validation.yml` uses the persisted `benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/environment.txt` as the replication constraint source and verifies every exact installed distribution pin before the full-data runner is allowed to access the benchmark. Changing that frozen dependency baseline is not an in-place replication; it is a new experiment environment and must receive a new preregistered identity rather than overwriting the accepted evidence.
+The current full-data workflows use their persisted accepted environment snapshots as replication constraint sources and verify every exact installed distribution pin before real benchmark data may be accessed:
+
+- Criteo: `benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/environment.txt`;
+- OBD: `benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/environment.txt`.
+
+Changing either frozen dependency baseline is not an in-place replication; it is a new experiment environment and must receive a new preregistered identity rather than overwriting accepted evidence.
 
 A replication does **not** replace the accepted result merely because its numeric output differs slightly. Any material discrepancy must be investigated and documented before promotion status changes.
 

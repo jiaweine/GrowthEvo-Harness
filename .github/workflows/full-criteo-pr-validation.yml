@@ -19,6 +19,8 @@ jobs:
   full-criteo:
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    env:
+      ACCEPTED_ENVIRONMENT: benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/environment.txt
 
     steps:
       - name: Checkout exact evidence commit
@@ -27,11 +29,14 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Set up Python
+      - name: Set up Python and frozen Criteo cache
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/environment.txt
 
       - name: Inspect initial runner resources
         env:
@@ -40,25 +45,23 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -n "$EXPERIMENT_REASON"
+          test -f "$ACCEPTED_ENVIRONMENT"
           printf 'experiment_reason=%s\n' "$EXPERIMENT_REASON"
           df -h
           free -h
 
-      - name: Install Criteo research environment
+      - name: Install frozen Criteo research environment
         run: |
+          mkdir -p /tmp/growthevo-full-criteo
+          grep -E '^[[:alnum:]_.-]+==' "$ACCEPTED_ENVIRONMENT" \
+            > /tmp/growthevo-full-criteo/accepted-constraints.txt
+          test -s /tmp/growthevo-full-criteo/accepted-constraints.txt
+
           python -m pip install --upgrade pip
-          pip install -e '.[criteo]'
-          python - <<'PY'
-          import lightgbm, numpy, pandas, sklearn
-          print('lightgbm', lightgbm.__version__)
-          print('numpy', numpy.__version__)
-          print('pandas', pandas.__version__)
-          print('sklearn', sklearn.__version__)
-          assert lightgbm.__version__ == '4.7.0'
-          assert numpy.__version__ == '1.26.4'
-          assert pandas.__version__ == '2.3.3'
-          assert sklearn.__version__ == '1.9.0'
-          PY
+          python -m pip install \
+            --constraint /tmp/growthevo-full-criteo/accepted-constraints.txt \
+            -e '.[criteo]'
+          python scripts/verify_frozen_environment.py "$ACCEPTED_ENVIRONMENT"
 
       - name: Exercise all five CATE learners before real data
         run: |
@@ -188,6 +191,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
           path: |
+            /tmp/growthevo-full-criteo/accepted-constraints.txt
             /tmp/growthevo-full-criteo/full-run.log
             /tmp/growthevo-full-criteo/result/source-provenance.json
             /tmp/growthevo-full-criteo/result/criteo-v2.1-visit-top10.v1.json
