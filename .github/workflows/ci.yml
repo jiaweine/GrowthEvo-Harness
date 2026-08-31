@@ -3,6 +3,8 @@ name: GrowthEvo CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -240,7 +242,7 @@ jobs:
                   "--test-reference", str(manifest["holdout_reference"]),
                   "--benchmark", "open-bandit-ope-small-evidence",
                   "--dataset", "obd-small-all-random-to-bts",
-                  "--commit-sha", "${{ github.event.pull_request.head.sha }}",
+                  "--commit-sha", "${{ github.event.pull_request.head.sha || github.sha }}",
                   "--support-propensity-floor", "0.001",
                   "--min-support-coverage", "0.95",
                   "--min-effective-sample-ratio", "0.05",
