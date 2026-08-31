@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hashlib import sha256
+from hashlib import sha1, sha256
 import json
 from pathlib import Path
 
@@ -11,6 +11,24 @@ ROOT = Path(__file__).resolve().parents[1]
 CRITEO = ROOT / "benchmarks" / "targeting" / "results" / "criteo-v2.1-visit-top10" / "7ac26a5a"
 OBD = ROOT / "benchmarks" / "ope" / "results" / "obd-full-all-random-to-bts" / "7d538cea"
 
+CRITEO_MACHINE_BLOBS = {
+    "criteo-lgbm-candidates.v1.json": "75bd1f8b55b1b1d292d56e5a225fbf680b0c38e2",
+    "criteo-v2.1-visit-top10.v1.json": "3ac7306276c6ea3eb8fd4880556a47b2775fb66c",
+    "environment.txt": "df4cc3e611cb0fadc27c23588848a6f71e032a00",
+    "evidence-metadata.json": "f70b0a0441a79069f310cd9cda225e120424b636",
+    "export-manifest.json": "4d3fb31f355278531e712c615713777abf207dae",
+    "locked-result.json": "78d466574b4fdf22f5dacd575df72da767860249",
+    "source-provenance.json": "974a2fb5d3a2e3db5588f733301ebbb0b3cafec5",
+}
+
+OBD_MACHINE_BLOBS = {
+    "environment.txt": "709f941a9e6206392d29a6e9ce58a799f96643fc",
+    "evidence-metadata.json": "03a959ca71620f342a7fa1e774179080523dc48f",
+    "export-manifest.json": "59d34c7cfb38f341c13af0642d552e2f3a0a1f65",
+    "locked-result.json": "26e48927dfb20a4682046139452114c4298128e9",
+    "source-provenance.json": "a27c984ae4ab781ac090f1b8a833aa678428a1b2",
+}
+
 
 def _json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -18,6 +36,31 @@ def _json(path: Path) -> dict:
 
 def _sha256(path: Path) -> str:
     return "sha256:" + sha256(path.read_bytes()).hexdigest()
+
+
+def _git_blob_sha1(path: Path) -> str:
+    content = path.read_bytes()
+    payload = f"blob {len(content)}\0".encode() + content
+    return sha1(payload, usedforsecurity=False).hexdigest()
+
+
+def _assert_machine_evidence_blobs(directory: Path, expected: dict[str, str]) -> None:
+    actual = {
+        path.name
+        for path in directory.iterdir()
+        if path.is_file() and path.name != "README.md"
+    }
+    assert actual == set(expected)
+    for filename, blob_sha in expected.items():
+        assert _git_blob_sha1(directory / filename) == blob_sha
+
+
+def test_accepted_evidence_machine_records_are_immutable() -> None:
+    # These are identities of the persisted repository copies, not the source
+    # workflow-artifact SHA256 values. This locks the complete machine record,
+    # including compact OBD JSON fields that are not individually asserted below.
+    _assert_machine_evidence_blobs(CRITEO, CRITEO_MACHINE_BLOBS)
+    _assert_machine_evidence_blobs(OBD, OBD_MACHINE_BLOBS)
 
 
 def test_criteo_persisted_evidence_is_byte_identical_and_self_consistent() -> None:
