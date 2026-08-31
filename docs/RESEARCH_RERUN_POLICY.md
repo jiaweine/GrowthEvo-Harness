@@ -39,14 +39,16 @@ A manual run is appropriate for one of two purposes.
 
 ### 1. Replication of an accepted experiment
 
-A replication may rerun the exact frozen source, plan, candidate configuration, split, seeds, selection contract, and dependency environment to test reproducibility.
+A replication may rerun the exact frozen source, plan, candidate configuration, split, seeds, selection contract, dependency environment, and operating-system family to test reproducibility.
 
 The current full-data workflows use their persisted accepted environment snapshots as replication constraint sources and verify every exact installed distribution pin before real benchmark data may be accessed:
 
 - Criteo: `benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/environment.txt`;
 - OBD: `benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/environment.txt`.
 
-Changing either frozen dependency baseline is not an in-place replication; it is a new experiment environment and must receive a new preregistered identity rather than overwriting accepted evidence.
+Both accepted full-data runs were produced on the GitHub-hosted Ubuntu 24.04 family. The replication workflows therefore use the explicit `ubuntu-24.04` runner label instead of the moving `ubuntu-latest` alias. GitHub does not expose a hosted-runner label for an exact image build, so each future run records the resolved image metadata, architecture, kernel, libc, and `/etc/os-release` into `runner-environment.txt` and uploads it with the evidence bundle. An image patch revision may vary while remaining within the accepted OS family; any material numerical discrepancy must still be investigated rather than normalized away.
+
+Changing either frozen dependency baseline or the operating-system family is not an in-place replication; it is a new experiment environment and must receive a new preregistered identity rather than overwriting accepted evidence.
 
 A replication does **not** replace the accepted result merely because its numeric output differs slightly. Any material discrepancy must be investigated and documented before promotion status changes.
 
@@ -62,7 +64,8 @@ Changing any material upstream choice creates a new experiment identity, includi
 - support/evidence gates;
 - target-policy simulation protocol;
 - selection objective;
-- frozen dependency environment.
+- frozen dependency environment;
+- operating-system family.
 
 The new experiment must receive a new plan/fingerprint and a new evidence directory. The previous final holdout result must not be used as a tuning signal for the new candidate set.
 
