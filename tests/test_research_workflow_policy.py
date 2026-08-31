@@ -7,6 +7,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 OBD_BOOTSTRAP = ROOT / "scripts" / "bootstrap_obd_ci_environment.py"
+FROZEN_ENV_VERIFIER = ROOT / "scripts" / "verify_frozen_environment.py"
+ACCEPTED_FULL_OBD_ENV = (
+    ROOT
+    / "benchmarks"
+    / "ope"
+    / "results"
+    / "obd-full-all-random-to-bts"
+    / "7d538cea"
+    / "environment.txt"
+)
 
 CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_PYTHON_SHA = "5fda3b95a4ea91299a34e894583c3862153e4b97"
@@ -130,3 +140,33 @@ def test_accepted_full_data_workflows_are_manual_only_and_sha_pinned() -> None:
         assert f"actions/checkout@{CHECKOUT_SHA} # v7" in workflow
         assert f"actions/setup-python@{SETUP_PYTHON_SHA} # v7" in workflow
         assert f"actions/upload-artifact@{UPLOAD_ARTIFACT_SHA} # v7" in workflow
+
+
+def test_full_obd_replication_is_constrained_to_the_accepted_environment() -> None:
+    workflow = (WORKFLOWS / "full-obd-pr-validation.yml").read_text(encoding="utf-8")
+    accepted = ACCEPTED_FULL_OBD_ENV.read_text(encoding="utf-8")
+    accepted_path = (
+        "benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/environment.txt"
+    )
+    constraints_path = "/tmp/growthevo-full-obd/accepted-constraints.txt"
+    verifier_command = 'python scripts/verify_frozen_environment.py "$ACCEPTED_ENVIRONMENT"'
+
+    assert FROZEN_ENV_VERIFIER.is_file()
+    assert "torch==2.13.0+cpu" in accepted
+    assert "obp==0.4.1" in accepted
+    assert "sb-obp==0.5.10" in accepted
+    assert f"ACCEPTED_ENVIRONMENT: {accepted_path}" in workflow
+    assert "cache-dependency-path: |\n            pyproject.toml\n" in workflow
+    assert accepted_path in workflow
+    assert "Install frozen CPU research environment" in workflow
+    assert "'torch>=2.2,<3'" not in workflow
+    assert "'torch==2.13.0+cpu'" in workflow
+    assert "'obp==0.4.1'" in workflow
+    assert f"--constraint {constraints_path}" in workflow
+    assert verifier_command in workflow
+    assert workflow.index(verifier_command) < workflow.index(
+        "Run full preregistered Open Bandit benchmark"
+    )
+    assert constraints_path in workflow.split(
+        "Upload full OBD research evidence", maxsplit=1
+    )[1]
