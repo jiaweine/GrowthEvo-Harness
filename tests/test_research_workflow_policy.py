@@ -83,6 +83,30 @@ def test_small_obd_ci_uses_a_cache_identity_separate_from_core_python_312() -> N
     )
 
 
+def test_obd_cache_seed_is_trusted_main_only_and_matches_integration_identity() -> None:
+    seed = (WORKFLOWS / "obd-cache-seed.yml").read_text(encoding="utf-8")
+    cache_identity = ".github/cache/obd-pip-cache-v1.txt"
+
+    _assert_external_actions_are_immutable(seed)
+    assert "  push:\n    branches: [main]\n" in seed
+    assert "  workflow_dispatch:\n" in seed
+    assert "pull_request:" not in seed
+    assert "permissions:\n  contents: read\n" in seed
+    assert f"actions/checkout@{CHECKOUT_SHA} # v7" in seed
+    assert f"actions/setup-python@{SETUP_PYTHON_SHA} # v7" in seed
+    assert "cache-dependency-path: |\n            pyproject.toml\n" in seed
+    assert cache_identity in seed
+    assert "pyproject.toml\n      - .github/cache/obd-pip-cache-v1.txt" in seed
+    assert ".github/workflows/obd-cache-seed.yml" in seed
+    assert "torch==2.13.0+cpu" in seed
+    assert "pip install --no-deps 'obp==0.4.1'" in seed
+    assert "pip install -e '.[obd]'" in seed
+    assert 'obp.__version__ == "0.5.5"' in seed
+    assert 'version("sb-obp") == "0.5.10"' in seed
+    assert "growthevo-locked-ope" not in seed
+    assert "export_obd_locked_ope.py" not in seed
+
+
 def test_accepted_full_data_workflows_are_manual_only_and_sha_pinned() -> None:
     for filename in (
         "full-criteo-pr-validation.yml",
