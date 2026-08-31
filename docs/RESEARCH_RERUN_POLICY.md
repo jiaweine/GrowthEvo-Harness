@@ -29,6 +29,8 @@ The small-OBD cohort described by `benchmarks/ope/obd-small-all-random-to-bts.v1
 
 It may continue to serve as a regression/integration fixture and may reproduce an already recorded attempt. It must not justify promotion of a newly proposed estimator, Q backend, hyperparameter choice, or candidate grid. Future empirical OPE promotion research requires a fresh preregistered development identity before its validation evidence is opened. See `docs/OPE_DEVELOPMENT_GOVERNANCE.md`.
 
+To keep that regression role stable, the small-OBD CI bootstrap constrains third-party OBD dependencies to the already accepted full-OBD environment snapshot at `benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/environment.txt` and verifies every exact persisted distribution pin before the small dataset is fetched. The repository code itself still comes from the PR head; the accepted snapshot supplies only the frozen third-party dependency baseline.
+
 Development comparisons should recompute their baseline inside the same run. Tiny floating-point differences across hosted hardware are not evidence that a method improved and must not be converted into a rerun-until-winning process.
 
 ## When a manual full-data run is admissible
