@@ -22,6 +22,7 @@ CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_PYTHON_SHA = "5fda3b95a4ea91299a34e894583c3862153e4b97"
 UPLOAD_ARTIFACT_SHA = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
 ACTION_REF = re.compile(r"^\s*uses:\s+([^\s@]+)@([^\s#]+)", re.MULTILINE)
+TRIGGER_KEY = re.compile(r"^  ([A-Za-z0-9_-]+):(?:\s.*)?$", re.MULTILINE)
 
 
 def _assert_external_actions_are_immutable(workflow: str) -> None:
@@ -31,6 +32,13 @@ def _assert_external_actions_are_immutable(workflow: str) -> None:
         if action.startswith("./"):
             continue
         assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{action}@{ref} is not immutable"
+
+
+def _workflow_trigger_events(workflow: str) -> set[str]:
+    trigger_block = workflow.split("on:\n", maxsplit=1)[1].split(
+        "\npermissions:\n", maxsplit=1
+    )[0]
+    return set(TRIGGER_KEY.findall(trigger_block))
 
 
 def test_regular_ci_uses_immutable_node24_native_actions_and_builds_distribution() -> None:
@@ -132,6 +140,7 @@ def test_accepted_full_data_workflows_are_manual_only_and_sha_pinned() -> None:
         "full-obd-pr-validation.yml",
     ):
         workflow = (WORKFLOWS / filename).read_text(encoding="utf-8")
+        assert _workflow_trigger_events(workflow) == {"workflow_dispatch"}
         assert "workflow_dispatch:" in workflow
         assert "experiment_reason:" in workflow
         assert "pull_request:" not in workflow
