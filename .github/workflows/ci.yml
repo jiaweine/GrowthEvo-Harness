@@ -70,7 +70,7 @@ jobs:
           /tmp/growthevo-wheel/bin/growthevo-locked-targeting --help
 
   obd-integration:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       SB_OBP_COMMIT: 1c6d14677ec6f06094a2f8886a1158bab99c571e
@@ -93,6 +93,9 @@ jobs:
 
       - name: Install GrowthEvo with CPU-only OBD bridge
         run: python scripts/bootstrap_obd_ci_environment.py --freeze-output /tmp/growthevo-obd-environment.txt
+
+      - name: Capture OBD numeric runtime provenance
+        run: python scripts/capture_numeric_runtime.py /tmp/growthevo-obd-runtime.json
 
       - name: Verify compact logistic Q matches OBP tensor predictions
         run: |
@@ -280,6 +283,7 @@ jobs:
           path: |
             benchmarks/ope/obd-small-all-random-to-bts.v1.json
             /tmp/growthevo-obd-environment.txt
+            /tmp/growthevo-obd-runtime.json
             /tmp/growthevo-obd/export_manifest.json
             /tmp/growthevo-obd/ope_candidates.json
             /tmp/growthevo-obd/locked-result.json
