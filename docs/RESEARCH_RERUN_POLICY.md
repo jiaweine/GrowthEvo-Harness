@@ -18,8 +18,12 @@ Therefore:
 - `.github/workflows/full-criteo-pr-validation.yml` is triggered only by `workflow_dispatch`;
 - `.github/workflows/full-obd-pr-validation.yml` is triggered only by `workflow_dispatch`;
 - each dispatch requires a non-empty `experiment_reason`;
+- the dispatched commit must already belong to reviewed `main` history before real benchmark data may be accessed;
+- each admitted dispatch persists its reason, ref, commit SHA, workflow identity, actor, triggering actor, run ID/attempt, and the contemporaneous `origin/main` SHA in `dispatch-provenance.json`;
 - accepted full-data workflows do not run automatically for ordinary PRs;
 - ordinary PR CI instead runs unit/regression tests, package-build/install checks, persisted-evidence integrity checks, and the pinned small-OBD integration benchmark.
+
+The main-history rule intentionally allows an older commit that is an ancestor of current `main`, so an accepted historical state can be replicated without requiring the repository to move backward. A feature-branch commit that has not entered `main` is rejected. This code-level guard prevents accidental use of unreviewed research code; repository-level rulesets or protected environments remain the stronger control against an actor who deliberately edits or bypasses the workflow guard itself.
 
 ## Development validation exhaustion
 
@@ -69,7 +73,7 @@ Changing any material upstream choice creates a new experiment identity, includi
 - frozen dependency environment;
 - operating-system family.
 
-The new experiment must receive a new plan/fingerprint and a new evidence directory. The previous final holdout result must not be used as a tuning signal for the new candidate set.
+The new experiment must receive a new plan/fingerprint and a new evidence directory. The previous final holdout result must not be used as a tuning signal for the new candidate set. Its implementation must first pass ordinary review and enter `main`; only then is a manual full-data dispatch admissible.
 
 ## Promotion rule
 
@@ -85,4 +89,4 @@ A new real-world result may replace or supplement a README headline only after i
 8. a persisted compact evidence bundle with fingerprints/digests;
 9. passing repository integrity tests.
 
-The accepted evidence directories are continuously checked by `tests/test_persisted_evidence.py`. The workflow trigger contract is continuously checked by `tests/test_research_workflow_policy.py`.
+The accepted evidence directories are continuously checked by `tests/test_persisted_evidence.py`. The workflow trigger contract is continuously checked by `tests/test_research_workflow_policy.py` and `tests/test_full_research_dispatch_policy.py`.

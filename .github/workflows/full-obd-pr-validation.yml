@@ -29,6 +29,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - name: Set up Python and frozen OBD cache
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -38,6 +39,12 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/environment.txt
+
+      - name: Verify reviewed main-history dispatch
+        run: |
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          python scripts/verify_research_dispatch.py \
+            --output /tmp/growthevo-full-obd/dispatch-provenance.json
 
       - name: Inspect initial runner resources
         run: |
@@ -59,6 +66,7 @@ jobs:
             cat /etc/os-release
           } > /tmp/growthevo-full-obd/runner-environment.txt
           printf 'experiment_reason=%s\n' "$EXPERIMENT_REASON"
+          cat /tmp/growthevo-full-obd/dispatch-provenance.json
           cat /tmp/growthevo-full-obd/runner-environment.txt
           df -h
           free -h
@@ -143,6 +151,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
           path: |
+            /tmp/growthevo-full-obd/dispatch-provenance.json
             /tmp/growthevo-full-obd/accepted-constraints.txt
             /tmp/growthevo-full-obd/runner-environment.txt
             /tmp/growthevo-full-obd/pip-freeze.txt
