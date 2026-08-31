@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
+OBD_BOOTSTRAP = ROOT / "scripts" / "bootstrap_obd_ci_environment.py"
 
 CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_PYTHON_SHA = "5fda3b95a4ea91299a34e894583c3862153e4b97"
@@ -40,32 +41,36 @@ def test_regular_ci_uses_immutable_node24_native_actions_and_builds_distribution
     assert "growthevo-locked-targeting --help" in ci
 
 
-def test_small_obd_ci_preinstalls_cpu_only_torch_and_known_obp_resolution() -> None:
+def test_shared_obd_bootstrap_pins_cpu_only_torch_and_known_obp_resolution() -> None:
     ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
-    cpu_index = "https://download.pytorch.org/whl/cpu"
-    cpu_torch = "torch==2.13.0+cpu"
-    obp_resolution = "pip install --no-deps 'obp==0.4.1'"
-    obd_install = "pip install -e '.[obd]'"
+    bootstrap = OBD_BOOTSTRAP.read_text(encoding="utf-8")
+    bootstrap_command = "python scripts/bootstrap_obd_ci_environment.py"
 
     assert "Install GrowthEvo with CPU-only OBD bridge" in ci
-    assert cpu_index in ci
-    assert cpu_torch in ci
-    assert obp_resolution in ci
-    assert "assert not torch.cuda.is_available()" in ci
-    assert 'obp.__version__ == "0.5.5"' in ci
-    assert 'version("sb-obp") == "0.5.10"' in ci
-    assert 'version("obp") == "0.4.1"' in ci
-    assert "obp_module_version=" in ci
-    assert "sb_obp_distribution=" in ci
-    assert "legacy_obp_distribution=" in ci
-    assert ci.index(cpu_torch) < ci.index(obp_resolution) < ci.index(obd_install)
+    assert bootstrap_command in ci
+    assert 'CPU_INDEX_URL = "https://download.pytorch.org/whl/cpu"' in bootstrap
+    assert 'TORCH_REQUIREMENT = "torch==2.13.0+cpu"' in bootstrap
+    assert 'LEGACY_OBP_REQUIREMENT = "obp==0.4.1"' in bootstrap
+    assert 'GROWTHEVO_OBD_REQUIREMENT = ".[obd]"' in bootstrap
+    assert 'EXPECTED_TORCH_VERSION = "2.13.0+cpu"' in bootstrap
+    assert 'EXPECTED_OBP_MODULE_VERSION = "0.5.5"' in bootstrap
+    assert 'EXPECTED_SB_OBP_DISTRIBUTION_VERSION = "0.5.10"' in bootstrap
+    assert 'EXPECTED_LEGACY_OBP_DISTRIBUTION_VERSION = "0.4.1"' in bootstrap
+    assert "assert not cuda_available" in bootstrap
+    assert "obp_module_version=" in bootstrap
+    assert "sb_obp_distribution=" in bootstrap
+    assert "legacy_obp_distribution=" in bootstrap
+    assert "growthevo-locked-ope" not in bootstrap
+    assert "export_obd_locked_ope.py" not in bootstrap
 
 
 def test_small_obd_ci_persists_resolved_environment_with_evidence() -> None:
     ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+    bootstrap = OBD_BOOTSTRAP.read_text(encoding="utf-8")
     environment_path = "/tmp/growthevo-obd-environment.txt"
 
-    assert f"python -m pip freeze > {environment_path}" in ci
+    assert f"--freeze-output {environment_path}" in ci
+    assert '_pip("freeze", stdout=handle)' in bootstrap
     assert "Upload locked OBD evidence summary" in ci
     assert environment_path in ci.split("Upload locked OBD evidence summary", maxsplit=1)[1]
 
@@ -73,19 +78,25 @@ def test_small_obd_ci_persists_resolved_environment_with_evidence() -> None:
 def test_small_obd_ci_uses_a_cache_identity_separate_from_core_python_312() -> None:
     ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
     cache_identity = ".github/cache/obd-pip-cache-v1.txt"
+    bootstrap_path = "scripts/bootstrap_obd_ci_environment.py"
     core_ci, obd_ci = ci.split("  obd-integration:\n", maxsplit=1)
 
     assert cache_identity not in core_ci
+    assert bootstrap_path not in core_ci
     assert "cache-dependency-path: |\n            pyproject.toml\n" in obd_ci
     assert cache_identity in obd_ci
+    assert bootstrap_path in obd_ci
     assert (ROOT / cache_identity).read_text(encoding="utf-8").strip().endswith(
         "obd-research-cache-v1"
     )
 
 
 def test_obd_cache_seed_is_trusted_main_only_and_matches_integration_identity() -> None:
+    ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
     seed = (WORKFLOWS / "obd-cache-seed.yml").read_text(encoding="utf-8")
     cache_identity = ".github/cache/obd-pip-cache-v1.txt"
+    bootstrap_path = "scripts/bootstrap_obd_ci_environment.py"
+    bootstrap_command = f"python {bootstrap_path}"
 
     _assert_external_actions_are_immutable(seed)
     assert "  push:\n    branches: [main]\n" in seed
@@ -96,13 +107,11 @@ def test_obd_cache_seed_is_trusted_main_only_and_matches_integration_identity() 
     assert f"actions/setup-python@{SETUP_PYTHON_SHA} # v7" in seed
     assert "cache-dependency-path: |\n            pyproject.toml\n" in seed
     assert cache_identity in seed
-    assert "pyproject.toml\n      - .github/cache/obd-pip-cache-v1.txt" in seed
+    assert bootstrap_path in seed
+    assert f"      - {bootstrap_path}\n" in seed
     assert ".github/workflows/obd-cache-seed.yml" in seed
-    assert "torch==2.13.0+cpu" in seed
-    assert "pip install --no-deps 'obp==0.4.1'" in seed
-    assert "pip install -e '.[obd]'" in seed
-    assert 'obp.__version__ == "0.5.5"' in seed
-    assert 'version("sb-obp") == "0.5.10"' in seed
+    assert bootstrap_command in seed
+    assert bootstrap_command in ci
     assert "growthevo-locked-ope" not in seed
     assert "export_obd_locked_ope.py" not in seed
 
