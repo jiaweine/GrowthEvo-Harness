@@ -37,7 +37,9 @@ A manual run is appropriate for one of two purposes.
 
 ### 1. Replication of an accepted experiment
 
-A replication may rerun the exact frozen source, plan, candidate configuration, split, seeds, and selection contract to test reproducibility.
+A replication may rerun the exact frozen source, plan, candidate configuration, split, seeds, selection contract, and dependency environment to test reproducibility.
+
+For the currently accepted full OBD result, `.github/workflows/full-obd-pr-validation.yml` uses the persisted `benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/environment.txt` as the replication constraint source and verifies every exact installed distribution pin before the full-data runner is allowed to access the benchmark. Changing that frozen dependency baseline is not an in-place replication; it is a new experiment environment and must receive a new preregistered identity rather than overwriting the accepted evidence.
 
 A replication does **not** replace the accepted result merely because its numeric output differs slightly. Any material discrepancy must be investigated and documented before promotion status changes.
 
@@ -52,7 +54,8 @@ Changing any material upstream choice creates a new experiment identity, includi
 - candidate set or candidate hyperparameters;
 - support/evidence gates;
 - target-policy simulation protocol;
-- selection objective.
+- selection objective;
+- frozen dependency environment.
 
 The new experiment must receive a new plan/fingerprint and a new evidence directory. The previous final holdout result must not be used as a tuning signal for the new candidate set.
 
