@@ -118,8 +118,10 @@ def _validate_manifest(manifest: object) -> tuple[str, tuple[dict[str, object], 
         if paths_in_set != sorted(paths_in_set):
             raise ValueError(f"evidence set {name!r} file paths must be canonically sorted")
 
+    if len(set_names) != len(set(set_names)):
+        raise ValueError("evidence set names must be unique")
     if set_names != sorted(set_names):
-        raise ValueError("evidence set names must be unique and canonically sorted")
+        raise ValueError("evidence set names must be canonically sorted")
     return object_format, tuple(entries)
 
 
