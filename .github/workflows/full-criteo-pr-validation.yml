@@ -54,6 +54,7 @@ jobs:
             printf 'runner_arch=%s\n' "${RUNNER_ARCH:-unknown}"
             printf 'image_os=%s\n' "${ImageOS:-unknown}"
             printf 'image_version=%s\n' "${ImageVersion:-unknown}"
+            printf 'python=%s\n' "$(python --version 2>&1)"
             printf 'uname=%s\n' "$(uname -a)"
             printf 'libc=%s\n' "$(ldd --version | head -n 1)"
             printf '%s\n' '--- /etc/os-release ---'
