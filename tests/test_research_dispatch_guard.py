@@ -80,6 +80,8 @@ def test_historical_main_commit_is_allowed_and_persisted(tmp_path: Path) -> None
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "growthevo.research-dispatch.v1"
     assert payload["commit_sha"] == first
+    assert payload["workflow_sha"] == first
+    assert payload["workflow_sha_matches_commit"] is True
     assert payload["trusted_ref"] == "origin/main"
     assert payload["trusted_ref_sha_at_dispatch"] == second
     assert payload["commit_is_trusted_ref_ancestor"] is True
@@ -104,6 +106,28 @@ def test_unmerged_feature_commit_is_rejected(tmp_path: Path) -> None:
 
     assert completed.returncode != 0
     assert "is not part of trusted main history" in completed.stderr
+    assert not output.exists()
+
+
+def test_workflow_commit_must_match_evidence_commit(tmp_path: Path) -> None:
+    repo, first, second = _repo(tmp_path)
+    _git(repo, "checkout", "--detach", second)
+    output = tmp_path / "dispatch.json"
+    env = _env(second)
+    env["GITHUB_WORKFLOW_SHA"] = first
+
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPT), "--output", str(output)],
+        cwd=repo,
+        env=env,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert completed.returncode != 0
+    assert f"workflow commit {first} does not match evidence commit {second}" in completed.stderr
     assert not output.exists()
 
 
