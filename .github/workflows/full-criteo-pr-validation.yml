@@ -206,6 +206,23 @@ jobs:
           mkdir -p /tmp/growthevo-full-criteo/result
           python -m pip freeze > /tmp/growthevo-full-criteo/result/environment.txt
 
+      - name: Verify complete full Criteo evidence bundle
+        if: success()
+        shell: bash
+        run: |
+          for path in \
+            /tmp/growthevo-full-criteo/dispatch-provenance.json \
+            /tmp/growthevo-full-criteo/accepted-constraints.txt \
+            /tmp/growthevo-full-criteo/runner-environment.txt \
+            /tmp/growthevo-full-criteo/result/source-provenance.json \
+            /tmp/growthevo-full-criteo/result/criteo-v2.1-visit-top10.v1.json \
+            /tmp/growthevo-full-criteo/result/criteo-lgbm-candidates.v1.json \
+            /tmp/growthevo-full-criteo/result/export-manifest.json \
+            /tmp/growthevo-full-criteo/result/locked-result.json \
+            /tmp/growthevo-full-criteo/result/environment.txt; do
+            test -s "$path"
+          done
+
       - name: Upload full Criteo research evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
