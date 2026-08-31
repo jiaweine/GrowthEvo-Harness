@@ -161,6 +161,22 @@ jobs:
             test -s "$path"
           done
 
+      - name: Hash full OBD core evidence bundle
+        if: success()
+        run: |
+          python scripts/write_evidence_integrity_manifest.py \
+            --root /tmp/growthevo-full-obd \
+            --output /tmp/growthevo-full-obd/evidence-integrity.json \
+            dispatch-provenance.json \
+            accepted-constraints.txt \
+            runner-environment.txt \
+            pip-freeze.txt \
+            result/source-provenance.json \
+            result/obd-full-all-random-to-bts.v1.json \
+            result/export/export_manifest.json \
+            result/export/ope_candidates.json \
+            result/locked-result.json
+
       - name: Upload full OBD research evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -173,6 +189,7 @@ jobs:
             /tmp/growthevo-full-obd/accepted-constraints.txt
             /tmp/growthevo-full-obd/runner-environment.txt
             /tmp/growthevo-full-obd/pip-freeze.txt
+            /tmp/growthevo-full-obd/evidence-integrity.json
             /tmp/growthevo-full-obd/full-run.log
             /tmp/growthevo-full-obd/result/source-provenance.json
             /tmp/growthevo-full-obd/result/obd-full-all-random-to-bts.v1.json
