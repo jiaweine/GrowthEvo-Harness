@@ -142,6 +142,37 @@ def test_accepted_full_data_workflows_are_manual_only_and_sha_pinned() -> None:
         assert f"actions/upload-artifact@{UPLOAD_ARTIFACT_SHA} # v7" in workflow
 
 
+def test_accepted_full_data_workflows_pin_runner_family_and_persist_platform_provenance() -> None:
+    cases = (
+        (
+            "full-criteo-pr-validation.yml",
+            "/tmp/growthevo-full-criteo/runner-environment.txt",
+            "Run full preregistered Criteo benchmark",
+            "Upload full Criteo research evidence",
+        ),
+        (
+            "full-obd-pr-validation.yml",
+            "/tmp/growthevo-full-obd/runner-environment.txt",
+            "Run full preregistered Open Bandit benchmark",
+            "Upload full OBD research evidence",
+        ),
+    )
+    for filename, provenance_path, benchmark_step, upload_step in cases:
+        workflow = (WORKFLOWS / filename).read_text(encoding="utf-8")
+        assert "runs-on: ubuntu-24.04" in workflow
+        assert "runs-on: ubuntu-latest" not in workflow
+        assert 'grep -q \'^VERSION_ID="24.04"$\' /etc/os-release' in workflow
+        assert "${RUNNER_OS:-unknown}" in workflow
+        assert "${RUNNER_ARCH:-unknown}" in workflow
+        assert "${ImageOS:-unknown}" in workflow
+        assert "${ImageVersion:-unknown}" in workflow
+        assert "uname -a" in workflow
+        assert "ldd --version" in workflow
+        assert provenance_path in workflow
+        assert workflow.index(provenance_path) < workflow.index(benchmark_step)
+        assert provenance_path in workflow.split(upload_step, maxsplit=1)[1]
+
+
 def test_full_obd_replication_is_constrained_to_the_accepted_environment() -> None:
     workflow = (WORKFLOWS / "full-obd-pr-validation.yml").read_text(encoding="utf-8")
     accepted = ACCEPTED_FULL_OBD_ENV.read_text(encoding="utf-8")
