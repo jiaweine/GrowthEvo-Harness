@@ -46,6 +46,12 @@ def verify_dispatch(*, trusted_ref: str, reason: str) -> dict[str, object]:
             f"checked-out commit {checked_out_sha} does not match GITHUB_SHA {expected_sha}"
         )
 
+    workflow_sha = _required_env("GITHUB_WORKFLOW_SHA")
+    if workflow_sha != expected_sha:
+        raise RuntimeError(
+            f"workflow commit {workflow_sha} does not match evidence commit {expected_sha}"
+        )
+
     trusted_sha = _git_output("rev-parse", f"{trusted_ref}^{{commit}}")
     ancestry = subprocess.run(
         ["git", "merge-base", "--is-ancestor", expected_sha, trusted_ref],
@@ -73,7 +79,8 @@ def verify_dispatch(*, trusted_ref: str, reason: str) -> dict[str, object]:
         "triggering_actor": os.environ.get("GITHUB_TRIGGERING_ACTOR", "").strip() or None,
         "workflow": _required_env("GITHUB_WORKFLOW"),
         "workflow_ref": _required_env("GITHUB_WORKFLOW_REF"),
-        "workflow_sha": _required_env("GITHUB_WORKFLOW_SHA"),
+        "workflow_sha": workflow_sha,
+        "workflow_sha_matches_commit": True,
         "ref": _required_env("GITHUB_REF"),
         "ref_name": _required_env("GITHUB_REF_NAME"),
         "commit_sha": expected_sha,
