@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 from growthevo.bench.targeting_experiment_plan import load_targeting_experiment_plan
@@ -8,6 +9,15 @@ from growthevo.bench.targeting_experiment_plan import load_targeting_experiment_
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SCRIPT = _ROOT / "scripts" / "run_criteo_full_locked.py"
+_ACCEPTED_RESULT = (
+    _ROOT
+    / "benchmarks"
+    / "targeting"
+    / "results"
+    / "criteo-v2.1-visit-top10"
+    / "7ac26a5a"
+    / "locked-result.json"
+)
 _SPEC = importlib.util.spec_from_file_location("growthevo_full_criteo_runner", _SCRIPT)
 assert _SPEC is not None and _SPEC.loader is not None
 _RUNNER = importlib.util.module_from_spec(_SPEC)
@@ -43,6 +53,23 @@ def test_candidate_config_fingerprint_is_bound_to_v2_plan() -> None:
         "x-lgbm",
         "r-lgbm",
         "dr-lgbm",
+    ]
+
+
+def test_canonical_full_criteo_preregistration_matches_accepted_result() -> None:
+    plan = load_targeting_experiment_plan(
+        _ROOT / "benchmarks" / "targeting" / "criteo-v2.1-visit-top10.v1.json"
+    )
+    _, candidate_fingerprint = _RUNNER._load_candidate_config(
+        _ROOT / "benchmarks" / "targeting" / "criteo-lgbm-candidates.v1.json"
+    )
+    result = json.loads(_ACCEPTED_RESULT.read_text(encoding="utf-8"))
+
+    assert plan.fingerprint == result["experiment_plan"]["fingerprint"]
+    assert plan.fingerprint == result["artifact"]["metrics"]["experiment_plan_fingerprint"]
+    assert candidate_fingerprint == result["candidate_config"]["fingerprint"]
+    assert candidate_fingerprint == result["artifact"]["metrics"][
+        "candidate_config_fingerprint"
     ]
 
 
