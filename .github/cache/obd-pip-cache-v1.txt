@@ -1,4 +1,5 @@
 # Dedicated pip-cache identity for the OBD research integration job.
 # Keep this separate from the core Python 3.12 setup-python cache reservation.
-# Bump this token when the OBD CI dependency strategy materially changes.
+# The shared OBD bootstrap script is also hashed, so install changes rotate the key automatically.
+# Bump this token only for manual invalidation not captured by dependency inputs.
 obd-research-cache-v1
