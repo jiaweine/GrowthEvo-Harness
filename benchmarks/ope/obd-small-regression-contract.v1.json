@@ -1,0 +1,34 @@
+{
+  "schema_version": "growthevo.obd-regression-contract.v1",
+  "purpose": "regression_only_not_promotion_evidence",
+  "dataset": "obd-small-all-random-to-bts",
+  "expected": {
+    "selected_candidate": "switch-5",
+    "estimator": "switch_dr",
+    "candidate_count": 9,
+    "experiment_plan_fingerprint": "d8ac714101799258f5202723ca3490e3b6b3c600",
+    "export_manifest_fingerprint": "9291f584b8b249edfe4f06fa15ad3bdea3d567d9",
+    "protocol_fingerprint": "b2de0a82ff14f8e242b946d5f7f2e4656ecd2b29",
+    "support_coverage": 1.0,
+    "validation_support_coverage": 1.0,
+    "effective_sample_ratio": 0.163667187578572,
+    "validation_effective_sample_ratio": 0.1694148651742783,
+    "estimate": 0.004231593960258252,
+    "standard_error": 0.001195674905425942,
+    "validation_absolute_error": 0.001282521969647588
+  },
+  "absolute_tolerances": {
+    "support_coverage": 0.0,
+    "validation_support_coverage": 0.0,
+    "effective_sample_ratio": 1e-12,
+    "validation_effective_sample_ratio": 1e-12,
+    "estimate": 1e-6,
+    "standard_error": 1e-6,
+    "validation_absolute_error": 1e-6
+  },
+  "realization_specific_fields": [
+    "tuning_fingerprint",
+    "test_fingerprint"
+  ],
+  "note": "The small OBD cohort is exhausted for promotion research. This contract is only a CI regression guard. Structure and protocol identities are exact; Q-derived floating metrics allow narrow host-level numerical tolerance. Realization-specific JSONL fingerprints are recorded in artifacts but are not compared across hosted machines."
+}
