@@ -19,19 +19,33 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def build_manifest(*, root: Path, files: Iterable[str]) -> dict[str, object]:
-    root = root.resolve()
-    normalized = sorted(set(files))
+def _normalize_files(files: Iterable[str]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in files:
+        relative_path = Path(raw)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise ValueError(f"evidence path must stay under root: {raw}")
+        relative = relative_path.as_posix()
+        if relative in {"", "."}:
+            raise ValueError("evidence path must name a file")
+        if relative in seen:
+            raise ValueError(f"duplicate evidence path: {relative}")
+        seen.add(relative)
+        normalized.append(relative)
     if not normalized:
         raise ValueError("at least one evidence file is required")
+    return tuple(sorted(normalized))
+
+
+def build_manifest(*, root: Path, files: Iterable[str]) -> dict[str, object]:
+    root = root.resolve()
+    normalized = _normalize_files(files)
 
     entries: list[dict[str, object]] = []
     total_size = 0
     for relative in normalized:
         relative_path = Path(relative)
-        if relative_path.is_absolute() or ".." in relative_path.parts:
-            raise ValueError(f"evidence path must stay under root: {relative}")
-
         path = (root / relative_path).resolve()
         if not path.is_relative_to(root):
             raise ValueError(f"evidence path escapes root: {relative}")
@@ -45,7 +59,7 @@ def build_manifest(*, root: Path, files: Iterable[str]) -> dict[str, object]:
         total_size += size
         entries.append(
             {
-                "path": relative_path.as_posix(),
+                "path": relative,
                 "sha256": _sha256(path),
                 "size_bytes": size,
             }
@@ -61,7 +75,16 @@ def build_manifest(*, root: Path, files: Iterable[str]) -> dict[str, object]:
 
 
 def write_manifest(*, root: Path, output: Path, files: Iterable[str]) -> dict[str, object]:
-    manifest = build_manifest(root=root, files=files)
+    root = root.resolve()
+    normalized = _normalize_files(files)
+    output = output.resolve()
+    if not output.is_relative_to(root):
+        raise ValueError("integrity manifest output must stay under root")
+    output_relative = output.relative_to(root).as_posix()
+    if output_relative in normalized:
+        raise ValueError("integrity manifest output must not overwrite an evidence file")
+
+    manifest = build_manifest(root=root, files=normalized)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest
