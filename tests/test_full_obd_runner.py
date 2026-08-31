@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +13,15 @@ from growthevo.bench.ope_experiment_plan import load_ope_experiment_plan
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SCRIPT = _ROOT / "scripts" / "run_obd_full_locked.py"
+_ACCEPTED_PROVENANCE = (
+    _ROOT
+    / "benchmarks"
+    / "ope"
+    / "results"
+    / "obd-full-all-random-to-bts"
+    / "7d538cea"
+    / "source-provenance.json"
+)
 _SPEC = importlib.util.spec_from_file_location("growthevo_full_obd_runner", _SCRIPT)
 assert _SPEC is not None and _SPEC.loader is not None
 _RUNNER = importlib.util.module_from_spec(_SPEC)
@@ -85,6 +96,99 @@ def test_full_mirror_transport_is_pinned_to_obd_v1_revision() -> None:
     target_url = _RUNNER._mirror_url("bts", "all", "all.csv")
     assert "/resolve/57a688e/random/all/all.csv" in behavior_url
     assert "/resolve/57a688e/bts/all/all.csv" in target_url
+
+
+def test_full_source_identity_matches_accepted_provenance() -> None:
+    provenance = json.loads(_ACCEPTED_PROVENANCE.read_text(encoding="utf-8"))
+
+    assert _RUNNER._CANONICAL_RELEASE == provenance["canonical_release_url"]
+    assert _RUNNER._HF_DATASET == provenance["mirror_dataset"]
+    assert _RUNNER._HF_DATA_REVISION == provenance["mirror_data_revision"]
+    assert _RUNNER._mirror_url("random", "all", "all.csv") == provenance["behavior_url"]
+    assert _RUNNER._mirror_url("bts", "all", "all.csv") == provenance[
+        "target_reference_url"
+    ]
+    assert _RUNNER._mirror_url("random", "all", "item_context.csv") == provenance[
+        "item_context_url"
+    ]
+    assert _RUNNER._EXPECTED_SOURCE_BYTES == {
+        "behavior": provenance["behavior_bytes"],
+        "target_reference": provenance["target_reference_bytes"],
+        "item_context": provenance["item_context_bytes"],
+    }
+    assert _RUNNER._EXPECTED_SOURCE_SHA256 == {
+        "behavior": provenance["behavior_sha256"],
+        "target_reference": provenance["target_reference_sha256"],
+        "item_context": provenance["item_context_sha256"],
+    }
+
+
+def test_pinned_source_identity_fails_closed_on_wrong_size(tmp_path: Path) -> None:
+    source = tmp_path / "behavior.csv"
+    source.write_bytes(b"wrong")
+
+    with pytest.raises(RuntimeError, match="behavior size mismatch"):
+        _RUNNER._verify_pinned_source_file(source, identity="behavior")
+
+
+def test_pinned_source_identity_fails_closed_on_wrong_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "behavior.csv"
+    source.write_bytes(b"wrong")
+    monkeypatch.setitem(_RUNNER._EXPECTED_SOURCE_BYTES, "behavior", source.stat().st_size)
+
+    with pytest.raises(RuntimeError, match="behavior SHA256 mismatch"):
+        _RUNNER._verify_pinned_source_file(source, identity="behavior")
+
+
+def test_pinned_source_identity_returns_verified_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "behavior.csv"
+    payload = b"verified"
+    source.write_bytes(payload)
+    monkeypatch.setitem(_RUNNER._EXPECTED_SOURCE_BYTES, "behavior", len(payload))
+    monkeypatch.setitem(
+        _RUNNER._EXPECTED_SOURCE_SHA256,
+        "behavior",
+        hashlib.sha256(payload).hexdigest(),
+    )
+
+    assert _RUNNER._verify_pinned_source_file(source, identity="behavior") == (
+        len(payload),
+        hashlib.sha256(payload).hexdigest(),
+    )
+
+
+def test_preexisting_root_rejects_wrong_identity_before_export(tmp_path: Path) -> None:
+    data_root = _make_obd_root(tmp_path / "obd")
+
+    with pytest.raises(RuntimeError, match="behavior size mismatch"):
+        _RUNNER.run_full_obd(
+            data_root=data_root,
+            cache_dir=tmp_path / "cache",
+            output_dir=tmp_path / "output",
+            plan_path=_ROOT / "benchmarks" / "ope" / "obd-full-all-random-to-bts.v1.json",
+        )
+
+
+def test_downloaded_mirror_rejects_wrong_identity_before_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_download(_url: str, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"wrong")
+
+    monkeypatch.setattr(_RUNNER, "_download", fake_download)
+    monkeypatch.setattr(
+        _RUNNER,
+        "_assert_download_budget",
+        lambda _cache_dir, downloads: {url: None for url, _destination in downloads},
+    )
+
+    with pytest.raises(RuntimeError, match="behavior size mismatch"):
+        _RUNNER._download_campaign_pair(tmp_path / "cache", campaign="all")
 
 
 def test_download_budget_fails_before_transfer_when_known_files_do_not_fit(
