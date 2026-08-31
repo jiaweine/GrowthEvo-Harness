@@ -12,7 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: full-criteo-${{ github.ref }}
+  group: full-criteo-research-validation
+  queue: max
   cancel-in-progress: false
 
 jobs:
