@@ -56,6 +56,19 @@ def test_small_obd_ci_preinstalls_cpu_only_torch_and_known_obp_resolution() -> N
     assert ci.index(cpu_torch) < ci.index(obp_resolution) < ci.index(obd_install)
 
 
+def test_small_obd_ci_uses_a_cache_identity_separate_from_core_python_312() -> None:
+    ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+    cache_identity = ".github/cache/obd-pip-cache-v1.txt"
+    core_ci, obd_ci = ci.split("  obd-integration:\n", maxsplit=1)
+
+    assert cache_identity not in core_ci
+    assert "cache-dependency-path: |\n            pyproject.toml\n" in obd_ci
+    assert cache_identity in obd_ci
+    assert (ROOT / cache_identity).read_text(encoding="utf-8").strip().endswith(
+        "obd-research-cache-v1"
+    )
+
+
 def test_accepted_full_data_workflows_are_manual_only_and_sha_pinned() -> None:
     for filename in (
         "full-criteo-pr-validation.yml",
