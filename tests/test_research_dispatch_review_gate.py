@@ -37,9 +37,15 @@ def _pull(*, base_ref: str = "main", merge_sha: str = MERGE_SHA) -> dict[str, ob
     }
 
 
-def _run(*, attempt: int = 1, conclusion: str = "success", path: str = ".github/workflows/ci.yml") -> dict[str, object]:
+def _run(
+    *,
+    run_id: int = 244,
+    attempt: int = 1,
+    conclusion: str = "success",
+    path: str = ".github/workflows/ci.yml",
+) -> dict[str, object]:
     return {
-        "id": 244,
+        "id": run_id,
         "run_attempt": attempt,
         "head_sha": HEAD_SHA,
         "event": "pull_request",
@@ -143,14 +149,14 @@ def test_review_gate_rejects_wrong_merge_identity(
         )
 
 
-def test_review_gate_rejects_stale_success_when_latest_ci_attempt_failed(
+def test_review_gate_prefers_newer_failed_run_over_older_rerun_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_api(
         monkeypatch,
         runs=[
-            _run(attempt=1, conclusion="success"),
-            _run(attempt=2, conclusion="failure"),
+            _run(run_id=244, attempt=2, conclusion="success"),
+            _run(run_id=245, attempt=1, conclusion="failure"),
         ],
     )
 
