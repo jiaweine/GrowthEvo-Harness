@@ -22,16 +22,13 @@ def _load_json(path: Path, *, label: str) -> dict[str, Any]:
     return value
 
 
-def _safe_relative_path(raw: object, *, label: str) -> str:
+def _safe_filename(raw: object, *, label: str) -> str:
     if not isinstance(raw, str) or not raw:
-        raise ValueError(f"{label} must be a non-empty string")
+        raise ValueError(f"{label} must be a non-empty filename")
     path = Path(raw)
-    if path.is_absolute() or ".." in path.parts:
-        raise ValueError(f"{label} must stay under its evidence root: {raw!r}")
-    normalized = path.as_posix()
-    if normalized in {"", "."}:
-        raise ValueError(f"{label} must name a file")
-    return normalized
+    if path.is_absolute() or len(path.parts) != 1 or path.name in {"", ".", ".."}:
+        raise ValueError(f"{label} must be one logical filename without directories: {raw!r}")
+    return path.name
 
 
 def _sha256(path: Path) -> str:
@@ -55,39 +52,52 @@ def _validate_prefixed_sha256(raw: object, *, label: str) -> str:
     return digest
 
 
-def _source_entry_for_key(
-    logical_name: str,
-    *,
+def _manifest_entries_by_filename(
     entries: tuple[dict[str, object], ...],
-) -> dict[str, object]:
-    if "/" in logical_name:
-        matches = [entry for entry in entries if entry["path"] == logical_name]
-    else:
-        matches = [
-            entry
-            for entry in entries
-            if Path(str(entry["path"])).name == logical_name
-        ]
-    if not matches:
-        raise ValueError(f"metadata source file is not covered by the integrity manifest: {logical_name}")
-    if len(matches) != 1:
-        paths = sorted(str(entry["path"]) for entry in matches)
-        raise ValueError(
-            f"metadata source file is ambiguous in the integrity manifest: {logical_name}: {paths}"
+) -> dict[str, dict[str, object]]:
+    indexed: dict[str, dict[str, object]] = {}
+    duplicate_paths: dict[str, list[str]] = {}
+    for entry in entries:
+        path = str(entry["path"])
+        name = Path(path).name
+        if name in indexed:
+            duplicate_paths.setdefault(name, [str(indexed[name]["path"])]).append(path)
+        else:
+            indexed[name] = entry
+    if duplicate_paths:
+        rendered = "; ".join(
+            f"{name}: {sorted(paths)}" for name, paths in sorted(duplicate_paths.items())
         )
-    return matches[0]
+        raise ValueError(
+            "source integrity manifest filenames must be unique for acceptance metadata: " + rendered
+        )
+    return indexed
 
 
-def _load_copy_contract(metadata: dict[str, Any]) -> tuple[dict[str, object], dict[str, object]]:
+def _load_copy_contract(
+    metadata: dict[str, Any],
+    *,
+    expected_names: set[str],
+) -> tuple[dict[str, object], dict[str, object]]:
     source_hashes = metadata.get("source_artifact_file_sha256")
     copy_formats = metadata.get("persisted_copy_format")
     if not isinstance(source_hashes, dict) or not source_hashes:
         raise ValueError("metadata source_artifact_file_sha256 must be a non-empty object")
     if not isinstance(copy_formats, dict) or not copy_formats:
         raise ValueError("metadata persisted_copy_format must be a non-empty object")
-    if set(source_hashes) != set(copy_formats):
+
+    source_names = {_safe_filename(name, label="metadata source file name") for name in source_hashes}
+    copy_names = {_safe_filename(name, label="metadata copy-format file name") for name in copy_formats}
+    if source_names != copy_names:
         raise ValueError(
             "metadata source_artifact_file_sha256 and persisted_copy_format must name the same files"
+        )
+    if source_names != expected_names:
+        missing = sorted(expected_names - source_names)
+        extra = sorted(source_names - expected_names)
+        raise ValueError(
+            "acceptance metadata must cover every source integrity-manifest file exactly once: "
+            f"missing={missing}, extra={extra}"
         )
     return source_hashes, copy_formats
 
@@ -141,10 +151,19 @@ def verify_acceptance(
     persisted_root = persisted_root.resolve()
     metadata_path = metadata_path.resolve()
 
+    if not integrity_manifest.is_relative_to(source_root):
+        raise ValueError("integrity manifest must be inside the extracted source artifact root")
+    if not metadata_path.is_relative_to(persisted_root):
+        raise ValueError("evidence metadata must be inside the persisted evidence root")
+
     verified_manifest = verify_manifest(root=source_root, manifest_path=integrity_manifest)
     manifest_entries = tuple(verified_manifest["files"])
+    entries_by_name = _manifest_entries_by_filename(manifest_entries)
     metadata = _load_json(metadata_path, label="evidence metadata")
-    source_hashes, copy_formats = _load_copy_contract(metadata)
+    source_hashes, copy_formats = _load_copy_contract(
+        metadata,
+        expected_names=set(entries_by_name),
+    )
 
     workflow_digest = metadata.get("workflow_artifact_digest")
     if workflow_digest is not None:
@@ -152,12 +171,12 @@ def verify_acceptance(
 
     verified_files: list[dict[str, object]] = []
     for raw_name in sorted(source_hashes):
-        logical_name = _safe_relative_path(raw_name, label="metadata source file name")
+        logical_name = _safe_filename(raw_name, label="metadata source file name")
         expected_digest = _validate_prefixed_sha256(
             source_hashes[raw_name],
             label=f"metadata source SHA256 for {logical_name}",
         )
-        entry = _source_entry_for_key(logical_name, entries=manifest_entries)
+        entry = entries_by_name[logical_name]
         source_relative = str(entry["path"])
         manifest_digest = str(entry["sha256"])
         if expected_digest != manifest_digest:
