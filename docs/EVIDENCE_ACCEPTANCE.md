@@ -67,7 +67,26 @@ A successful verifier run is necessary but not sufficient for promotion. Review 
 
 ## Persisting and sealing
 
-Only after the acceptance handoff verifies should a PR add or update a promoted accepted-evidence set and its repository seal. The PR must keep the accepted machine-readable record explicit, update `benchmarks/accepted-evidence-integrity.v1.json` for the new accepted file set, and pass:
+Only after the acceptance handoff verifies should a PR add a promoted accepted-evidence set and extend the repository seal. The seal update is append-only: historical sealed evidence must remain byte-for-byte and blob-for-blob valid rather than being refreshed to whatever happens to be in the worktree.
+
+Stage every file that belongs to the new accepted evidence set, including any already tracked preregistration/config file that should become part of that set. Then append the new set explicitly:
+
+```bash
+git add benchmarks/.../results/.../<evidence-id>/... benchmarks/.../plan-or-config.json
+python scripts/append_accepted_evidence_seal.py \
+  --name '<benchmark>/<evidence-id>' \
+  benchmarks/.../plan-or-config.json \
+  benchmarks/.../results/.../<evidence-id>/environment.txt \
+  benchmarks/.../results/.../<evidence-id>/evidence-metadata.json \
+  benchmarks/.../results/.../<evidence-id>/export-manifest.json \
+  benchmarks/.../results/.../<evidence-id>/locked-result.json \
+  benchmarks/.../results/.../<evidence-id>/source-provenance.json
+git add benchmarks/accepted-evidence-integrity.v1.json
+```
+
+The append-only writer first requires the starting seal manifest itself to match `HEAD` exactly and runs the existing accepted-evidence verifier over every historical sealed file. It then rejects duplicate set names, already sealed paths, missing/non-regular index entries, and any candidate whose Git index blob differs from its worktree blob. It has no mode for resealing or refreshing an existing set. The explicit file list remains a reviewable inventory rather than being inferred from a directory glob.
+
+The writer does **not** accept or promote evidence. It only records the exact Git blob identities of an already reviewed, already staged proposed evidence set. Review the resulting seal diff, then commit the evidence files and seal together. The PR must pass:
 
 ```bash
 python scripts/verify_accepted_evidence_integrity.py
