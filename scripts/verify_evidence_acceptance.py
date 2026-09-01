@@ -26,7 +26,12 @@ def _safe_filename(raw: object, *, label: str) -> str:
     if not isinstance(raw, str) or not raw:
         raise ValueError(f"{label} must be a non-empty filename")
     path = Path(raw)
-    if path.is_absolute() or len(path.parts) != 1 or path.name in {"", ".", ".."}:
+    if (
+        path.is_absolute()
+        or len(path.parts) != 1
+        or path.name in {"", ".", ".."}
+        or raw != path.name
+    ):
         raise ValueError(f"{label} must be one logical filename without directories: {raw!r}")
     return path.name
 
@@ -85,13 +90,12 @@ def _load_copy_contract(
         raise ValueError("metadata source_artifact_file_sha256 must be a non-empty object")
     if not isinstance(copy_formats, dict) or not copy_formats:
         raise ValueError("metadata persisted_copy_format must be a non-empty object")
-
-    source_names = {_safe_filename(name, label="metadata source file name") for name in source_hashes}
-    copy_names = {_safe_filename(name, label="metadata copy-format file name") for name in copy_formats}
-    if source_names != copy_names:
+    if set(source_hashes) != set(copy_formats):
         raise ValueError(
             "metadata source_artifact_file_sha256 and persisted_copy_format must name the same files"
         )
+
+    source_names = {_safe_filename(name, label="metadata source file name") for name in source_hashes}
     if source_names != expected_names:
         missing = sorted(expected_names - source_names)
         extra = sorted(source_names - expected_names)
@@ -165,9 +169,10 @@ def verify_acceptance(
         expected_names=set(entries_by_name),
     )
 
-    workflow_digest = metadata.get("workflow_artifact_digest")
-    if workflow_digest is not None:
-        _validate_prefixed_sha256(workflow_digest, label="metadata workflow_artifact_digest")
+    _validate_prefixed_sha256(
+        metadata.get("workflow_artifact_digest"),
+        label="metadata workflow_artifact_digest",
+    )
 
     verified_files: list[dict[str, object]] = []
     for raw_name in sorted(source_hashes):
