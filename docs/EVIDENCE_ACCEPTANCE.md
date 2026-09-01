@@ -11,11 +11,11 @@ GrowthEvo has two different integrity layers:
 1. A successful full-data workflow writes `evidence-integrity.json`, which SHA-256 binds the files in that workflow artifact.
 2. Persisted accepted evidence is protected after commit by `benchmarks/accepted-evidence-integrity.v1.json`, which binds repository paths to exact Git blob identities.
 
-Those layers protect different moments. The acceptance handoff must additionally prove that the files copied or compacted into a proposed accepted-evidence directory came from the verified workflow bundle rather than from another run, an edited local copy, or an incomplete subset. It must also bind the proposed acceptance record to the manual dispatch identity already captured inside that hashed workflow bundle.
+Those layers protect different moments. The acceptance handoff must additionally prove that the files copied or compacted into a proposed accepted-evidence directory came from the verified workflow bundle rather than from another run, an edited local copy, or an incomplete subset. It must also bind the proposed acceptance record to the manual dispatch identity already captured inside that hashed workflow bundle and to the run/artifact identity reported by GitHub Actions itself.
 
 ## Required acceptance metadata
 
-A proposed `evidence-metadata.json` must retain positive-integer `workflow_run_id` and `workflow_artifact_id` values plus the GitHub-reported `workflow_artifact_digest` according to the repository's evidence-record schema. Before extraction, compare the recorded artifact ID/digest with the values reported by GitHub Actions for the downloaded artifact.
+A proposed `evidence-metadata.json` must retain positive-integer `workflow_run_id` and `workflow_artifact_id` values plus the GitHub-reported `workflow_artifact_digest` according to the repository's evidence-record schema.
 
 The extracted bundle must contain `dispatch-provenance.json`, and that file must be covered by `evidence-integrity.json`. The acceptance verifier requires the dispatch provenance to record:
 
@@ -25,7 +25,7 @@ The extracted bundle must contain `dispatch-provenance.json`, and that file must
 - `reviewed_ci_verified=true` and a reviewed PR base equal to the trusted branch;
 - a dispatch `run_id` equal to metadata `workflow_run_id`.
 
-The local verifier can therefore prove that the proposed metadata refers to the same run/commit identity recorded inside the already-hashed source bundle. It cannot independently authenticate the GitHub artifact ID or artifact digest, because those values are assigned by the platform after upload; those two values remain a platform-level review check.
+The source-bundle verifier can therefore prove that the proposed metadata refers to the same run/commit identity recorded inside the already-hashed bundle. Platform-assigned artifact identity is verified separately against GitHub Actions rather than trusted from hand-entered metadata.
 
 For the extracted bundle, `source_artifact_file_sha256` and `persisted_copy_format` must cover **every file named by `evidence-integrity.json` exactly once**. No source file may disappear from the acceptance record merely because it is not persisted in the repository.
 
@@ -37,7 +37,43 @@ Each file must use one of these explicit copy contracts:
 
 The current full-data workflow bundles use unique basenames for their integrity-manifest files. The acceptance verifier rejects duplicate basenames rather than guessing which source file a metadata entry refers to.
 
-## Verification procedure
+## Verify GitHub run and artifact identity
+
+Before accepting the extracted bundle, query GitHub Actions using the exact workflow path and artifact name for the benchmark. The verifier is read-only: it does not download the artifact, trigger a workflow, modify metadata, or promote evidence.
+
+For Criteo:
+
+```bash
+python scripts/verify_evidence_artifact_identity.py \
+  --metadata benchmarks/.../results/.../<evidence-id>/evidence-metadata.json \
+  --repository jiaweine/GrowthEvo-Harness \
+  --workflow-path .github/workflows/full-criteo-pr-validation.yml \
+  --artifact-name criteo-full-preregistered-evidence
+```
+
+For Open Bandit:
+
+```bash
+python scripts/verify_evidence_artifact_identity.py \
+  --metadata benchmarks/.../results/.../<evidence-id>/evidence-metadata.json \
+  --repository jiaweine/GrowthEvo-Harness \
+  --workflow-path .github/workflows/full-obd-pr-validation.yml \
+  --artifact-name obd-full-preregistered-evidence
+```
+
+Set `GITHUB_TOKEN` when available for authenticated API access. The verifier fails closed unless GitHub reports that:
+
+- metadata `workflow_run_id` is a completed successful `workflow_dispatch` run in the requested repository;
+- the run `head_sha` equals metadata `evidence_commit_sha`;
+- the run used the exact expected full-data workflow path;
+- metadata `workflow_artifact_id` names the exact expected artifact from that run;
+- the artifact is not expired;
+- the platform-reported artifact digest exactly equals metadata `workflow_artifact_digest`;
+- the artifact's embedded run/repository/commit provenance agrees with the workflow run.
+
+This check is intentionally for **future** accepted evidence produced by the current manual-dispatch workflows. Historical accepted Criteo and OBD evidence were produced under earlier workflow policies and are not retroactively required to satisfy `event_name=workflow_dispatch`.
+
+## Verify the extracted bundle and persisted copies
 
 After downloading and extracting the successful workflow artifact, prepare the proposed persisted evidence directory and its `evidence-metadata.json`. Then run:
 
@@ -63,7 +99,7 @@ The verifier fails closed if:
 - a copy mode is unknown;
 - `locked-result.json` or `source-provenance.json` disagrees with the metadata evidence commit.
 
-A successful verifier run is necessary but not sufficient for promotion. Review must still confirm from GitHub that the recorded `workflow_artifact_id` and `workflow_artifact_digest` identify the intended artifact from metadata `workflow_run_id`, and that the experiment is scientifically admissible under `docs/RESEARCH_RERUN_POLICY.md`.
+Both the GitHub platform identity check and the extracted-bundle acceptance check are necessary but not sufficient for promotion. The experiment must still be scientifically admissible under `docs/RESEARCH_RERUN_POLICY.md`.
 
 ## Persisting and sealing
 
