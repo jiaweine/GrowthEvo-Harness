@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 from typing import Any
 
@@ -12,6 +12,16 @@ from verify_research_dispatch import _github_json
 _SCHEMA_VERSION = "growthevo.evidence-artifact-identity-verification.v1"
 _SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 _REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_PLATFORM_POLICY_BY_EVIDENCE_SCHEMA = {
+    "growthevo.criteo-evidence-record.v1": {
+        "workflow_path": ".github/workflows/full-criteo-pr-validation.yml",
+        "artifact_name": "criteo-full-preregistered-evidence",
+    },
+    "growthevo.obd-evidence-record.v1": {
+        "workflow_path": ".github/workflows/full-obd-pr-validation.yml",
+        "artifact_name": "obd-full-preregistered-evidence",
+    },
+}
 
 
 def _load_metadata(path: Path) -> dict[str, Any]:
@@ -52,26 +62,17 @@ def _repository(raw: str) -> str:
     return raw
 
 
-def _workflow_path(raw: str) -> str:
-    if not isinstance(raw, str) or not raw or raw != raw.strip():
-        raise ValueError("expected workflow path must be a non-empty repository path")
-    path = PurePosixPath(raw)
-    if (
-        path.is_absolute()
-        or ".." in path.parts
-        or len(path.parts) != 3
-        or path.parts[:2] != (".github", "workflows")
-        or path.suffix not in {".yml", ".yaml"}
-        or raw != path.as_posix()
-    ):
-        raise ValueError("expected workflow path must name one .github/workflows/*.yml or *.yaml file")
-    return raw
-
-
-def _artifact_name(raw: str) -> str:
-    if not isinstance(raw, str) or not raw or raw != raw.strip():
-        raise ValueError("expected artifact name must be a non-empty exact name")
-    return raw
+def _platform_policy(metadata: dict[str, Any]) -> tuple[str, str, str]:
+    schema_version = metadata.get("schema_version")
+    if not isinstance(schema_version, str) or not schema_version:
+        raise ValueError("metadata schema_version must be a non-empty string")
+    policy = _PLATFORM_POLICY_BY_EVIDENCE_SCHEMA.get(schema_version)
+    if policy is None:
+        raise ValueError(
+            "unsupported evidence metadata schema_version for platform verification: "
+            f"{schema_version!r}"
+        )
+    return schema_version, policy["workflow_path"], policy["artifact_name"]
 
 
 def _require_object(raw: object, *, label: str) -> dict[str, Any]:
@@ -84,13 +85,12 @@ def verify_artifact_identity(
     *,
     metadata_path: Path,
     repository: str,
-    expected_workflow_path: str,
-    expected_artifact_name: str,
 ) -> dict[str, object]:
     metadata = _load_metadata(metadata_path)
     repository = _repository(repository)
-    expected_workflow_path = _workflow_path(expected_workflow_path)
-    expected_artifact_name = _artifact_name(expected_artifact_name)
+    evidence_schema_version, expected_workflow_path, expected_artifact_name = _platform_policy(
+        metadata
+    )
 
     evidence_commit = _git_sha(
         metadata.get("evidence_commit_sha"),
@@ -126,7 +126,7 @@ def verify_artifact_identity(
         raise RuntimeError("GitHub workflow run head_sha does not match metadata evidence_commit_sha")
     if run.get("path") != expected_workflow_path:
         raise RuntimeError(
-            "GitHub workflow run path does not match expected full-data workflow: "
+            "GitHub workflow run path does not match evidence-schema platform policy: "
             f"{run.get('path')!r} != {expected_workflow_path!r}"
         )
 
@@ -138,7 +138,7 @@ def verify_artifact_identity(
         raise RuntimeError("GitHub artifact ID does not match evidence metadata")
     if artifact.get("name") != expected_artifact_name:
         raise RuntimeError(
-            "GitHub artifact name does not match expected evidence artifact: "
+            "GitHub artifact name does not match evidence-schema platform policy: "
             f"{artifact.get('name')!r} != {expected_artifact_name!r}"
         )
     if artifact.get("expired") is not False:
@@ -167,6 +167,7 @@ def verify_artifact_identity(
 
     return {
         "schema_version": _SCHEMA_VERSION,
+        "evidence_schema_version": evidence_schema_version,
         "repository": repository,
         "evidence_commit_sha": evidence_commit,
         "workflow_run_id": workflow_run_id,
@@ -185,14 +186,12 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Verify that evidence metadata names the exact successful GitHub Actions run and "
-            "artifact reported by the platform. This is a future-acceptance check and does not "
-            "download, promote, or modify evidence."
+            "artifact required by its committed evidence schema. This is a future-acceptance "
+            "check and does not download, promote, or modify evidence."
         )
     )
     parser.add_argument("--metadata", required=True, type=Path)
     parser.add_argument("--repository", required=True)
-    parser.add_argument("--workflow-path", required=True)
-    parser.add_argument("--artifact-name", required=True)
     return parser.parse_args()
 
 
@@ -201,8 +200,6 @@ def main() -> None:
     result = verify_artifact_identity(
         metadata_path=args.metadata,
         repository=args.repository,
-        expected_workflow_path=args.workflow_path,
-        expected_artifact_name=args.artifact_name,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
 
