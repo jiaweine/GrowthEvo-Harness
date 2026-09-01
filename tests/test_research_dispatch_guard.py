@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-import json
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "verify_research_dispatch.py"
+SPEC = importlib.util.spec_from_file_location("research_dispatch_cli_guard", SCRIPT)
+assert SPEC is not None and SPEC.loader is not None
+GUARD = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(GUARD)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -61,31 +67,56 @@ def _repo(tmp_path: Path) -> tuple[Path, str, str]:
     return repo, first, second
 
 
-def test_historical_main_commit_is_allowed_and_persisted(tmp_path: Path) -> None:
+def test_reviewed_historical_main_commit_is_allowed_and_persisted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo, first, second = _repo(tmp_path)
     _git(repo, "checkout", "--detach", first)
-    output = tmp_path / "dispatch.json"
+    monkeypatch.chdir(repo)
+    for name, value in _env(first).items():
+        monkeypatch.setenv(name, value)
 
-    completed = subprocess.run(
-        [sys.executable, str(SCRIPT), "--output", str(output)],
-        cwd=repo,
-        env=_env(first),
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+    review = {
+        "reviewed_pull_request_number": 80,
+        "reviewed_pull_request_url": "https://github.com/example/GrowthEvo-Harness/pull/80",
+        "reviewed_pull_request_head_sha": "a" * 40,
+        "reviewed_pull_request_merge_sha": first,
+        "reviewed_pull_request_base_ref": "main",
+        "reviewed_ci_workflow_name": "GrowthEvo CI",
+        "reviewed_ci_workflow_path": ".github/workflows/ci.yml",
+        "reviewed_ci_run_id": 246,
+        "reviewed_ci_run_attempt": 1,
+        "reviewed_ci_jobs": [
+            {"name": name, "job_id": index, "status": "completed", "conclusion": "success"}
+            for index, name in enumerate(GUARD._REQUIRED_CI_JOBS, start=1)
+        ],
+        "reviewed_ci_verified": True,
+    }
+    monkeypatch.setattr(
+        GUARD,
+        "_verify_reviewed_pr_and_ci",
+        lambda **_kwargs: review,
     )
 
-    assert completed.returncode == 0, completed.stderr
-    payload = json.loads(output.read_text(encoding="utf-8"))
+    payload = GUARD.verify_dispatch(
+        trusted_ref="origin/main",
+        trusted_branch="main",
+        reason="explicit replication check",
+    )
+
     assert payload["schema_version"] == "growthevo.research-dispatch.v1"
     assert payload["commit_sha"] == first
     assert payload["workflow_sha"] == first
     assert payload["workflow_sha_matches_commit"] is True
     assert payload["trusted_ref"] == "origin/main"
+    assert payload["trusted_branch"] == "main"
     assert payload["trusted_ref_sha_at_dispatch"] == second
     assert payload["commit_is_trusted_ref_ancestor"] is True
     assert payload["experiment_reason"] == "explicit replication check"
+    assert payload["reviewed_pull_request_number"] == 80
+    assert payload["reviewed_ci_run_id"] == 246
+    assert payload["reviewed_ci_verified"] is True
 
 
 def test_unmerged_feature_commit_is_rejected(tmp_path: Path) -> None:
