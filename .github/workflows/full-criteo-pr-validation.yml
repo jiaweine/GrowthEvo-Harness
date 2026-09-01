@@ -10,6 +10,8 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
   group: full-criteo-research-validation
@@ -41,6 +43,8 @@ jobs:
             benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/environment.txt
 
       - name: Verify reviewed main-history dispatch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           python scripts/verify_research_dispatch.py \

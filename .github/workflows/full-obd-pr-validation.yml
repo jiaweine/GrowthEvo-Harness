@@ -10,6 +10,8 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
   group: full-obd-research-validation
@@ -42,6 +44,8 @@ jobs:
             benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/environment.txt
 
       - name: Verify reviewed main-history dispatch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           python scripts/verify_research_dispatch.py \
