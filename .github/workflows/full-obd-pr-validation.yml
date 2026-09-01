@@ -157,6 +157,7 @@ jobs:
             /tmp/growthevo-full-obd/accepted-constraints.txt \
             /tmp/growthevo-full-obd/runner-environment.txt \
             /tmp/growthevo-full-obd/pip-freeze.txt \
+            /tmp/growthevo-full-obd/full-run.log \
             /tmp/growthevo-full-obd/result/source-provenance.json \
             /tmp/growthevo-full-obd/result/obd-full-all-random-to-bts.v1.json \
             /tmp/growthevo-full-obd/result/export/export_manifest.json \
@@ -175,6 +176,7 @@ jobs:
             accepted-constraints.txt \
             runner-environment.txt \
             pip-freeze.txt \
+            full-run.log \
             result/source-provenance.json \
             result/obd-full-all-random-to-bts.v1.json \
             result/export/export_manifest.json \
