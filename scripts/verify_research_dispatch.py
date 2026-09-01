@@ -125,8 +125,8 @@ def _verify_reviewed_pr_and_ci(
     ci_run = max(
         matching_runs,
         key=lambda run: (
-            int(run.get("run_attempt") or 0),
             int(run.get("id") or 0),
+            int(run.get("run_attempt") or 0),
         ),
     )
     if ci_run.get("status") != "completed" or ci_run.get("conclusion") != "success":
