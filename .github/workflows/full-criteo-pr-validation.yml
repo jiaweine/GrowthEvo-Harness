@@ -218,6 +218,7 @@ jobs:
             /tmp/growthevo-full-criteo/dispatch-provenance.json \
             /tmp/growthevo-full-criteo/accepted-constraints.txt \
             /tmp/growthevo-full-criteo/runner-environment.txt \
+            /tmp/growthevo-full-criteo/full-run.log \
             /tmp/growthevo-full-criteo/result/source-provenance.json \
             /tmp/growthevo-full-criteo/result/criteo-v2.1-visit-top10.v1.json \
             /tmp/growthevo-full-criteo/result/criteo-lgbm-candidates.v1.json \
@@ -236,6 +237,7 @@ jobs:
             dispatch-provenance.json \
             accepted-constraints.txt \
             runner-environment.txt \
+            full-run.log \
             result/source-provenance.json \
             result/criteo-v2.1-visit-top10.v1.json \
             result/criteo-lgbm-candidates.v1.json \
