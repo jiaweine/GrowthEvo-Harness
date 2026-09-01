@@ -11,11 +11,21 @@ GrowthEvo has two different integrity layers:
 1. A successful full-data workflow writes `evidence-integrity.json`, which SHA-256 binds the files in that workflow artifact.
 2. Persisted accepted evidence is protected after commit by `benchmarks/accepted-evidence-integrity.v1.json`, which binds repository paths to exact Git blob identities.
 
-Those layers protect different moments. The acceptance handoff must additionally prove that the files copied or compacted into a proposed accepted-evidence directory came from the verified workflow bundle rather than from another run, an edited local copy, or an incomplete subset.
+Those layers protect different moments. The acceptance handoff must additionally prove that the files copied or compacted into a proposed accepted-evidence directory came from the verified workflow bundle rather than from another run, an edited local copy, or an incomplete subset. It must also bind the proposed acceptance record to the manual dispatch identity already captured inside that hashed workflow bundle.
 
 ## Required acceptance metadata
 
-A proposed `evidence-metadata.json` must retain the workflow run/artifact identity and its GitHub-reported artifact digest according to the repository's evidence-record schema. Before extraction, compare that recorded `workflow_artifact_digest` with the digest reported for the downloaded GitHub Actions artifact.
+A proposed `evidence-metadata.json` must retain positive-integer `workflow_run_id` and `workflow_artifact_id` values plus the GitHub-reported `workflow_artifact_digest` according to the repository's evidence-record schema. Before extraction, compare the recorded artifact ID/digest with the values reported by GitHub Actions for the downloaded artifact.
+
+The extracted bundle must contain `dispatch-provenance.json`, and that file must be covered by `evidence-integrity.json`. The acceptance verifier requires the dispatch provenance to record:
+
+- schema `growthevo.research-dispatch.v1` and `event_name=workflow_dispatch`;
+- an evidence commit equal to both the workflow SHA and the reviewed PR merge SHA;
+- successful trusted-main ancestry and workflow-SHA checks;
+- `reviewed_ci_verified=true` and a reviewed PR base equal to the trusted branch;
+- a dispatch `run_id` equal to metadata `workflow_run_id`.
+
+The local verifier can therefore prove that the proposed metadata refers to the same run/commit identity recorded inside the already-hashed source bundle. It cannot independently authenticate the GitHub artifact ID or artifact digest, because those values are assigned by the platform after upload; those two values remain a platform-level review check.
 
 For the extracted bundle, `source_artifact_file_sha256` and `persisted_copy_format` must cover **every file named by `evidence-integrity.json` exactly once**. No source file may disappear from the acceptance record merely because it is not persisted in the repository.
 
@@ -42,7 +52,10 @@ python scripts/verify_evidence_acceptance.py \
 The verifier fails closed if:
 
 - the source bundle no longer matches `evidence-integrity.json`;
-- acceptance metadata omits or adds a source file;
+- `dispatch-provenance.json` is missing from the hashed source bundle or does not describe an approved manual dispatch;
+- metadata `workflow_run_id` differs from the hashed dispatch run ID;
+- the dispatch commit/workflow/reviewed-merge identity differs from metadata `evidence_commit_sha`;
+- metadata omits or adds a source file;
 - a metadata SHA-256 disagrees with the verified source manifest;
 - a byte-identical persisted copy differs in bytes or size;
 - a compact JSON copy differs semantically;
@@ -50,7 +63,7 @@ The verifier fails closed if:
 - a copy mode is unknown;
 - `locked-result.json` or `source-provenance.json` disagrees with the metadata evidence commit.
 
-A successful verifier run is necessary but not sufficient for promotion. Review must also confirm that the recorded GitHub workflow run/artifact IDs and `workflow_artifact_digest` refer to the intended successful manual run, and that the experiment is scientifically admissible under `docs/RESEARCH_RERUN_POLICY.md`.
+A successful verifier run is necessary but not sufficient for promotion. Review must still confirm from GitHub that the recorded `workflow_artifact_id` and `workflow_artifact_digest` identify the intended artifact from metadata `workflow_run_id`, and that the experiment is scientifically admissible under `docs/RESEARCH_RERUN_POLICY.md`.
 
 ## Persisting and sealing
 

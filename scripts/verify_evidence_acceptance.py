@@ -10,6 +10,7 @@ from verify_evidence_integrity_manifest import verify_manifest
 
 
 _SHA256_PREFIX = "sha256:"
+_DISPATCH_SCHEMA_VERSION = "growthevo.research-dispatch.v1"
 
 
 def _load_json(path: Path, *, label: str) -> dict[str, Any]:
@@ -55,6 +56,30 @@ def _validate_prefixed_sha256(raw: object, *, label: str) -> str:
     except ValueError as exc:
         raise ValueError(f"{label} must use sha256:<64 lowercase hex>") from exc
     return digest
+
+
+def _validate_git_sha(raw: object, *, label: str) -> str:
+    if not isinstance(raw, str) or len(raw) != 40 or raw != raw.lower():
+        raise ValueError(f"{label} must be a 40-character lowercase hexadecimal Git SHA")
+    try:
+        bytes.fromhex(raw)
+    except ValueError as exc:
+        raise ValueError(f"{label} must be a 40-character lowercase hexadecimal Git SHA") from exc
+    return raw
+
+
+def _positive_int(raw: object, *, label: str, allow_decimal_string: bool = False) -> int:
+    if isinstance(raw, bool):
+        raise ValueError(f"{label} must be a positive integer")
+    if isinstance(raw, int):
+        value = raw
+    elif allow_decimal_string and isinstance(raw, str) and raw.isdecimal():
+        value = int(raw)
+    else:
+        raise ValueError(f"{label} must be a positive integer")
+    if value <= 0:
+        raise ValueError(f"{label} must be a positive integer")
+    return value
 
 
 def _manifest_entries_by_filename(
@@ -117,13 +142,10 @@ def _assert_json_equal(source: Path, persisted: Path, *, logical_name: str) -> N
 
 
 def _verify_evidence_commit(metadata: dict[str, Any], *, persisted_root: Path) -> str:
-    evidence_commit = metadata.get("evidence_commit_sha")
-    if not isinstance(evidence_commit, str) or len(evidence_commit) != 40:
-        raise ValueError("metadata evidence_commit_sha must be a 40-character Git SHA")
-    try:
-        bytes.fromhex(evidence_commit)
-    except ValueError as exc:
-        raise ValueError("metadata evidence_commit_sha must be hexadecimal") from exc
+    evidence_commit = _validate_git_sha(
+        metadata.get("evidence_commit_sha"),
+        label="metadata evidence_commit_sha",
+    )
 
     locked_result = persisted_root / "locked-result.json"
     if locked_result.is_file():
@@ -141,6 +163,86 @@ def _verify_evidence_commit(metadata: dict[str, Any], *, persisted_root: Path) -
                 "persisted source-provenance growth_evo_commit_sha does not match metadata evidence_commit_sha"
             )
     return evidence_commit
+
+
+def _verify_dispatch_identity(
+    *,
+    source_root: Path,
+    dispatch_entry: dict[str, object],
+    metadata: dict[str, Any],
+    evidence_commit: str,
+) -> dict[str, object]:
+    dispatch_relative = str(dispatch_entry["path"])
+    dispatch_path = (source_root / dispatch_relative).resolve()
+    if not dispatch_path.is_relative_to(source_root):
+        raise ValueError(f"dispatch provenance path escapes source root: {dispatch_relative}")
+    dispatch = _load_json(dispatch_path, label="source dispatch provenance")
+
+    if dispatch.get("schema_version") != _DISPATCH_SCHEMA_VERSION:
+        raise ValueError(
+            "source dispatch provenance schema_version must be " + _DISPATCH_SCHEMA_VERSION
+        )
+    if dispatch.get("event_name") != "workflow_dispatch":
+        raise ValueError("source dispatch provenance must record event_name=workflow_dispatch")
+    for flag in (
+        "workflow_sha_matches_commit",
+        "commit_is_trusted_ref_ancestor",
+        "reviewed_ci_verified",
+    ):
+        if dispatch.get(flag) is not True:
+            raise ValueError(f"source dispatch provenance must record {flag}=true")
+
+    for field in ("commit_sha", "workflow_sha", "reviewed_pull_request_merge_sha"):
+        recorded = _validate_git_sha(
+            dispatch.get(field),
+            label=f"source dispatch provenance {field}",
+        )
+        if recorded != evidence_commit:
+            raise ValueError(
+                f"source dispatch provenance {field} does not match metadata evidence_commit_sha"
+            )
+
+    trusted_branch = dispatch.get("trusted_branch")
+    reviewed_base = dispatch.get("reviewed_pull_request_base_ref")
+    if not isinstance(trusted_branch, str) or not trusted_branch:
+        raise ValueError("source dispatch provenance trusted_branch must be non-empty")
+    if reviewed_base != trusted_branch:
+        raise ValueError(
+            "source dispatch provenance reviewed PR base does not match its trusted branch"
+        )
+
+    dispatch_run_id = _positive_int(
+        dispatch.get("run_id"),
+        label="source dispatch provenance run_id",
+        allow_decimal_string=True,
+    )
+    metadata_run_id = _positive_int(
+        metadata.get("workflow_run_id"),
+        label="metadata workflow_run_id",
+    )
+    if metadata_run_id != dispatch_run_id:
+        raise ValueError(
+            "metadata workflow_run_id does not match source dispatch provenance run_id"
+        )
+    artifact_id = _positive_int(
+        metadata.get("workflow_artifact_id"),
+        label="metadata workflow_artifact_id",
+    )
+
+    reviewed_pr_number = _positive_int(
+        dispatch.get("reviewed_pull_request_number"),
+        label="source dispatch provenance reviewed_pull_request_number",
+    )
+    reviewed_ci_run_id = _positive_int(
+        dispatch.get("reviewed_ci_run_id"),
+        label="source dispatch provenance reviewed_ci_run_id",
+    )
+    return {
+        "workflow_run_id": metadata_run_id,
+        "workflow_artifact_id": artifact_id,
+        "reviewed_pull_request_number": reviewed_pr_number,
+        "reviewed_ci_run_id": reviewed_ci_run_id,
+    }
 
 
 def verify_acceptance(
@@ -163,15 +265,27 @@ def verify_acceptance(
     verified_manifest = verify_manifest(root=source_root, manifest_path=integrity_manifest)
     manifest_entries = tuple(verified_manifest["files"])
     entries_by_name = _manifest_entries_by_filename(manifest_entries)
+    dispatch_entry = entries_by_name.get("dispatch-provenance.json")
+    if dispatch_entry is None:
+        raise ValueError(
+            "source integrity manifest must include dispatch-provenance.json for acceptance"
+        )
+
     metadata = _load_json(metadata_path, label="evidence metadata")
     source_hashes, copy_formats = _load_copy_contract(
         metadata,
         expected_names=set(entries_by_name),
     )
-
     _validate_prefixed_sha256(
         metadata.get("workflow_artifact_digest"),
         label="metadata workflow_artifact_digest",
+    )
+    evidence_commit = _verify_evidence_commit(metadata, persisted_root=persisted_root)
+    dispatch_identity = _verify_dispatch_identity(
+        source_root=source_root,
+        dispatch_entry=dispatch_entry,
+        metadata=metadata,
+        evidence_commit=evidence_commit,
     )
 
     verified_files: list[dict[str, object]] = []
@@ -230,13 +344,13 @@ def verify_acceptance(
             }
         )
 
-    evidence_commit = _verify_evidence_commit(metadata, persisted_root=persisted_root)
     return {
         "schema_version": "growthevo.evidence-acceptance-verification.v1",
         "evidence_commit_sha": evidence_commit,
         "source_integrity_schema": verified_manifest["schema_version"],
         "verified_source_file_count": len(verified_manifest["files"]),
         "accepted_file_count": len(verified_files),
+        **dispatch_identity,
         "verified_files": verified_files,
     }
 
