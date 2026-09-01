@@ -121,11 +121,11 @@ def test_writer_appends_only_new_indexed_set_and_final_verifier_accepts_commit(t
 
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(manifest.read_text(encoding="utf-8"))
-    assert payload["evidence_sets"][0] == old_set
     assert [row["name"] for row in payload["evidence_sets"]] == [
         "accepted/future",
         "accepted/old",
     ]
+    assert payload["evidence_sets"][1] == old_set
     future = payload["evidence_sets"][0]
     assert [row["path"] for row in future["files"]] == [
         "evidence/a.json",
