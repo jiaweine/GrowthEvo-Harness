@@ -39,34 +39,29 @@ The current full-data workflow bundles use unique basenames for their integrity-
 
 ## Verify GitHub run and artifact identity
 
-Before accepting the extracted bundle, query GitHub Actions using the exact workflow path and artifact name for the benchmark. The verifier is read-only: it does not download the artifact, trigger a workflow, modify metadata, or promote evidence.
+Before accepting the extracted bundle, query GitHub Actions using the committed evidence-record schema. The verifier is read-only: it does not download the artifact, trigger a workflow, modify metadata, or promote evidence.
 
-For Criteo:
+The platform identity is not supplied by the operator. `scripts/verify_evidence_artifact_identity.py` derives the only admissible workflow path and artifact name from metadata `schema_version`:
 
-```bash
-python scripts/verify_evidence_artifact_identity.py \
-  --metadata benchmarks/.../results/.../<evidence-id>/evidence-metadata.json \
-  --repository jiaweine/GrowthEvo-Harness \
-  --workflow-path .github/workflows/full-criteo-pr-validation.yml \
-  --artifact-name criteo-full-preregistered-evidence
-```
+- `growthevo.criteo-evidence-record.v1` → `.github/workflows/full-criteo-pr-validation.yml` and `criteo-full-preregistered-evidence`;
+- `growthevo.obd-evidence-record.v1` → `.github/workflows/full-obd-pr-validation.yml` and `obd-full-preregistered-evidence`.
 
-For Open Bandit:
+An unknown evidence schema fails before any GitHub API request. Adding a future evidence-record schema therefore requires an ordinary reviewed code change that explicitly extends this platform policy; acceptance cannot weaken the expected workflow/artifact identity through command-line arguments.
+
+For either supported schema, run:
 
 ```bash
 python scripts/verify_evidence_artifact_identity.py \
   --metadata benchmarks/.../results/.../<evidence-id>/evidence-metadata.json \
-  --repository jiaweine/GrowthEvo-Harness \
-  --workflow-path .github/workflows/full-obd-pr-validation.yml \
-  --artifact-name obd-full-preregistered-evidence
+  --repository jiaweine/GrowthEvo-Harness
 ```
 
 Set `GITHUB_TOKEN` when available for authenticated API access. The verifier fails closed unless GitHub reports that:
 
 - metadata `workflow_run_id` is a completed successful `workflow_dispatch` run in the requested repository;
 - the run `head_sha` equals metadata `evidence_commit_sha`;
-- the run used the exact expected full-data workflow path;
-- metadata `workflow_artifact_id` names the exact expected artifact from that run;
+- the run used the exact full-data workflow required by metadata `schema_version`;
+- metadata `workflow_artifact_id` names the exact artifact required by that schema and produced by that run;
 - the artifact is not expired;
 - the platform-reported artifact digest exactly equals metadata `workflow_artifact_digest`;
 - the artifact's embedded run/repository/commit provenance agrees with the workflow run.
