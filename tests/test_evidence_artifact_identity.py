@@ -26,14 +26,18 @@ COMMIT = "a" * 40
 RUN_ID = 123456789
 ARTIFACT_ID = 987654321
 DIGEST = "sha256:" + "b" * 64
-WORKFLOW_PATH = ".github/workflows/full-obd-pr-validation.yml"
-ARTIFACT_NAME = "obd-full-preregistered-evidence"
+OBD_SCHEMA = "growthevo.obd-evidence-record.v1"
+OBD_WORKFLOW_PATH = ".github/workflows/full-obd-pr-validation.yml"
+OBD_ARTIFACT_NAME = "obd-full-preregistered-evidence"
+CRITEO_SCHEMA = "growthevo.criteo-evidence-record.v1"
+CRITEO_WORKFLOW_PATH = ".github/workflows/full-criteo-pr-validation.yml"
+CRITEO_ARTIFACT_NAME = "criteo-full-preregistered-evidence"
 REPOSITORY_ID = 424242
 
 
 def _write_metadata(path: Path, **overrides: object) -> None:
     payload: dict[str, object] = {
-        "schema_version": "growthevo.example-evidence-record.v1",
+        "schema_version": OBD_SCHEMA,
         "evidence_commit_sha": COMMIT,
         "workflow_run_id": RUN_ID,
         "workflow_artifact_id": ARTIFACT_ID,
@@ -43,19 +47,23 @@ def _write_metadata(path: Path, **overrides: object) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _payloads() -> tuple[dict[str, Any], dict[str, Any]]:
+def _payloads(
+    *,
+    workflow_path: str = OBD_WORKFLOW_PATH,
+    artifact_name: str = OBD_ARTIFACT_NAME,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     run = {
         "id": RUN_ID,
         "event": "workflow_dispatch",
         "status": "completed",
         "conclusion": "success",
         "head_sha": COMMIT,
-        "path": WORKFLOW_PATH,
+        "path": workflow_path,
         "repository": {"id": REPOSITORY_ID, "full_name": REPOSITORY},
     }
     artifact = {
         "id": ARTIFACT_ID,
-        "name": ARTIFACT_NAME,
+        "name": artifact_name,
         "expired": False,
         "digest": DIGEST,
         "workflow_run": {
@@ -86,12 +94,13 @@ def _verify(metadata: Path) -> dict[str, object]:
     return MODULE.verify_artifact_identity(
         metadata_path=metadata,
         repository=REPOSITORY,
-        expected_workflow_path=WORKFLOW_PATH,
-        expected_artifact_name=ARTIFACT_NAME,
     )
 
 
-def test_platform_verifier_binds_successful_run_and_artifact(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_platform_verifier_binds_successful_obd_run_and_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     metadata = tmp_path / "evidence-metadata.json"
     _write_metadata(metadata)
     run, artifact = _payloads()
@@ -101,18 +110,38 @@ def test_platform_verifier_binds_successful_run_and_artifact(monkeypatch: pytest
 
     assert result == {
         "schema_version": "growthevo.evidence-artifact-identity-verification.v1",
+        "evidence_schema_version": OBD_SCHEMA,
         "repository": REPOSITORY,
         "evidence_commit_sha": COMMIT,
         "workflow_run_id": RUN_ID,
-        "workflow_path": WORKFLOW_PATH,
+        "workflow_path": OBD_WORKFLOW_PATH,
         "workflow_event": "workflow_dispatch",
         "workflow_status": "completed",
         "workflow_conclusion": "success",
         "workflow_artifact_id": ARTIFACT_ID,
-        "workflow_artifact_name": ARTIFACT_NAME,
+        "workflow_artifact_name": OBD_ARTIFACT_NAME,
         "workflow_artifact_digest": DIGEST,
         "workflow_artifact_expired": False,
     }
+
+
+def test_platform_verifier_derives_criteo_identity_from_schema(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    metadata = tmp_path / "evidence-metadata.json"
+    _write_metadata(metadata, schema_version=CRITEO_SCHEMA)
+    run, artifact = _payloads(
+        workflow_path=CRITEO_WORKFLOW_PATH,
+        artifact_name=CRITEO_ARTIFACT_NAME,
+    )
+    _install_api(monkeypatch, run, artifact)
+
+    result = _verify(metadata)
+
+    assert result["evidence_schema_version"] == CRITEO_SCHEMA
+    assert result["workflow_path"] == CRITEO_WORKFLOW_PATH
+    assert result["workflow_artifact_name"] == CRITEO_ARTIFACT_NAME
 
 
 @pytest.mark.parametrize(
@@ -121,7 +150,7 @@ def test_platform_verifier_binds_successful_run_and_artifact(monkeypatch: pytest
         ("event", "push", "event=workflow_dispatch"),
         ("conclusion", "failure", "not a completed success"),
         ("head_sha", "c" * 40, "head_sha does not match"),
-        ("path", ".github/workflows/ci.yml", "path does not match"),
+        ("path", CRITEO_WORKFLOW_PATH, "evidence-schema platform policy"),
     ],
 )
 def test_platform_verifier_rejects_wrong_workflow_identity(
@@ -144,7 +173,7 @@ def test_platform_verifier_rejects_wrong_workflow_identity(
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("name", "wrong-evidence", "artifact name does not match"),
+        ("name", CRITEO_ARTIFACT_NAME, "evidence-schema platform policy"),
         ("expired", True, "artifact is expired"),
         ("digest", "sha256:" + "c" * 64, "artifact digest does not match"),
     ],
@@ -166,7 +195,10 @@ def test_platform_verifier_rejects_wrong_artifact_identity(
         _verify(metadata)
 
 
-def test_platform_verifier_rejects_artifact_from_other_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_platform_verifier_rejects_artifact_from_other_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     metadata = tmp_path / "evidence-metadata.json"
     _write_metadata(metadata)
     run, artifact = _payloads()
@@ -177,7 +209,10 @@ def test_platform_verifier_rejects_artifact_from_other_run(monkeypatch: pytest.M
         _verify(metadata)
 
 
-def test_platform_verifier_rejects_artifact_from_other_commit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_platform_verifier_rejects_artifact_from_other_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     metadata = tmp_path / "evidence-metadata.json"
     _write_metadata(metadata)
     run, artifact = _payloads()
@@ -188,7 +223,10 @@ def test_platform_verifier_rejects_artifact_from_other_commit(monkeypatch: pytes
         _verify(metadata)
 
 
-def test_platform_verifier_rejects_artifact_repository_mismatch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_platform_verifier_rejects_artifact_repository_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     metadata = tmp_path / "evidence-metadata.json"
     _write_metadata(metadata)
     run, artifact = _payloads()
@@ -196,6 +234,21 @@ def test_platform_verifier_rejects_artifact_repository_mismatch(monkeypatch: pyt
     _install_api(monkeypatch, run, artifact)
 
     with pytest.raises(RuntimeError, match="repository identity does not match"):
+        _verify(metadata)
+
+
+def test_platform_verifier_rejects_unknown_schema_before_api_call(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    metadata = tmp_path / "evidence-metadata.json"
+    _write_metadata(metadata, schema_version="growthevo.unreviewed-evidence-record.v1")
+
+    def no_api(_: str) -> object:
+        raise AssertionError("GitHub API must not be called for an unreviewed evidence schema")
+
+    monkeypatch.setattr(MODULE, "_github_json", no_api)
+    with pytest.raises(ValueError, match="unsupported evidence metadata schema_version"):
         _verify(metadata)
 
 
