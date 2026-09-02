@@ -155,10 +155,17 @@ def test_obd_persisted_evidence_is_semantically_locked() -> None:
     assert provenance["growth_evo_commit_sha"] == expected["evidence_commit_sha"]
 
 
-def test_readme_promotes_only_the_locked_evidence_numbers() -> None:
+def test_readme_surfaces_only_current_locked_evidence() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "evidence commit 为 `7ac26a5aebde2c70e1b43264b89f08dddcff0245`" in readme
-    assert "**`0.0093791024` (+0.93791 pp)**" in readme
-    assert "evidence commit 为 `7d538cea9698b5f0a48c585eed85e3ae526e5af6`" in readme
-    assert "**9.20045%**" in readme
-    assert "pre-locked legacy evaluation records" in readme
+
+    assert "**Evidence commit:** `7ac26a5aebde2c70e1b43264b89f08dddcff0245`" in readme
+    assert "| Population incremental visit | **+0.93791 pp** |" in readme
+    assert "| Selected top-10% incremental visit | **+9.37910 pp** |" in readme
+
+    assert "**Evidence commit:** `7d538cea9698b5f0a48c585eed85e3ae526e5af6`" in readme
+    assert "| Final estimate | **0.0045295435** |" in readme
+    assert "| Final support coverage | **1.0000** |" in readme
+    assert "| Final ESS ratio | **0.16123** |" in readme
+
+    assert "+6.8%" not in readme
+    assert "-8.4%" not in readme
