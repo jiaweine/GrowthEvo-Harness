@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import blake2b
-from json import dumps, loads
 from math import isfinite
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from growthevo.models import Channel
+
+from ._serialization import (
+    fingerprint_json,
+    load_json_object,
+    required_int,
+    required_number,
+    required_string,
+)
 
 
 _SCHEMA_V1 = "growthevo.targeting-experiment-plan.v1"
@@ -136,24 +142,18 @@ class TargetingExperimentPlan:
 
     @property
     def fingerprint(self) -> str:
-        encoded = dumps(
-            self.canonical_payload(), sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
-        return blake2b(encoded, digest_size=20).hexdigest()
+        return fingerprint_json(self.canonical_payload())
 
     def bind_protocol_fingerprint(self, locked_protocol_fingerprint: str) -> str:
         if not locked_protocol_fingerprint:
             raise ValueError("locked_protocol_fingerprint cannot be empty")
-        encoded = dumps(
+        return fingerprint_json(
             {
                 "schema": "growthevo.bound-targeting-protocol.v1",
                 "experiment_plan_fingerprint": self.fingerprint,
                 "locked_protocol_fingerprint": locked_protocol_fingerprint,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return blake2b(encoded, digest_size=20).hexdigest()
+            }
+        )
 
     def validate_runtime_contract(
         self,
@@ -241,38 +241,8 @@ class TargetingExperimentPlan:
             )
 
 
-def _string(payload: Mapping[str, Any], key: str) -> str:
-    value = payload[key]
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"targeting plan field {key!r} must be a non-empty string")
-    return value
-
-
-def _number(payload: Mapping[str, Any], key: str) -> float:
-    value = payload[key]
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"targeting plan field {key!r} must be a JSON number")
-    result = float(value)
-    if not isfinite(result):
-        raise ValueError(f"targeting plan field {key!r} must be finite")
-    return result
-
-
-def _integer(payload: Mapping[str, Any], key: str) -> int:
-    value = payload[key]
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"targeting plan field {key!r} must be a JSON integer")
-    return value
-
-
 def load_targeting_experiment_plan(path: str | Path) -> TargetingExperimentPlan:
-    resolved = Path(path)
-    try:
-        payload = loads(resolved.read_text(encoding="utf-8"))
-    except ValueError as exc:
-        raise ValueError(f"invalid targeting experiment plan JSON: {resolved}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("targeting experiment plan JSON must be an object")
+    payload = load_json_object(path, label="targeting experiment plan")
 
     schema = payload.get("schema_version")
     if schema not in _SUPPORTED_SCHEMAS:
@@ -310,32 +280,44 @@ def load_targeting_experiment_plan(path: str | Path) -> TargetingExperimentPlan:
         raise ValueError("targeting plan candidate_names must be a non-empty array")
     if any(not isinstance(name, str) or not name for name in raw_names):
         raise ValueError("targeting plan candidate_names must contain non-empty strings")
+
+    scope = "targeting plan"
     try:
-        treatment = Channel(_string(payload, "treatment"))
+        treatment = Channel(required_string(payload, "treatment", scope=scope))
     except ValueError as exc:
         raise ValueError("targeting plan treatment is not a supported Channel") from exc
 
     kwargs: dict[str, Any] = {}
     if schema == _SCHEMA_V2:
         kwargs = {
-            "training_fraction": _number(payload, "training_fraction"),
-            "split_seed": _integer(payload, "split_seed"),
-            "propensity_protocol": _string(payload, "propensity_protocol"),
-            "candidate_config_fingerprint": _string(
-                payload, "candidate_config_fingerprint"
+            "training_fraction": required_number(
+                payload,
+                "training_fraction",
+                scope=scope,
+            ),
+            "split_seed": required_int(payload, "split_seed", scope=scope),
+            "propensity_protocol": required_string(
+                payload,
+                "propensity_protocol",
+                scope=scope,
+            ),
+            "candidate_config_fingerprint": required_string(
+                payload,
+                "candidate_config_fingerprint",
+                scope=scope,
             ),
         }
     return TargetingExperimentPlan(
-        schema_version=_string(payload, "schema_version"),
-        benchmark=_string(payload, "benchmark"),
-        dataset=_string(payload, "dataset"),
-        dataset_source=_string(payload, "dataset_source"),
-        outcome_definition=_string(payload, "outcome_definition"),
-        split_strategy=_string(payload, "split_strategy"),
-        validation_fraction=_number(payload, "validation_fraction"),
+        schema_version=required_string(payload, "schema_version", scope=scope),
+        benchmark=required_string(payload, "benchmark", scope=scope),
+        dataset=required_string(payload, "dataset", scope=scope),
+        dataset_source=required_string(payload, "dataset_source", scope=scope),
+        outcome_definition=required_string(payload, "outcome_definition", scope=scope),
+        split_strategy=required_string(payload, "split_strategy", scope=scope),
+        validation_fraction=required_number(payload, "validation_fraction", scope=scope),
         treatment=treatment,
-        selected_fraction=_number(payload, "selected_fraction"),
-        score_protocol=_string(payload, "score_protocol"),
+        selected_fraction=required_number(payload, "selected_fraction", scope=scope),
+        score_protocol=required_string(payload, "score_protocol", scope=scope),
         candidate_names=tuple(raw_names),
         **kwargs,
     )
