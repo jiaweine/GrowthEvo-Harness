@@ -1,89 +1,103 @@
-# CausalLift-HRL
+# GrowthEvo Causal Decision Algorithm
 
 ## Objective
 
-GrowthEvo optimizes incremental long-horizon value under hard user and business constraints.
+GrowthEvo optimizes **incremental long-horizon value** under user, evidence, and business constraints.
 
 For user state `x` and treatment `a`, the primitive causal quantity is:
 
-\[
-\tau(x,a)=\mathbb{E}[Y(a)-Y(a_0)\mid X=x]
-\]
+```math
+\tau(x,a)=\mathbb{E}[Y(a)-Y(a_0)\mid X=x],
+\qquad a_0=\mathrm{NO\_TREATMENT}.
+```
 
-where `a0` is `NO_TREATMENT`.
+The runtime can use a decomposed shaping reward for sequential learning:
 
-The Runtime reward is a decomposed shaping signal:
-
-\[
+```math
 r_t=
- w_c\hat\tau^{conv}_t
- +w_l\hat\tau^{ltv}_t
+ w_c\widehat\tau^{conv}_t
+ +w_l\widehat\tau^{ltv}_t
  +w_r\Delta retention_t
  -\lambda_b cost_t
  -\lambda_f fatigue_t
  -\lambda_q risk_t
  -\lambda_u uncertainty_t.
-\]
+```
 
-The frozen North-Star metric and policy-promotion evidence are evaluated separately from this short-horizon shaping reward.
+Benchmark promotion is evaluated through the repository's locked evidence protocols, keeping training reward design and public evidence selection as separate contracts.
 
-## 1. Hierarchical policy
+---
 
-The semantic option policy selects:
+## 1. Hierarchical decision policy
 
-\[
-z_t \sim \pi_H(z\mid b_t,g)
-\]
+The semantic option policy selects a lifecycle intent:
 
-and the numeric action policy selects:
+```math
+z_t \sim \pi_H(z\mid b_t,g),
+```
 
-\[
+while the numeric policy selects the executable action:
+
+```math
 a_t \sim \pi_A(a\mid b_t,z_t).
-\]
+```
 
-The split allows an LLM planner to reason about lifecycle intent without giving it unrestricted control over budget, incentive magnitude or channels.
+This division lets semantic reasoning operate at the goal/hypothesis level while channel, offer, timing, and budget decisions remain inside a numeric policy contract.
 
 ## 2. Legal action space
 
-Learning is conditioned on a legal action set:
+Learning and planning operate over a legal action set:
 
-\[
+```math
 \mathcal{A}_{legal}(b_t)=
 \mathcal{A}_{registered}
 \cap\mathcal{A}_{consent}
 \cap\mathcal{A}_{budget}
 \cap\mathcal{A}_{frequency}
 \cap\mathcal{A}_{risk}.
-\]
+```
 
-Illegal actions are rejected before side effects and cannot earn a training reward for bypassing a hard constraint.
+Consent, budget, frequency, and risk gates are applied before treatment side effects. `NO_TREATMENT` is represented directly in the action space.
 
-## 3. Cross-fitted causal bootstrap
+---
 
-A logged decision stores the full behavior-policy propensity vector, not only the propensity of the observed action.
+## 3. Group-aware cross-fitted causal estimation
 
-For treatment `a` versus control `a0`, multi-action propensities are renormalized inside the pair:
+A logged treatment record stores the full behavior-policy propensity vector.
 
-\[
-e_a(x)=\frac{\mu(a|x)}{\mu(a|x)+\mu(a_0|x)}.
-\]
+For treatment `a` versus control `a₀`, the pairwise propensity is:
 
-Nuisance outcome models are trained on K-1 folds. For each held-out record, the DR pseudo-outcome is:
+```math
+e_a(x)=\frac{\mu(a\mid x)}{\mu(a\mid x)+\mu(a_0\mid x)}.
+```
 
-\[
-\tilde\tau_i =
-\hat m_1(x_i)-\hat m_0(x_i)
-+\frac{A_i(Y_i-\hat m_1(x_i))}{\hat e(x_i)}
--\frac{(1-A_i)(Y_i-\hat m_0(x_i))}{1-\hat e(x_i)}.
-\]
+Nuisance models are fitted outside each evaluation fold. Held-out rows receive the DR pseudo-outcome:
 
-The second-stage effect model is trained only on out-of-fold pseudo-outcomes. This gives the Runtime a causal uplift estimate while reducing direct nuisance-model leakage.
+```math
+\widetilde\tau_i =
+\widehat m_1(x_i)-\widehat m_0(x_i)
++\frac{A_i(Y_i-\widehat m_1(x_i))}{\widehat e(x_i)}
+-\frac{(1-A_i)(Y_i-\widehat m_0(x_i))}{1-\widehat e(x_i)}.
+```
 
-The reference backend is dependency-free ridge regression. Production backends can replace it with causal forests, DR-Learner implementations, CausalML, EconML or neural uplift models without changing the serving contract.
+The second-stage effect learner is fitted on out-of-fold pseudo-outcomes. When `group_id` is provided, repeated units remain in the same fold assignment.
+
+The learner contract additionally exposes:
+
+- strict positivity semantics;
+- practical overlap diagnostics;
+- explicit propensity stabilization choices;
+- OOF residual diagnostics;
+- regularized Mahalanobis distributional support;
+- pluggable nuisance and effect backends.
+
+The bundled Ridge learner is the dependency-light reference backend; tree, forest, boosted, or neural learners can plug into the same cross-fitting contract.
+
+---
 
 ## 4. CATE serving
 
-`CausalUpliftServingBridge` converts fitted treatment-effect models into:
+`CausalUpliftServingBridge` converts fitted treatment-effect models into channel-level runtime fields:
 
 ```text
 channel_effects
@@ -91,81 +105,141 @@ channel_uncertainty
 channel_support
 ```
 
-Low support inflates uncertainty instead of silently becoming a confident zero effect. This makes abstention a first-class serving behavior.
+The serving layer preserves raw causal effects and exposes support information separately. The policy layer can therefore use both expected incremental value and the strength of the local data support.
 
-The serving uncertainty is a model diagnostic, not a replacement for cohort-level OPE or randomized evidence.
+---
 
-## 5. Support-anchored conservative policy improvement
+## 5. Calibrated support-anchored policy improvement
 
-For each discrete action, construct a pessimistic value:
+Safe Policy Improvement evaluates candidate actions around the observed behavior policy.
 
-\[
-LCB(a)=\hat Q(a)-z\hat\sigma(a).
-\]
+With supplied lower and upper bounds:
 
-Unsupported actions are excluded from improvement. `NO_TREATMENT` remains available as a safe fallback.
+```math
+Q_a^- = L_a,
+\qquad
+C_a^+ = U_a.
+```
 
-Let `a*` be the best supported pessimistic action. The candidate policy is a bounded interpolation with the logging policy:
+A candidate direction toward action `a` is:
 
-\[
-\pi_{new}=(1-\eta)\mu+\eta\delta_{a^*}.
-\]
+```math
+\pi_a^{(\eta)}=(1-\eta)\mu+\eta\delta_a.
+```
 
-`η` is limited by:
+The feasible update mass is resolved from:
 
-- a total-variation update cap;
-- an expected-cost upper bound;
-- the requirement that pessimistic candidate value exceed pessimistic behavior value.
+- action support;
+- total-variation trust region;
+- expected-cost constraint;
+- pessimistic candidate value;
+- optional calibrated/inferential bounds.
 
-This kernel prevents a value model from making an immediate OOD jump. It does not replace formal deployment verification.
+For the TV constraint:
+
+```math
+\eta
+\le
+\frac{\epsilon_{TV}}{1-\mu(a\mid x)}.
+```
+
+Candidate policies are ranked after these constraints are applied, so optimization happens directly in the final feasible policy space.
+
+---
 
 ## 6. Off-policy evaluation
 
-For logged action `a_i`, reward `r_i`, behavior propensity `\mu(a_i|x_i)` and target policy `\pi(a_i|x_i)`:
+For logged action `a_i`, reward `r_i`, behavior propensity `\mu(a_i\mid x_i)`, and target policy `\pi(a_i\mid x_i)`:
 
-\[
-\hat V_{IPS}=\frac{1}{n}\sum_i\frac{\pi(a_i|x_i)}{\mu(a_i|x_i)}r_i.
-\]
+```math
+w_i=\frac{\pi(a_i\mid x_i)}{\mu(a_i\mid x_i)}.
+```
 
-The DR estimator is:
+IPS is:
 
-\[
-\hat V_{DR}=\frac{1}{n}\sum_i
+```math
+\widehat V_{IPS}=\frac{1}{n}\sum_i w_i r_i.
+```
+
+Doubly Robust evaluation is:
+
+```math
+\widehat V_{DR}=\frac{1}{n}\sum_i
 \left[
-\hat V(x_i,\pi)+
-\frac{\pi(a_i|x_i)}{\mu(a_i|x_i)}
-(r_i-\hat Q(x_i,a_i))
+\widehat q_\pi(x_i)
++w_i(r_i-\widehat q(x_i,a_i))
 \right].
-\]
+```
 
-GrowthEvo also implements an estimated additive-control-variate estimator:
+GrowthEvo's flagship efficient estimator is cross-fitted β*-IPS. Let:
 
-\[
-\hat V_{\beta}=\frac1n\sum_i[w_i r_i-\hat\beta(w_i-1)].
-\]
+```math
+Z_i=w_i-1.
+```
 
-Every estimate is accompanied by support diagnostics:
+Estimate β outside the current evaluation fold:
 
-- effective sample size and ESS ratio;
-- practical logging support coverage;
+```math
+\widehat\beta^*_{-f(i)}
+=
+\frac{\widehat{\mathrm{Cov}}_{-f(i)}(wR,Z)}
+{\widehat{\mathrm{Var}}_{-f(i)}(Z)}.
+```
+
+Then:
+
+```math
+\widehat V_{\beta,CF}
+=
+\frac1n\sum_i
+\left[w_i r_i-\widehat\beta^*_{-f(i)}(w_i-1)\right].
+```
+
+The full estimator panel contains DM, IPS, SNIPS, DR, SWITCH-DR, DR-OS, cross-fitted β*-IPS, and Meta-OPE candidates.
+
+### Evidence diagnostics
+
+Every OPE result can carry:
+
+- standard error;
+- ESS and ESS ratio;
+- target-policy support coverage;
 - maximum importance weight;
-- weight coefficient of variation.
+- mean-weight normalization diagnostics;
+- importance-weight coefficient of variation;
+- protocol-defined cluster-robust uncertainty.
 
-A large nominal cohort with poor overlap is treated as weak evidence.
+```math
+ESS=\frac{(\sum_i w_i)^2}{\sum_i w_i^2}.
+```
 
-## 7. Calibrated promotion gate
+These diagnostics participate in the predeclared evidence gate before benchmark estimator ranking.
 
-Candidate policies are promoted only if:
+---
 
-\[
-LCB(V(\pi_c)-V(\pi_b))>\delta
-\]
+## 7. One-sided conformal verification
 
-and all configured constraints pass.
+For lower-bound calibration:
 
-When conformal calibration margins are supplied, value and ROI use lower bounds while spend, fatigue and churn use upper bounds. The Verifier takes the more conservative of statistical and calibrated value bounds.
+```math
+r_i^{lower}=\widehat y_i-y_i.
+```
 
-The gate has three outcomes:
+For upper-bound calibration:
+
+```math
+r_i^{upper}=y_i-\widehat y_i.
+```
+
+The finite-sample quantile is:
+
+```math
+q_{1-\alpha}=r_{(\lceil(n+1)(1-\alpha)\rceil)}.
+```
+
+The resulting margins can be attached to value/ROI lower bounds and spend/fatigue/churn upper bounds. `CounterfactualVerifier` combines these quantities with statistical uncertainty and business constraints.
+
+Verifier states are:
 
 ```text
 PASS
@@ -173,94 +247,117 @@ FAIL
 INSUFFICIENT_EVIDENCE
 ```
 
-Lack of support is not mislabeled as evidence that the policy is worse.
+---
 
 ## 8. Long-horizon process credit
 
-GrowthPRM uses potential-based progress plus observation-grounded credit:
+GrowthPRM uses potential-based shaping plus observation-grounded signals:
 
-\[
+```math
 r_t^{proc}=
 \gamma\Phi(s_{t+1})-\Phi(s_t)
 +\lambda_{obs}(1-H(a_t))\Delta Evidence_t
 -Cost_t-Penalty_t.
-\]
+```
 
-The signal rewards real evidence/progress and penalizes failed tools, duplicate evidence, cost and irreversible side effects.
+The signal can incorporate evidence gain, action confidence, tool outcomes, duplicate evidence, direct economic cost, and irreversible-side-effect signals.
 
-For planner post-training, `TrajectoryTrainerAdapter` computes GAE:
+`TrajectoryTrainerAdapter` computes GAE:
 
-\[
+```math
 \delta_t=r_t+\gamma V(s_{t+1})-V(s_t),
-\]
+```
 
-\[
+```math
 A_t=\delta_t+\gamma\lambda A_{t+1}.
-\]
+```
 
-`credit_boundary` resets propagation across rollback, reset, segment switch or delayed-outcome attribution boundaries. This prevents unrelated transition regimes from sharing local credit.
+`credit_boundary` resets propagation at declared dynamics discontinuities such as rollback, reset, user/segment switch, or delayed-outcome attribution boundaries.
+
+---
 
 ## 9. Risk-sensitive model-based planning
 
-The World Model is used for stress testing and candidate ranking, not as causal ground truth.
+The world-model layer evaluates multi-step candidates through stochastic rollout. State evolution can include fatigue, churn risk, spend, touch counts, intent, and effective treatment response.
 
-For each candidate plan, multi-seed rollout returns are scored with lower-tail CVaR and constraint violation probability:
+Candidate returns are ranked by downside CVaR and constraint risk:
 
-\[
+```math
+CVaR_\alpha(R)=\mathbb E[R\mid R\le VaR_\alpha(R)],
+```
+
+```math
 Score(plan)=CVaR_{\alpha}(Return)-\lambda P(ConstraintViolation).
-\]
+```
 
-Stress scenarios can reduce uplift, increase cost and amplify fatigue before a candidate reaches shadow traffic.
+Stress scenarios perturb uplift, cost, and fatigue dynamics to test plan sensitivity before downstream deployment stages.
+
+---
 
 ## 10. Harness evolution
 
-Failure-driven evolution operates on a slower timescale than policy learning.
+Harness evolution operates on a slower timescale than treatment-policy learning. Verified failure categories map to bounded proposal coordinates such as exploration, routing, process reward, feature construction, or planner behavior.
 
-Examples:
+| Evidence pattern | Typical evolution direction |
+| --- | --- |
+| Low support / ESS | collect additional evidence or increase bounded exploration |
+| Counterfactual value regression | reduce proxy-driven credit and strengthen causal evidence use |
+| Budget / ROI pressure | favor lower-cost routing and stronger cost preview |
+| Fatigue pressure | favor holdout or lower-touch retention strategies |
 
-```text
-insufficient support / ESS
-  -> increase bounded exploration or collect holdout evidence
+The evolution layer proposes changes while core metric, legal-action, event, and verification contracts remain stable.
 
-counterfactual value regression
-  -> reduce raw-conversion proxy credit
+---
 
-budget / ROI failures
-  -> prefer lower-cost routing and stronger cost preview
+## 11. Evidence-governed benchmark selection
 
-fatigue failures
-  -> prefer holdout / retention hypotheses
-```
+Real-world benchmark selection follows a fixed staged contract:
 
-Each proposal modifies one whitelisted coordinate. The Evolver cannot rewrite the North-Star metric, legal-action gate or Verifier.
+| Stage | Action |
+| ---: | --- |
+| **1** | Freeze experiment plan, source, split, candidate configuration, and evidence gates |
+| **2** | Materialize the realized data/model manifest |
+| **3** | Open validation and score every predeclared candidate |
+| **4** | Apply evidence eligibility and select one winner |
+| **5** | Freeze the winner |
+| **6** | Evaluate that winner on the independent final holdout |
+| **7** | Persist plan, manifest, evidence, environment, and code fingerprints |
 
-## 11. GrowthAgentBench
+Current accepted full-data artifacts cover:
+
+- **Criteo Uplift v2.1** targeting: S-Learner validation winner, **+0.93791 pp** population incremental visit and **+9.37910 pp** selected top-10% incremental visit;
+- **Open Bandit Dataset** OPE: IPS validation winner, final support **1.0000** and ESS ratio **0.16123**.
+
+See `docs/REAL_WORLD_BENCHMARKS.md` for the complete benchmark protocol.
+
+---
+
+## 12. GrowthAgentBench
 
 The repository includes a reproducible synthetic contextual-bandit oracle with:
 
 - heterogeneous treatment effects;
 - context-dependent behavior propensities;
-- explicit `NO_TREATMENT` potential outcome;
+- explicit `NO_TREATMENT` potential outcomes;
 - configurable outcome noise;
 - held-out CATE RMSE / MAE / bias;
 - support / uncertainty diagnostics;
-- oracle policy regret.
+- oracle policy value and regret;
+- safety and trajectory-credit invariants.
 
-Synthetic benchmark metrics are implementation regression tests, not product lift.
+GrowthAgentBench gives CI an inspectable ground-truth environment, while Criteo and Open Bandit supply the public locked real-world evidence layer.
 
-Public-dataset evaluation should add Open Bandit Dataset / Criteo adapters and preserve logging propensities, legal action state, delayed outcomes and holdout semantics.
+## Implementation map
 
-## 12. Claims boundary
-
-The repository does not describe neural IQL/CQL/CPO/GRPO, learned user simulators or real online uplift as completed until the corresponding training code and reproducible evaluation exist.
-
-The required sequence is:
-
-```text
-code
-  -> reproducible benchmark
-  -> OPE / uncertainty diagnostics
-  -> shadow / canary
-  -> verified result
-  -> README claim
-```
+| Algorithm component | Source |
+| --- | --- |
+| Cross-fitted DR CATE | `growthevo/causal/dr_learner.py` |
+| CATE serving | `growthevo/causal/serving.py` |
+| Safe Policy Improvement | `growthevo/rl/safe_policy_improvement.py` |
+| OPE estimator panel | `growthevo/rl/ope.py` |
+| Conformal calibration | `growthevo/rl/conformal.py` |
+| Risk-sensitive planning | `growthevo/rl/model_based.py` |
+| Process reward | `growthevo/rl/process_reward.py` |
+| Dynamics-aware trajectory credit | `growthevo/training/trajectory.py` |
+| Locked OPE | `growthevo/bench/locked_ope_cli.py` |
+| Locked targeting | `growthevo/bench/locked_targeting_cli.py` |
