@@ -1,12 +1,23 @@
 # GrowthEvo Frontier Map · 2026
 
-This document records research signals that materially affect GrowthEvo's design and the exact boundary between **implemented contracts** and **external training backends**.
+This document connects current research directions to concrete GrowthEvo-Harness components. It is a research map for architecture and algorithm selection rather than a project-version history.
 
-Research publication years are citations, not project-version labels.
+## Frontier map
+
+| Research direction | GrowthEvo component | Repository role |
+| --- | --- | --- |
+| Efficient off-policy evaluation | `growthevo/rl/ope.py` | cross-fitted β*-IPS, DR-family estimators, evidence diagnostics |
+| Uncertainty-aware constrained optimization | `growthevo/rl/conformal.py`, verifier, Safe PI | calibrated lower/upper bounds and final-feasible policy selection |
+| Hierarchical decision systems | planner + numeric policy | semantic growth intent separated from channel/offer/timing/budget control |
+| Orthogonal CATE learning | `growthevo/causal/dr_learner.py` | group-aware cross-fitting and pluggable effect estimation |
+| Support-constrained policy improvement | `growthevo/rl/safe_policy_improvement.py` | behavior anchoring, trust regions, cost constraints, support-aware action search |
+| Agentic process credit | GrowthPRM + trajectory adapter | observation-grounded process reward and dynamics-aware GAE |
+| Verifiable simulation | `UserWorldModel`, GrowthAgentBench | inspectable stress testing and synthetic ground-truth regression |
+| Risk-sensitive long horizon | `growthevo/rl/model_based.py` | stochastic rollout, downside CVaR, constraint-risk ranking |
 
 ---
 
-## 1. Off-policy evaluation beyond plain IPS / SNIPS
+## 1. Efficient OPE with additive control variates
 
 ### SIGIR 2026 · Additive Control Variates Dominate Self-Normalisation in Off-Policy Evaluation
 
@@ -14,33 +25,23 @@ Research publication years are citations, not project-version labels.
 - Microsoft Research: https://www.microsoft.com/en-us/research/publication/additive-control-variates-dominate-self-normalisation-in-off-policy-evaluation/
 - arXiv: https://arxiv.org/abs/2602.14914
 
-**Signal**
+**Research signal**
 
-Logged contextual policies need lower-variance OPE without hiding overlap problems. Additive control variates provide a principled alternative to treating self-normalization as the default variance-reduction technique.
+Additive control variates provide a principled variance-reduction direction for off-policy evaluation and motivate treating β*-IPS as a first-class estimator rather than relying solely on self-normalization.
 
 **GrowthEvo mapping**
 
-`growthevo/rl/ope.py` implements IPS, Doubly Robust and estimated beta*-IPS plus estimator standard error, ESS, ESS ratio, support coverage, maximum importance weight and weight-CV diagnostics.
+`growthevo/rl/ope.py` provides cross-fitted β*-IPS together with IPS, SNIPS, Doubly Robust, SWITCH-DR, DR-OS, Meta-OPE candidates, estimator uncertainty, ESS, support coverage, and importance-weight diagnostics.
 
-**Boundary**
-
-No estimator repairs hidden confounding, incorrect propensities or missing support. Weak overlap produces abstention in the Verifier.
+The repository adds an explicit evidence layer around estimator choice: a real-data benchmark predeclares the candidate panel, applies support gates, selects on validation, and evaluates only the frozen winner on final holdout.
 
 ---
 
-## 2. Advertising optimization is uncertainty-aware and hierarchical
+## 2. Uncertainty-aware and hierarchical growth optimization
 
 ### WWW 2026 · Auto-bidding under Return-on-Spend Constraints with Uncertainty Quantification
 
 - arXiv: https://arxiv.org/abs/2509.16324
-
-**Signal**
-
-Industrial growth/bidding policies need uncertainty-aware value estimates and explicit business constraints.
-
-**GrowthEvo mapping**
-
-`growthevo/rl/conformal.py` and `growthevo/verifier/counterfactual.py` use one-sided residual calibration for value/ROI lower bounds and spend/fatigue/churn upper bounds. Margin fields are explicitly separated from the actual bounds applied to new predictions.
 
 ### WWW 2026 · DARA
 
@@ -50,184 +51,163 @@ Industrial growth/bidding policies need uncertainty-aware value estimates and ex
 
 - arXiv: https://arxiv.org/abs/2603.05134
 
-**Signal**
+**Research signal**
 
-High-level semantic reasoning and low-level numerical allocation are different control problems.
+Modern growth and bidding systems increasingly combine uncertainty-aware value estimation, business constraints, high-level reasoning, and low-level allocation.
 
 **GrowthEvo mapping**
 
-`GrowthHypothesisPlanner` owns semantic intent/evidence acquisition while `HierarchicalGrowthPolicy` owns numeric channel/offer/timing/budget decisions.
+`GrowthHypothesisPlanner` owns semantic intent and evidence acquisition. `HierarchicalGrowthPolicy` owns numeric channel, offer, timing, and budget decisions. `growthevo/rl/conformal.py` and the counterfactual verifier provide one-sided lower/upper margins for value, ROI, spend, fatigue, and churn quantities.
 
-**Boundary**
-
-GrowthEvo does not claim to reproduce DARA's or LBM's exact training algorithms.
+The common architectural theme is a clean separation between semantic planning, numerical optimization, and independently evaluated evidence.
 
 ---
 
-## 3. Causal uplift should be trained out-of-fold and served with support diagnostics
+## 3. Orthogonal CATE learning with serving-time support
 
-GrowthEvo's causal learner is not copied from one 2026 paper; it follows established doubly-robust / cross-fitting principles while making them explicit in the Agent Runtime.
+GrowthEvo's causal learner follows doubly-robust and cross-fitting principles while making the serving contract explicit for an agent runtime.
 
-**Implemented mapping**
+`growthevo/causal/dr_learner.py` provides:
 
-`growthevo/causal/dr_learner.py` now provides:
-
-- full multi-action logging-policy propensity vectors;
-- treatment-vs-control propensity renormalization;
-- stratified K-fold nuisance fitting;
+- full multi-action behavior-policy propensity vectors;
+- treatment-vs-control propensity normalization;
+- group-aware stratified cross-fitting;
 - held-out AIPW/DR pseudo-outcomes;
-- second-stage fitting only on out-of-fold pseudo-outcomes;
-- overlap coverage and extrapolation diagnostics.
+- second-stage fitting on out-of-fold targets;
+- pluggable nuisance and effect learners;
+- practical-overlap diagnostics;
+- OOF residual diagnostics;
+- regularized Mahalanobis distributional support.
 
-`growthevo/causal/serving.py` then maps CATE into Runtime belief while preserving raw effects, clipping probability-scale uplift only at the serving contract boundary and adding clipping/support loss into uncertainty.
+`growthevo/causal/serving.py` maps fitted treatment effects into runtime beliefs while preserving channel-level effect, uncertainty, and support information.
 
-**Boundary**
-
-The built-in ridge learner is an auditable reference backend. It is not described as a state-of-the-art nonlinear CATE model, and its serving uncertainty is not presented as a formal causal confidence interval.
+This allows sophisticated nonlinear or neural CATE backends to participate behind the same orthogonal estimation and serving interfaces.
 
 ---
 
-## 4. Offline policy improvement is moving toward support constraints and safe anchoring
+## 4. Support-constrained and safe offline improvement
 
 ### AAMAS 2026 · PIQL: Projective Implicit Q-Learning with Support Constraint for Offline Reinforcement Learning
 
 - DOI: https://doi.org/10.65109/GZIN7614
-
-**Signal**
-
-OOD action error remains a central offline-RL failure mode; policy improvement increasingly treats data support as a first-class constraint rather than a logging detail.
 
 ### Neural Networks 2026 · Offline constrained policy optimization with safe anchoring
 
 - DOI: https://doi.org/10.1016/j.neunet.2026.108865
 - PubMed: https://pubmed.ncbi.nlm.nih.gov/41934715/
 
-**Signal**
-
-Safety constraints and behavior-policy anchoring can be combined to bound offline updates and avoid unsafe OOD actions.
-
 ### 2026 · Support-Constrained RL Enables Real-World Policy Improvement without Real-World Experience
 
 - arXiv: https://arxiv.org/abs/2606.27475
 
-**Signal**
+**Research signal**
 
-Constraining improvement to the support of a competent base policy can preserve transferability while still allowing useful improvement.
+Support constraints, behavior anchoring, and explicit cost limits are central tools for controlling offline policy updates under distribution shift.
 
 **GrowthEvo mapping**
 
-`growthevo/rl/safe_policy_improvement.py` implements a dependency-free contextual safe-improvement kernel:
+`growthevo/rl/safe_policy_improvement.py` implements a contextual safe-improvement kernel with:
 
-- pessimistic action value lower bounds;
-- behavior support floor;
-- unsupported treatment exclusion;
-- behavior-policy mixture rather than direct argmax jumps;
-- total-variation update cap;
-- expected-cost cap;
-- `NO_TREATMENT` fallback.
+- pessimistic action-value bounds;
+- explicit behavior support;
+- support-aware candidate eligibility;
+- behavior-policy mixtures;
+- total-variation update caps;
+- expected-cost constraints;
+- final-feasible candidate ranking;
+- first-class `NO_TREATMENT` fallback.
 
-**Boundary**
-
-This module is not advertised as PIQL, CQL, IQL or the cited safe-anchoring algorithm. It implements the shared systems principle—support-aware conservative improvement—while final promotion remains an independent OPE/Verifier decision.
+GrowthEvo uses these ideas as a deployment-facing policy-improvement contract while keeping the underlying sequential trainer backend modular.
 
 ---
 
-## 5. Agentic RL needs observation-grounded and dynamics-aware credit
+## 5. Observation-grounded and dynamics-aware agent credit
 
 ### ACL 2026 · SOAR: Supervision from Observation for Agentic Reinforcement Learning
 
 - ACL Anthology: https://aclanthology.org/2026.acl-long.1624/
 
-**Signal**
-
-Environment observations can provide learning signal for actions instead of relying only on sparse terminal outcomes.
-
-**GrowthEvo mapping**
-
-`growthevo/rl/process_reward.py` implements Goal/Evidence/Constraint potential change, evidence gain, action-confidence weighting, tool failure, duplicate evidence, direct cost and irreversible-side-effect penalties.
-
 ### AAAI 2026 · SHADOW: Dynamic-Aware Credit Assignment Against Long-Horizon Tasks
 
 - DOI: https://doi.org/10.1609/aaai.v40i28.39570
-
-**Signal**
-
-Long-horizon credit can be biased when transitions from dynamically inconsistent states are compared or propagated as if they belonged to one regime.
-
-**GrowthEvo mapping**
-
-`growthevo/training/trajectory.py` computes GAE while allowing a `credit_boundary` to reset bootstrap/advantage propagation across rollback, reset, user/segment switch and delayed-outcome attribution boundaries.
-
-This is a Runtime-level dynamics boundary contract, not a reproduction of SHADOW's full algorithm.
 
 ### Findings of ACL 2026 · ToolPRMBench
 
 - ACL Anthology: https://aclanthology.org/2026.findings-acl.602/
 - Code: https://github.com/David-Li0406/ToolPRMBench
 
-**Signal**
+**Research signal**
 
-Tool-using process reward models need local-step and trajectory-level evaluation.
+Long-horizon agent training benefits from process signals grounded in observations and from credit rules that respect transition dynamics.
 
 **GrowthEvo mapping**
 
-Process rewards and terminal business outcomes are stored separately, and planner transitions export legal-action/tool-success state for external trainers.
+`growthevo/rl/process_reward.py` scores Goal/Evidence/Constraint progress, evidence gain, action confidence, tool outcomes, direct cost, duplicate evidence, and irreversible-side-effect signals.
+
+`growthevo/training/trajectory.py` computes GAE with an explicit `credit_boundary` that can reset propagation across rollback, environment reset, user/segment switch, and delayed-outcome attribution boundaries.
+
+Process rewards and terminal business outcomes remain separate fields in the trajectory contract, which makes the export usable by external Agent-RL trainers without changing runtime evidence semantics.
 
 ---
 
-## 6. User simulation must be auditable
+## 6. Verifiable simulation and long-horizon risk
 
 ### SIGIR 2026 Tutorial · Verifiable User Simulation for Search and Recommendation Systems
 
 - arXiv: https://arxiv.org/abs/2606.14474
 - SIGIR listing: https://sigir2026.org/en-AU/pages/program/accepted-tutorials
 
+**Research signal**
+
+Simulation is most useful when its role, assumptions, and failure modes are inspectable and separated from empirical policy evidence.
+
 **GrowthEvo mapping**
 
-`UserWorldModel` and `RiskSensitiveMPC` are replay/stress components only. Synthetic returns are never sufficient for policy promotion.
+`UserWorldModel` and `RiskSensitiveMPC` provide replay and stress-testing surfaces. GrowthAgentBench supplies known synthetic potential outcomes for deterministic regression testing.
 
-`GrowthAgentBench` follows the same discipline: known synthetic potential outcomes are useful for regression testing because the oracle is inspectable, but they are not business evidence.
+The long-horizon planner models fatigue, churn risk, spend, touch counts, intent, and effective treatment response across multi-seed stochastic rollouts.
 
----
+```math
+Score(plan)=CVaR_{\alpha}(Return)-\lambda P(ConstraintViolation).
+```
 
-## 7. Long-horizon model-based safety
-
-Repeated growth interventions change fatigue, churn risk, spend, intent and future treatment effect.
-
-`growthevo/rl/model_based.py` models long-horizon belief transitions, fatigue accumulation/decay, churn deterioration/recovery, spend, touch constraints, stress scenarios, multi-seed rollout, downside CVaR and constraint-violation probability.
-
-\[
-Score(plan)=CVaR_{\alpha}(Return)-\lambda P(ConstraintViolation)
-\]
-
-This remains a candidate-ranking/stress layer, not a replacement for causal evaluation.
+This gives the runtime an explicit downside-risk objective while locked real-world evaluation remains the benchmark evidence layer.
 
 ---
 
-## 8. GrowthAgentBench closes the code-to-evidence loop
+## 7. Public evidence closes the research loop
 
-`growthevo/bench/` now contains an auditable synthetic contextual-bandit oracle with:
+GrowthEvo now carries accepted locked full-data evidence for both major contextual causal benchmarks used by the repository.
 
-- heterogeneous treatment effects;
-- context-dependent logging propensities;
-- explicit `NO_TREATMENT`, push and email potential outcomes;
-- configurable outcome noise;
-- held-out CATE RMSE/MAE/bias;
-- serving support/uncertainty metrics;
-- oracle policy value/regret.
+### Criteo Uplift v2.1
 
-**Boundary**
+The pre-registered top-10% targeting experiment selected S-Learner on randomized validation and reported on final holdout:
 
-Real benchmark claims still require Open Bandit Dataset / Criteo adapters and reproducible experiment configuration.
+- population incremental visit: **+0.93791 pp**;
+- selected top-10% incremental visit: **+9.37910 pp**;
+- evidence commit: `7ac26a5aebde2c70e1b43264b89f08dddcff0245`.
+
+### Open Bandit Dataset
+
+The pre-registered OPE experiment selected IPS on validation and reported on final holdout:
+
+- support coverage: **1.0000**;
+- ESS ratio: **0.16123**;
+- final estimate: **0.0045295435**;
+- evidence commit: `7d538cea9698b5f0a48c585eed85e3ae526e5af6`.
+
+These results connect the algorithm stack to frozen public-data evidence rather than leaving the frontier map at the implementation-only level.
+
+Full protocol and provenance details are in `docs/REAL_WORLD_BENCHMARKS.md` and the corresponding evidence directories.
 
 ---
 
-## 9. External systems to integrate behind stable adapters
+## 8. External ecosystem behind stable adapters
 
-The core package stays dependency-light. Heavy systems belong behind typed adapters.
+The dependency-light core is designed to interoperate with specialized research systems through typed contracts.
 
 | Project | Intended role | Link |
-|---|---|---|
+| --- | --- | --- |
 | verl | scalable PPO/GRPO and RL post-training | https://github.com/volcengine/verl |
 | Agent Lightning | execution/training separation and agent credit | https://github.com/microsoft/agent-lightning |
 | Open Bandit Pipeline | public logged-bandit data and OPE baselines | https://github.com/st-tech/zr-obp |
@@ -237,34 +217,15 @@ The core package stays dependency-light. Heavy systems belong behind typed adapt
 | Tool-Star | multi-tool Agent-RL recipes | https://github.com/RUC-NLPIR/Tool-Star |
 | SmartSearch | process-reward-guided local refinement | https://github.com/RUC-NLPIR/SmartSearch |
 
-Runtime facts, consent, budget, event history and promotion semantics remain owned by GrowthEvo.
+GrowthEvo keeps runtime facts, consent, budget, event history, causal estimates, and benchmark-promotion semantics stable while allowing specialized trainers and modeling libraries to evolve independently.
 
----
+## Active research extensions
 
-## 10. Claims boundary
+Current extension directions include:
 
-The following are intentionally **not** presented as completed results:
-
-- production neural IQL/CQL/CPO/GRPO policies;
-- reproduced DARA GRPO-Adaptive or LBM GQPO;
-- learned neural user world model;
-- calibrated CATE on real GrowthEvo data;
-- Open Bandit / Criteo benchmark numbers;
-- real online A/B uplift;
-- production ad-auction latency;
-- full Agent Lightning / verl trainer integration;
-- causal validity under hidden confounding;
-- distribution-free guarantees under arbitrary non-stationarity.
-
-These become project claims only after code plus reproducible evaluation exist.
-
----
-
-## 11. Next research-grade work
-
-1. Open Bandit Dataset / Criteo schema adapters and propensity validation.
-2. Nonlinear CATE backends and uncertainty calibration.
-3. Sequential IQL/CQL adapters with support-constrained action serving.
-4. External planner PPO/GRPO training from exported Harness trajectories.
-5. World-model calibration and rollout-error growth curves.
-6. Anytime-valid / sequential OPE for replay → shadow → canary promotion decisions.
+1. richer nonlinear CATE backends and calibrated uncertainty;
+2. sequential IQL/CQL-style trainer integrations using the existing KuaiRand contract;
+3. planner PPO/GRPO post-training from exported Harness trajectories;
+4. learned world-model calibration and rollout-error diagnostics;
+5. sequential / anytime-valid OPE for staged deployment evaluation;
+6. broader real-world benchmark coverage under the same locked-evidence protocol.
