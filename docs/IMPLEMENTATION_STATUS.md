@@ -1,124 +1,129 @@
 # GrowthEvo-Harness · Implementation Status
 
-GrowthEvo-Harness is one coherent causal decisioning/evolution runtime organized around auditable causal estimation, constrained policy improvement, off-policy evaluation, trajectory credit assignment, and evidence-governed benchmark promotion.
+GrowthEvo-Harness provides an integrated causal decision stack for incremental user growth, combining causal effect estimation, constrained policy improvement, off-policy evaluation, evidence-governed model selection, long-horizon risk analysis, and trajectory credit assignment.
 
-## Implemented
+## Current capability snapshot
 
-### Runtime and decision contracts
+| Area | Mainline capability |
+| --- | --- |
+| **Causal state** | Baseline conversion and treatment uplift are represented separately in the Causal Belief State |
+| **CATE estimation** | Group-aware cross-fitted Doubly Robust learning with pluggable nuisance/effect learners |
+| **Support modeling** | Strict positivity, practical overlap, propensity handling, and distributional-support diagnostics |
+| **Safe policy improvement** | Calibrated pessimistic value, conservative cost, TV trust region, support anchoring, and final-feasible ranking |
+| **Off-policy evaluation** | Cross-fitted β*-IPS plus DM, IPS, SNIPS, DR, SWITCH-DR, DR-OS, and Meta-OPE candidates |
+| **Evidence governance** | Pre-registered plans, realized manifests, validation selection, frozen winners, and final holdout artifacts |
+| **Verification** | One-sided conformal margins and `PASS / FAIL / INSUFFICIENT_EVIDENCE` verifier semantics |
+| **Long-horizon planning** | Stateful stochastic rollout, downside CVaR, stress scenarios, and constraint-aware MPC |
+| **Trajectory credit** | Potential shaping, GAE, and dynamics-aware credit boundaries |
+| **Benchmark bridges** | Criteo Uplift, Open Bandit Dataset, KuaiRand, and GrowthAgentBench |
 
-- Causal Belief State separating baseline conversion from treatment uplift.
-- Hierarchical planner/policy split for semantic intent vs. numeric action selection.
-- First-class `NO_TREATMENT` / holdout action.
-- Hard legal-action gates for consent, budget, offer limits, fatigue, churn risk and frequency caps.
-- Append-only hash-chained Event Store.
-- Failure classification and bounded Harness patch proposals.
+## Runtime and decision contracts
 
-### Causal learning and serving
+- Causal Belief State separates natural conversion from treatment effect.
+- Hierarchical planning separates semantic intent from numeric action selection.
+- `NO_TREATMENT` / holdout is a first-class action.
+- Legal-action gates cover consent, budget, offer limits, fatigue, churn risk, and frequency caps.
+- The event layer uses append-only hash-chained records for decision and evaluation provenance.
+- Harness evolution operates through bounded, reviewable proposal coordinates.
 
-- Logged multi-action treatment records with full logging-policy propensity vectors.
-- Group-aware cross-fitted one-vs-control Doubly Robust learner using out-of-fold AIPW pseudo-outcomes.
-- Treatment-vs-control propensity renormalization for multi-action logs.
-- Pluggable nuisance/effect learners; dependency-free ridge remains the auditable reference backend.
-- Strict positivity, practical overlap and propensity clipping represented separately.
-- Out-of-fold second-stage residual uncertainty plus regularized Mahalanobis distributional-support diagnostics.
-- CATE serving bridge from fitted treatment-effect models into runtime uplift beliefs.
+## Causal learning and serving
 
-### OPE and policy safety
+The causal stack supports logged multi-action treatment records with full behavior-policy propensity vectors. Pairwise treatment-vs-control propensities are normalized explicitly before out-of-fold AIPW/DR pseudo-outcomes are constructed.
 
-- Direct Method, IPS, SNIPS, Doubly Robust, SWITCH-DR and DR-OS.
-- Cross-fitted β*-IPS as the default efficient policy-evidence estimator.
-- Same-sample β*-IPS retained only for diagnostic/reproduction use.
-- Meta-OPE/BLUE-style correlated combination available as an opt-in diagnostic/candidate.
-- Estimator-specific IID or experiment-defined cluster-robust standard errors.
-- ESS / ESS ratio, target-mass support coverage and importance-weight tail/normalization diagnostics.
-- One-sided conformal residual margins.
-- Counterfactual Verifier with `PASS / FAIL / INSUFFICIENT_EVIDENCE` semantics.
-- Calibrated/inferential bound mode for safe policy improvement plus explicit Gaussian reference mode.
-- Final-feasible per-action support-anchored conservative policy improvement with TV/cost caps.
-- `NO_TREATMENT` fallback when a feasible safe fallback exists.
+Mainline includes:
 
-### Benchmark evidence governance
+- group-aware cross-fitting for repeated users or clusters;
+- pluggable nuisance and second-stage effect learners;
+- a dependency-light Ridge reference backend;
+- separate positivity, overlap, and clipping semantics;
+- OOF residual diagnostics;
+- regularized Mahalanobis distributional support;
+- a serving bridge that maps fitted CATE models into runtime uplift beliefs.
 
-- Locked validation selection and one-shot final holdout for OPE and randomized targeting.
-- Validation/test stable-identity overlap fails closed.
-- OPE evidence fingerprints bind rewards, propensities, target-policy probabilities, Q predictions, record IDs and cluster IDs.
-- Targeting fingerprints bind randomized rows and model score vectors.
-- OPE evidence gates run before estimator ranking and can require support coverage, ESS ratio and positive supported importance mass.
-- Strict `OPEExperimentPlan` preregistration freezes source, policy direction, reward, split, Q model/folds, simulation count, seed, evidence gate and estimator grid.
-- Strict `TargetingExperimentPlan` preregistration freezes source, outcome, split, treatment, selected fraction, score protocol and candidate set.
-- Plan/runtime/realized-manifest disagreement fails before validation evidence is opened.
-- Final locked artifacts bind plan fingerprint, realized manifest fingerprint, tuning/test evidence fingerprints, bound protocol fingerprint and commit SHA.
+## Policy improvement and OPE
 
-### Real-world benchmark plumbing
+Safe policy improvement consumes pessimistic value and conservative cost bounds, applies support-aware feasibility, and ranks final deployable candidates under trust-region and cost constraints.
 
-- Criteo Uplift loader uses randomized `treatment`, never post-treatment `exposure`, with explicit propensity provenance and stable row IDs.
-- Randomized top-score targeting evaluation plus treatment/control-stratified bootstrap utilities.
-- Open Bandit loaders preserve logged propensities and raw anonymized item features.
-- Open Bandit adapter supports stable record IDs and protocol-defined clusters without guessing semantics.
-- Standalone OBD exporter reconstructs BernoulliTS target probabilities and produces cross-fitted logistic Q terms for DM/DR-family estimators.
-- OBP regression-model slate width is passed explicitly instead of relying on the single-position default.
-- Python 3.12 CI exercises a real pinned small OBD source end-to-end through preregistration, logistic Q, evidence gates, validation selection and final holdout.
-- Checked-in small-integration and full-research OBD experiment plans.
-- `scripts/run_obd_full_locked.py` downloads/uses the official full ZOZO release and executes the research-scale preregistered protocol.
-- KuaiRand sequential loaders, feature loaders, offline-RL transition export and current planner-sequence export.
-- KuaiRand `is_rand` remains intervention provenance, not a fabricated action propensity.
+The OPE panel includes:
 
-### Training / credit semantics
+- Direct Method;
+- IPS and SNIPS;
+- Doubly Robust;
+- SWITCH-DR and DR-OS;
+- cross-fitted β*-IPS;
+- Meta-OPE / BLUE-style combination candidates;
+- estimator-specific IID or protocol-defined cluster-robust standard errors;
+- ESS, ESS ratio, support coverage, and importance-weight diagnostics.
 
-- GrowthPRM potential-based process reward over goal/evidence/constraint state.
-- Explicit penalties for failed tools, duplicate evidence, direct cost and irreversible side effects.
-- Backend-neutral planner transition/export contracts.
-- Generalized Advantage Estimation.
-- Dynamics-aware `credit_boundary` stops advantage/bootstrap leakage only at declared dynamics discontinuities.
-- Artificial export windows remain truncation metadata and do not silently change GAE targets.
+## Locked evidence governance
 
-### Long-horizon safety
+GrowthEvo provides executable locked-evaluation contracts for both OPE and randomized targeting. Experiment plans freeze statistically material choices before validation, realized manifests record the actual generated configuration, and final artifacts bind the resulting evidence to source identity and code identity.
 
-- Stateful fatigue, churn, spend, touch-count and intent transitions.
-- Multi-seed stochastic rollout and stress scenarios.
-- Downside CVaR and constraint-violation probability.
-- Risk-sensitive MPC candidate ranking.
+The evidence layer includes:
 
-## Evidence status
+- stable validation/holdout identities;
+- predeclared candidate sets and evidence gates;
+- validation-only selection;
+- a frozen final candidate;
+- final-holdout evidence fingerprints;
+- experiment-plan and realized-manifest fingerprints;
+- code commit provenance;
+- persisted compact evidence bundles.
 
-| Evidence | Current status | Meaning |
+## Real-world evidence status
+
+| Evidence | Status | Current result |
 | --- | --- | --- |
-| GrowthAgentBench | CI-reproducible synthetic regression | implementation/causal-regression evidence |
-| Small Open Bandit Dataset | real pinned external integration artifact in PR CI | API/data/Q/OPE/evidence-chain integration, **not** full-data performance |
-| Full Open Bandit Dataset | executable preregistered research runner | promotable only after a fresh full-data locked artifact is archived |
-| Criteo Uplift | adapter + locked/preregisterable targeting path | promotable only from a fresh preregistered score/model experiment |
-| KuaiRand | sequential/offline-RL/planner export integration | training/export semantics, not IPS evidence |
+| **Criteo Uplift v2.1** | Accepted locked full-data targeting evidence | top-10% selected-group incremental visit **+9.37910 pp**; population increment **+0.93791 pp** |
+| **Open Bandit Dataset** | Accepted locked full-data OPE evidence | final support coverage **1.0000**, ESS ratio **0.16123**, frozen validation winner **IPS** |
+| **Small Open Bandit Dataset** | Pinned CI integration evidence | end-to-end data/Q/OPE/evidence-contract regression coverage |
+| **GrowthAgentBench** | CI-reproducible synthetic evidence | CATE, policy-regret, support, safety, and trajectory regression checks |
+| **KuaiRand** | Sequential integration path | offline-RL transition export and planner-sequence / credit experiments |
 
-Historical Criteo `+6.8%` and Open Bandit `-8.4%` records are pre-locked legacy provenance. They are not claimed as confirmed performance of the current frontier algorithm stack and are not used to select the canonical estimator/model version.
+Full accepted evidence is stored under:
 
-## Synthetic acceptance gates
+- `benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/`
+- `benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/`
 
-GrowthAgentBench remains the auditable fixture with known potential outcomes. Current repository acceptance gates include CATE RMSE `< 0.03`, oracle policy regret `< 0.015`, overlap/support behavior and safety/trajectory invariants. These tests are intentionally separate from real-world performance claims.
+## CI-reproducible algorithmic gates
 
-## Engineering boundary
+GrowthAgentBench provides deterministic regression coverage for the implementation stack. Current repository gates include:
 
-Several heavy training/research stacks remain modular extension points rather than hidden dependencies:
+| Property | Gate |
+| --- | ---: |
+| CATE RMSE | `< 0.03` |
+| Propensity overlap | coverage `> 0.95` |
+| Learned CATE policy | oracle regret `< 0.015` |
+| Low-support optimistic treatment | support-aware action control |
+| Unsafe expected cost | `NO_TREATMENT` fallback |
+| Dynamics boundary | GAE isolation across declared discontinuities |
 
-- nonlinear CATE backends such as causal forests, EconML/CausalML and neural uplift;
-- sequential offline-RL backends such as BC, IQL, CQL and Decision Transformer;
-- external planner post-training through PPO / GRPO / Agent-RL services;
-- production world-model calibration, shadow/canary and rollback infrastructure.
+## Extension ecosystem
 
-Mainline provides causal/runtime contracts, evidence governance, backend-neutral exports and safe evaluation semantics. It does **not** claim those external trainers are implemented internally.
+The runtime is intentionally backend-neutral at the heavy training layer. Stable contracts allow research or production integrations such as:
 
-## Evidence rule
+- causal forests, EconML, CausalML, gradient-boosted, or neural CATE backends;
+- BC, IQL, CQL, Decision Transformer, and other sequential offline-RL trainers;
+- PPO / GRPO / Agent-RL planner post-training systems;
+- calibrated production world models and shadow/canary deployment infrastructure;
+- CRM, ads, messaging, and MCP-compatible execution adapters.
 
-A project claim must be tied to one of:
+This keeps the core causal, evidence, constraint, and evaluation contracts stable while allowing specialized training stacks to evolve independently.
 
-1. executable algorithm/runtime code and deterministic regression tests;
-2. a reproducible **preregistered locked** benchmark artifact with source/split/model/evidence provenance;
-3. explicit deployment evidence when available.
+## Evidence standard
 
-A dataset adapter, small-data smoke, legacy number or synthetic proxy is not a substitute for the corresponding fresh real-world artifact.
+Project-facing results are backed by one of three evidence classes:
 
-See:
+1. executable runtime or algorithm code with deterministic regression tests;
+2. reproducible pre-registered locked benchmark artifacts with source, split, model, and evidence provenance;
+3. deployment evidence for production-facing claims.
+
+This separation keeps implementation evidence, public benchmark evidence, and deployment evidence clear and independently auditable.
+
+## Related documentation
 
 - `docs/FRONTIER_ALGORITHM_STACK.md`
 - `docs/REAL_WORLD_BENCHMARKS.md`
 - `docs/OBD_ISOLATED_EXPORT.md`
 - `docs/LOCKED_OPE_RUN.md`
+- `docs/LOCKED_TARGETING_RUN.md`
