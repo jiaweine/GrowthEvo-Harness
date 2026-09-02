@@ -1,37 +1,56 @@
-# Open Bandit Dataset → GrowthEvo Locked OPE
+# Open Bandit Dataset · GrowthEvo Locked OPE
 
-GrowthEvo keeps Open Bandit tooling **optional**. The default runtime remains dependency-free; real OBD work installs the maintained research bridge with:
+GrowthEvo keeps Open Bandit tooling optional so the core runtime remains dependency-light. Install the research bridge with:
 
 ```bash
 pip install -e '.[obd]'
 ```
 
-The `obd` extra pins the `sb-obp==0.5.10` distribution on supported Python versions. The exporter remains outside the core runtime and imports OBP, scikit-learn, pandas and NumPy only when executed. Full-data CI additionally installs a CPU-only PyTorch build so the research environment does not pull an unused CUDA stack.
+The `obd` extra pins `sb-obp==0.5.10` on supported Python versions. OBP, scikit-learn, pandas, and NumPy are imported only by the research bridge. Full-data CI also uses a CPU-only PyTorch installation for a compact reproducible environment.
 
 ## Evidence levels
 
-GrowthEvo deliberately separates two OBD uses:
-
-| Level | Data | Purpose | README performance claim? |
+| Level | Data | Purpose | Repository role |
 | --- | --- | --- | --- |
-| Integration evidence | pinned small OBD from `sb-ai-lab/sb-obp` | prove API/data/Q/OPE pipeline compatibility | No |
-| Research evidence | full ZOZO Open Bandit Dataset | estimator comparison and promotable real-world evidence | Only with a locked artifact |
+| **Integration evidence** | pinned small OBD from `sb-ai-lab/sb-obp` | verify API, data, Q-model, OPE, and evidence-chain compatibility | PR CI regression |
+| **Research evidence** | full ZOZO Open Bandit Dataset | compare predeclared estimators under a locked protocol | accepted full-data OPE evidence |
 
-The canonical full release is published by ZOZO Research. For automated execution, GrowthEvo uses the ZOZO NEXT mirror pinned to OBD 1.0 data revision `57a688e`, while retaining the canonical ZOZO Research release URL as the dataset identity.
+The canonical dataset identity is the ZOZO Research Open Bandit Dataset release. Automated research execution uses a pinned ZOZO NEXT mirror revision while retaining canonical source provenance in the artifact.
+
+## Current accepted full-data result
+
+The accepted full OBD artifact is stored at:
+
+`benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/`
+
+| Metric | Locked result |
+| --- | ---: |
+| Random-policy evidence rows | **1,374,327** |
+| BernoulliTS reference rows | **12,357,200** |
+| Predeclared estimator configurations | **9** |
+| Validation winner | **IPS** |
+| Final estimate | **0.0045295435** |
+| Final on-policy reference | `0.0049885087` |
+| Final relative estimation error | `9.20045%` |
+| Final support coverage | **1.0000** |
+| Final ESS ratio | **0.16123** |
+
+**Evidence commit:** `7d538cea9698b5f0a48c585eed85e3ae526e5af6`
+
+---
 
 ## Pre-registered plans
 
-A real OBD result is not accepted from command-line arguments alone. The repository checks in immutable experiment plans:
+The repository checks in explicit experiment plans:
 
 - `benchmarks/ope/obd-small-all-random-to-bts.v1.json`
 - `benchmarks/ope/obd-full-all-random-to-bts.v1.json`
 
-Each plan fingerprints, before validation is opened:
+Each plan fingerprints the benchmark identity before validation:
 
-- benchmark and dataset identity;
 - dataset source;
 - campaign;
-- behavior/evaluation policy direction;
+- behavior and evaluation policies;
 - reward definition;
 - split strategy and validation fraction;
 - Q model and cross-fit folds;
@@ -41,11 +60,11 @@ Each plan fingerprints, before validation is opened:
 - evidence gates;
 - complete estimator/hyperparameter grid.
 
-`growthevo-locked-ope` accepts `--experiment-plan-json` together with `--export-manifest-json`. Plan/runtime/manifest disagreement fails **before validation JSONL is read**. The final artifact binds both the plan fingerprint and the realized export-manifest fingerprint.
+`growthevo-locked-ope` pairs `--experiment-plan-json` with `--export-manifest-json`. The plan captures intended protocol; the manifest captures the configuration that was actually materialized. Their fingerprints are persisted in the final evidence bundle.
 
-## Target policy without the full round tensor
+## Target policy representation
 
-The exporter implements the canonical `random → BernoulliTS` direction and reconstructs the ZOZOTOWN BernoulliTS distribution through OBP. This production policy is context-free. OBP first computes one Monte Carlo action distribution and its historical batch helper repeats that same distribution over rounds. GrowthEvo therefore keeps the single `(n_actions, len_list)` distribution rather than materializing an equivalent `n_rounds` tile.
+The exporter implements the canonical `random` behavior policy and BernoulliTS evaluation policy direction. The ZOZOTOWN BernoulliTS policy is context-free, so the exporter stores the compact action distribution instead of repeating an equivalent distribution for every round.
 
 For factual row `i`, logged action `a_i`, and slate position `p_i`:
 
@@ -55,18 +74,16 @@ For factual row `i`, logged action `a_i`, and slate position `p_i`:
 \mathrm{action\_dist}[a_i,p_i].
 ```
 
-The exporter validates that target-policy mass sums to one at every observed position. CI also compares the compact path against the historical tiled semantics.
+The exporter validates probability mass at every observed position. CI also checks compact semantics against the equivalent tiled OBP representation.
 
 ## Compact cross-fitted Q terms
 
-The research path preserves OBP `RegressionModel.fit` feature and position semantics inside each K-fold split, but it does **not** retain the full `(n_rounds, n_actions, len_list)` Q tensor. On held-out rows it computes only the two quantities needed by GrowthEvo OPE.
+The research bridge preserves OBP `RegressionModel.fit` feature and position semantics inside each cross-fitting fold while retaining only the quantities required by GrowthEvo OPE.
 
 For the factual action:
 
 ```math
-\widehat q_i
-=
-\widehat Q_i(a_i,p_i).
+\widehat q_i=\widehat Q_i(a_i,p_i).
 ```
 
 For the target-policy expected reward:
@@ -78,69 +95,73 @@ For the target-policy expected reward:
 \pi_e(a\mid x_i,p_i)\widehat Q_i(a,p_i).
 ```
 
-These become GrowthEvo's `baseline_q` and `target_q` for DM/DR/SWITCH-DR/DR-OS. Small-OBD CI directly compares these compact logistic predictions with OBP `RegressionModel.fit_predict` tensor output at `1e-12` numerical tolerance. `--q-model zero` remains a debugging option only and is not admissible as DM/DR performance evidence.
+These become GrowthEvo's `baseline_q` and `target_q` fields for DM, DR, SWITCH-DR, and DR-OS.
 
-## Paired chronological validation/holdout
+Small-OBD CI compares compact logistic predictions with OBP `RegressionModel.fit_predict` output at `1e-12` numerical tolerance.
 
-The GrowthEvo protocol adds a locked model-selection layer to the official two-production-policy OPE idea:
+## Paired chronological evaluation
 
-- earlier random-policy rows → validation OPE evidence;
-- earlier BTS rows → validation on-policy reference;
-- later random-policy rows → final OPE evidence;
-- later BTS rows → final on-policy reference.
+The locked OBD experiment uses paired validation and final windows across the two logged policies.
 
-BTS timestamps are parsed as ISO-8601 UTC instants before the GrowthEvo chronological split. The full release contains timestamps both with and without fractional seconds, so the parser explicitly accepts mixed ISO-8601 precision. This paired split is a **GrowthEvo experiment definition**, not a claim that historical OBP used the identical split or timestamp implementation.
+| Cohort | Purpose |
+| --- | --- |
+| Earlier random-policy rows | validation OPE evidence |
+| Earlier BernoulliTS rows | validation on-policy reference |
+| Later random-policy rows | final OPE evidence |
+| Later BernoulliTS rows | final on-policy reference |
+
+BTS timestamps are parsed as ISO-8601 UTC instants before splitting. The experiment definition is captured in the GrowthEvo plan and reproduced by the full-data runner.
 
 ## Evidence gate
 
-Estimator error is ranked only after the OPE cohort passes the predeclared evidence gate. The checked-in OBD plans currently require:
+Estimator ranking starts after the logged cohort satisfies the predeclared evidence criteria. Current OBD plans use:
 
-- target-policy-mass support coverage `>= 0.95`;
+- target-policy support coverage `>= 0.95`;
 - effective sample ratio `>= 0.05`;
 - positive supported importance mass.
 
-These are benchmark acceptance thresholds, not universal statistical constants. A failed validation or holdout gate is a failed reveal; the runner does not permit swapping in another cohort after inspecting diagnostics.
+The evidence gate is part of the experiment identity, so support criteria and estimator configuration remain frozen together.
 
 ## Small OBD CI
 
-PR CI uses a real external dataset pinned exactly to:
+PR CI uses an external OBD snapshot pinned to:
 
 ```text
 sb-ai-lab/sb-obp@1c6d14677ec6f06094a2f8886a1158bab99c571e
 ```
 
-The job:
+The job performs nine checks:
 
 1. installs `.[obd]` on Python 3.12;
 2. verifies compact logistic Q against OBP tensor predictions;
-3. fetches that exact small-OBD commit;
-4. exports the `all/random → BTS` evidence with 2-fold logistic Q and `n_sim=500`;
-5. validates the realized manifest against `obd-small-all-random-to-bts.v1.json`;
-6. applies the evidence gate;
-7. selects an estimator only on validation reference evidence;
-8. reveals the final holdout once;
-9. uploads the plan, manifest, candidate grid and locked result.
+3. fetches the pinned small-OBD source;
+4. exports `all/random` evidence for the BernoulliTS target policy with 2-fold logistic Q and `n_sim=500`;
+5. validates the realized manifest against the pre-registered plan;
+6. applies support and ESS gates;
+7. selects the candidate estimator on validation reference evidence;
+8. evaluates the frozen candidate on final holdout;
+9. uploads the plan, manifest, candidate grid, and locked result.
 
-This is real-data integration evidence. It is intentionally not promoted as the full-data OPE performance result.
+This CI path keeps the entire real-data OPE integration contract under continuous regression coverage.
 
-## Full OBD one-command runner
+## Full OBD runner
 
-For the research-scale `all/random → BTS` plan:
+Run the research-scale `all/random` to BernoulliTS protocol with:
 
 ```bash
 pip install -e '.[obd]'
 python scripts/run_obd_full_locked.py
 ```
 
-With no `--data-root`, the runner does **not** download and extract the 11.7 GB aggregate archive. It fetches only the three files required by the checked-in `all` campaign plan from the pinned ZOZO NEXT OBD 1.0 revision:
+Without `--data-root`, the runner materializes only the files required by the checked-in `all` campaign plan from the pinned mirror revision:
 
-- `random/all/all.csv` — OPE evidence;
-- `bts/all/all.csv` — factual on-policy reference;
-- `random/all/item_context.csv` — action context used by OBP preprocessing.
+- `random/all/all.csv` for OPE evidence;
+- `bts/all/all.csv` for the on-policy reference;
+- `random/all/item_context.csv` for action context.
 
-Before transfer, the runner checks advertised file sizes against free disk with a 2 GiB reserve. Each materialized file is SHA256-hashed and its byte count, pinned mirror revision and canonical release identity are written to `source-provenance.json`.
+Before transfer, the runner checks available disk space. Materialized files are SHA256-hashed, and byte count, mirror revision, and canonical release identity are recorded in `source-provenance.json`.
 
-If the full dataset is already available locally:
+For an existing local dataset:
 
 ```bash
 python scripts/run_obd_full_locked.py \
@@ -150,42 +171,54 @@ python scripts/run_obd_full_locked.py \
 
 The full plan fixes:
 
-- campaign: `all`;
-- behavior policy: `random`;
-- evaluation policy: `bts`;
-- reward: click;
-- validation fraction: `0.5`;
-- Q model: logistic;
-- Q cross-fit folds: `3`;
-- BernoulliTS simulations: `100000`;
-- seed: `12345`;
-- the complete finite OPE candidate grid;
-- support and ESS gates.
+| Field | Value |
+| --- | --- |
+| Campaign | `all` |
+| Behavior policy | `random` |
+| Evaluation policy | `bts` |
+| Reward | click |
+| Validation fraction | `0.5` |
+| Q model | logistic |
+| Q cross-fit folds | `3` |
+| BernoulliTS simulations | `100000` |
+| Seed | `12345` |
+| Estimator grid | finite predeclared candidate panel |
+| Evidence gate | support and ESS thresholds from the plan |
 
-The dedicated full-data workflow checks out the exact evidence commit rather than GitHub's temporary PR merge ref, uses `set -o pipefail`, verifies the artifact commit SHA, and uploads `pip freeze` beside the compact evidence bundle. Large source CSVs and generated JSONL evidence are not uploaded as artifacts.
+The dedicated full-data workflow records the exact evidence commit and uploads `pip freeze` alongside the compact evidence bundle. Large source CSVs and generated row-level JSONL remain outside the persisted repository artifact.
 
 ## Locked result bundle
 
-A preregistered OPE result (`growthevo.locked-ope-run.v3`) includes:
+A `growthevo.locked-ope-run.v3` result records:
 
 - validation scoreboard;
-- selected estimator/hyperparameters;
-- final holdout estimate/error/uncertainty;
-- ESS/support/importance-weight diagnostics;
+- selected estimator and hyperparameters;
+- final holdout estimate, error, and uncertainty;
+- ESS, support, and importance-weight diagnostics;
 - code commit SHA;
 - validation and holdout evidence fingerprints;
 - experiment-plan fingerprint;
 - realized export-manifest fingerprint;
 - bound protocol fingerprint.
 
-The accompanying research evidence bundle adds source-file SHA256 provenance and the exact installed Python distributions. A number without this provenance is not current GrowthEvo real-world evidence.
+The full research bundle additionally records source-file SHA256 provenance and the exact Python environment.
 
-## Candidate policy
+## Candidate panel
 
-The finite candidate grid includes cross-fitted β*-IPS, DR, IPS, SNIPS, SWITCH-DR thresholds, DR-OS shrinkage values, and the current Meta-OPE diagnostic candidate. The grid is fixed before validation. Adding/removing an estimator or tuning value requires a new plan fingerprint and therefore a new benchmark protocol; it cannot be changed after observing final holdout performance.
+The finite candidate grid can include:
 
-The validation winner is selected by evidence, not by novelty. A newer estimator is not promoted merely because it is newer; if a simpler candidate wins the frozen validation criterion, that simpler candidate is the one revealed on final holdout.
+- cross-fitted β*-IPS;
+- Doubly Robust;
+- IPS;
+- SNIPS;
+- SWITCH-DR thresholds;
+- DR-OS shrinkage values;
+- Meta-OPE / BLUE-style candidates.
 
-## Promotion rule
+The complete grid is fixed in the experiment plan before validation. The benchmark objective then determines the validation winner, which is frozen before final evaluation.
 
-README headline performance may be updated only from a **fresh full-data preregistered artifact** whose code commit is a real repository commit and whose validation/holdout fingerprints differ. Small OBD CI, historical pre-locked numbers, synthetic tests, temporary PR merge SHAs, or a manually selected final-test estimator are not substitutes.
+This design separates library-level estimator preference from benchmark-specific empirical selection: GrowthEvo can expose advanced estimators while still allowing the locked validation evidence to decide the final benchmark candidate.
+
+## Evidence identity
+
+A new promoted OBD result receives a new experiment identity whenever material source, split, Q protocol, target-policy simulation, evidence-gate, or candidate-grid choices change. This keeps historical accepted results stable and makes each new research comparison independently auditable.
