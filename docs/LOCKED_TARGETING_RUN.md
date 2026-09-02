@@ -1,26 +1,20 @@
 # Locked Randomized Targeting Run
 
-`growthevo-locked-targeting` selects a targeting/CATE score model using randomized validation evidence and evaluates only the frozen winner on final holdout.
+`growthevo-locked-targeting` selects a targeting/CATE score model using randomized validation evidence and evaluates the frozen winner on an independent final holdout.
 
-For new promotable Criteo-style evidence, use a **v2 preregistered plan** rather than an ad-hoc final-test model comparison. Version 1 remains supported so existing locked artifacts keep their original fingerprint and semantics.
+For new Criteo-style evidence, the v2 preregistered plan captures both the evaluation protocol and the statistically material upstream model-generation configuration. Version 1 remains available for compatibility with already-audited artifacts.
 
-## Locked execution order
+## Execution contract
 
-```text
-plan + realized manifest agreement
-        ↓
-train-only score generation already frozen
-        ↓
-open validation with every preregistered candidate score
-        ↓
-select candidate by randomized incremental value vs treat-none
-        ↓
-freeze winner
-        ↓
-generate/open only the winner's holdout score
-        ↓
-one final randomized holdout evaluation
-```
+| Stage | Action |
+| ---: | --- |
+| **1** | Verify experiment plan, runtime configuration, and realized manifest agreement |
+| **2** | Load the train-generated validation scores for every preregistered candidate |
+| **3** | Evaluate candidates by randomized incremental value versus treat-none |
+| **4** | Select and freeze the validation winner |
+| **5** | Produce or load the frozen winner's holdout score |
+| **6** | Evaluate the frozen policy once on final randomized holdout |
+| **7** | Persist the locked artifact and fingerprint chain |
 
 The generic CLI consumes already-materialized validation and holdout scores:
 
@@ -38,23 +32,24 @@ growthevo-locked-targeting \
   --output targeting-result.json
 ```
 
-`--experiment-plan-json` and `--export-manifest-json` must be supplied together. Plan/manifest/runtime disagreement fails before validation evidence is opened.
+`--experiment-plan-json` and `--export-manifest-json` are supplied together so intended configuration and realized score generation can be checked before validation evidence is evaluated.
 
 ## Targeting experiment plan v2
 
-`growthevo.targeting-experiment-plan.v2` freezes both evaluation and the statistically material upstream training boundary:
+`growthevo.targeting-experiment-plan.v2` freezes the training and evaluation choices that define one benchmark identity:
 
-- benchmark, dataset and pinned source identity;
+- benchmark and dataset identity;
+- pinned source identity;
 - outcome definition;
 - deterministic split algorithm;
-- **training fraction**;
-- **validation fraction**; the remainder is final holdout;
-- **split seed**;
+- training fraction;
+- validation fraction;
+- split seed;
 - treatment arm;
 - selected top fraction;
-- **propensity protocol**;
+- propensity protocol;
 - score-generation protocol identifier;
-- **fingerprint of the complete candidate/model configuration**;
+- fingerprint of the complete candidate/model configuration;
 - complete candidate-name set.
 
 Example:
@@ -79,19 +74,19 @@ Example:
 }
 ```
 
-`training_fraction + validation_fraction` must be strictly below one. A v2 plan therefore cannot silently consume all data before the final holdout is defined.
+`training_fraction + validation_fraction` remains below one, reserving the remaining rows for the final holdout.
 
-The candidate-config fingerprint is separate from candidate names. Renaming nothing while changing tree count, learning rate, nuisance folds, random seeds, objective, or learner recipe is a **new model configuration** and must produce a different fingerprint before validation is opened.
+The candidate-config fingerprint is separate from the candidate names. Tree count, learning rate, nuisance folds, random seeds, objective, and learner recipe are therefore captured as part of the experiment identity rather than hidden behind a model label.
 
 ## Propensity provenance
 
-Randomized assignment does not justify inventing a propensity value that is absent from the public release. A protocol may use a documented design propensity when the exact design fact is available. Otherwise, a full benchmark can predeclare a pooled assignment share estimated **only from the training split**, freeze it, and then apply that frozen value to validation and holdout.
+The targeting protocol supports a documented design propensity when that value is available from the randomized experiment. It also supports a predeclared empirical protocol that estimates the pooled assignment share from the training split and freezes that value before validation and holdout evaluation.
 
-The latter is an empirical propensity protocol, not a claim about the unpublished experiment strata. Holdout inference is conditional on that independently estimated frozen propensity unless a separate procedure explicitly propagates propensity-estimation uncertainty.
+This keeps propensity provenance explicit and separates training-time estimation from final evaluation.
 
 ## Realized targeting manifest v2
 
-A v2 plan requires `growthevo.targeting-export.v2`. The manifest repeats the realized values of every upstream v2 field that can drift:
+A v2 plan is paired with `growthevo.targeting-export.v2`. The manifest records the realized values of the upstream configuration:
 
 ```json
 {
@@ -110,17 +105,17 @@ A v2 plan requires `growthevo.targeting-export.v2`. The manifest repeats the rea
 }
 ```
 
-Any mismatch fails before validation scores are read.
+The runner checks the plan and manifest before validation scoring. This binds declared intent to the configuration that actually produced the candidate scores.
 
 ## Version 1 compatibility
 
-`growthevo.targeting-experiment-plan.v1` and `growthevo.targeting-export.v1` remain valid for already-audited externally generated score workflows. Their canonical payload and fingerprint do not gain v2 fields retroactively.
+`growthevo.targeting-experiment-plan.v1` and `growthevo.targeting-export.v1` remain valid for existing audited externally generated score workflows. Their canonical payloads and fingerprints remain stable.
 
-New full-data promotion work should use v2 because a candidate name plus a generic score-protocol string is not enough to prove train/validation isolation or freeze concrete model configuration.
+New full-data targeting work uses v2 so train/validation separation and concrete model configuration are independently auditable.
 
 ## Validation evidence
 
-Each validation row contains the randomized record plus a score for **every** preregistered candidate:
+Each validation row carries the randomized record and one score per preregistered candidate:
 
 ```json
 {
@@ -136,11 +131,11 @@ Each validation row contains the randomized record plus a score for **every** pr
 }
 ```
 
-Every validation row must expose the same candidate-name set. The protocol evaluates the top-score treatment policy on randomized evidence and freezes the candidate with the strongest validation `incremental_value_vs_none`. Final holdout is not used for model selection.
+Every validation row exposes the same candidate-name set. The protocol evaluates each candidate's top-score treatment policy on randomized evidence and freezes the candidate with the strongest validation `incremental_value_vs_none`.
 
 ## Final holdout
 
-The holdout contains only the frozen winner's score and explicitly declares that winner:
+The final holdout contains the frozen winner's score together with the selected candidate identity:
 
 ```json
 {
@@ -154,11 +149,11 @@ The holdout contains only the frozen winner's score and explicitly declares that
 }
 ```
 
-A holdout row declaring another candidate fails closed. Validation/test unit identity overlap also fails closed.
+Stable row identities keep validation and holdout cohorts disjoint, and the selected-candidate field preserves the frozen model identity through final evaluation.
 
 ## Frozen-policy uncertainty
 
-For a selected top-k set `S`, only selected units differ from the treat-none comparator. The Horvitz-Thompson policy-minus-none term is
+For selected top-k set `S`, the Horvitz-Thompson policy-minus-none contribution is:
 
 ```math
 D_i
@@ -171,15 +166,15 @@ D_i
 \right].
 ```
 
-The population incremental value is
+The population incremental value is:
 
 ```math
 \widehat\Delta
 =
-\frac{1}{n}\sum_{i=1}^{n}D_i,
+\frac{1}{n}\sum_{i=1}^{n}D_i.
 ```
 
-with sample standard error
+Its sample standard error is:
 
 ```math
 \widehat{SE}(\widehat\Delta)
@@ -191,38 +186,51 @@ with sample standard error
 }.
 ```
 
-`infer_randomized_targeting` reports this uncertainty for an **already-frozen** score vector. It also reports selected-group incremental effect
+The selected-group effect is:
 
 ```math
 \widehat\Delta_{selected}
 =
-\frac{\widehat\Delta}{|S|/n},
+\frac{\widehat\Delta}{|S|/n}.
 ```
 
-and its correspondingly scaled standard error and normal interval.
-
-This interval is appropriate for the frozen final policy contrast. It is not a confidence interval for the preceding model-selection search. The existing stratified bootstrap remains available for smaller studies; repeatedly reranking a multi-million-row dataset hundreds of times is not the default full-data path.
+`infer_randomized_targeting` reports population and selected-group estimates, standard errors, and intervals for the already-frozen policy score vector. Stratified bootstrap utilities remain available for smaller studies.
 
 ## Fingerprint chain
 
-For a preregistered targeting run, the final artifact binds:
+The final targeting artifact binds:
 
 - experiment-plan fingerprint;
+- candidate-configuration fingerprint;
 - realized export-manifest fingerprint;
-- validation randomized rows **and all candidate score vectors**;
-- final randomized rows and frozen winner scores;
-- selected fraction/treatment protocol;
-- code commit SHA;
-- dataset source and score protocol.
+- validation randomized rows and complete candidate score vectors;
+- final randomized rows and frozen winner score;
+- selected-fraction and treatment protocol;
+- dataset source and score protocol;
+- code commit SHA.
 
-Version 2 additionally makes the training split, propensity protocol and candidate configuration independently auditable before validation opens.
+Version 2 additionally binds the training split and propensity protocol as explicit upstream experiment fields.
 
 ## Backend neutrality
 
-The locked evaluation contract intentionally does not make LightGBM, EconML, causal forests, or neural uplift libraries core runtime dependencies. A high-performance backend participates by producing scores under a preregistered v2 score/model configuration.
+The locked targeting contract is independent of a specific modeling library. LightGBM, EconML, causal forests, neural uplift, or another backend can participate by producing scores under a preregistered model configuration.
 
-For very large datasets such as full Criteo, a specialized vectorized exporter/runner may avoid materializing millions of Python JSON objects while preserving these same plan, fingerprint, validation-selection and single-holdout semantics.
+For research-scale datasets, specialized vectorized runners can preserve the same plan, fingerprint, validation-selection, and final-holdout semantics without materializing millions of Python JSON objects.
 
-## Promotion rule
+## Current Criteo evidence
 
-Do not inspect final Criteo holdout uplift for several models and report the best one. A changed candidate set, model recipe, split, propensity protocol, outcome, selected fraction or dataset release is a new experiment plan. Current README performance should only be updated from a fresh preregistered locked artifact; historical pre-locked numbers remain legacy provenance.
+The repository's accepted full Criteo Uplift v2.1 artifact uses this locked selection philosophy:
+
+| Metric | Result |
+| --- | ---: |
+| Source rows | **13,979,592** |
+| Predeclared candidates | **5** |
+| Validation winner | **S-Learner** |
+| Population incremental visit | **+0.93791 pp** |
+| Selected top-10% incremental visit | **+9.37910 pp** |
+
+Evidence directory:
+
+`benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/`
+
+A new headline experiment receives its own plan and fingerprint identity whenever a material source, split, model configuration, propensity protocol, outcome, or targeting objective changes.
