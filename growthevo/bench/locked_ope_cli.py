@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, replace
-from hashlib import blake2b
 from json import dumps, loads
 from math import isfinite
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 
 from growthevo.rl.ope import LoggedBanditRecord
 
+from ._serialization import fingerprint_json, iter_jsonl_objects, load_json_object
 from .locked_evaluation import OPECandidate
 from .ope_evidence_gate import EvidenceGatedOPEProtocol, OPEEvidenceGate
 from .ope_experiment_plan import OPEExperimentPlan, load_ope_experiment_plan
@@ -35,56 +35,31 @@ def _json_cluster_identity(value: Any) -> Any:
     raise ValueError("cluster_id must be a JSON scalar or nested array of scalars")
 
 
-def _load_json_object(path: str | Path, *, label: str) -> dict[str, Any]:
-    resolved = Path(path)
-    try:
-        payload = loads(resolved.read_text(encoding="utf-8"))
-    except ValueError as exc:
-        raise ValueError(f"invalid {label} JSON: {resolved}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError(f"{label} JSON must be an object")
-    return payload
-
-
-def _json_object_fingerprint(payload: Mapping[str, Any]) -> str:
-    encoded = dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return blake2b(encoded, digest_size=20).hexdigest()
-
-
 def _load_ope_jsonl(path: str | Path) -> tuple[LoggedBanditRecord, ...]:
     resolved = Path(path)
     rows: list[LoggedBanditRecord] = []
-    with resolved.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            try:
-                payload = loads(line)
-            except ValueError as exc:
-                raise ValueError(f"invalid JSON on {resolved}:{line_number}") from exc
-            if not isinstance(payload, dict):
-                raise ValueError(f"expected JSON object on {resolved}:{line_number}")
-            try:
-                raw_record_id = payload["record_id"]
-                if not isinstance(raw_record_id, str) or not raw_record_id:
-                    raise ValueError("record_id must be a non-empty JSON string")
-                rows.append(
-                    LoggedBanditRecord(
-                        reward=float(payload["reward"]),
-                        behavior_propensity=float(payload["behavior_propensity"]),
-                        target_action_probability=float(payload["target_action_probability"]),
-                        baseline_q=float(payload["baseline_q"]),
-                        target_q=float(payload["target_q"]),
-                        cluster_id=_json_cluster_identity(payload.get("cluster_id")),
-                        record_id=raw_record_id,
-                    )
+    for payload, source in iter_jsonl_objects(resolved):
+        try:
+            raw_record_id = payload["record_id"]
+            if not isinstance(raw_record_id, str) or not raw_record_id:
+                raise ValueError("record_id must be a non-empty JSON string")
+            rows.append(
+                LoggedBanditRecord(
+                    reward=float(payload["reward"]),
+                    behavior_propensity=float(payload["behavior_propensity"]),
+                    target_action_probability=float(payload["target_action_probability"]),
+                    baseline_q=float(payload["baseline_q"]),
+                    target_q=float(payload["target_q"]),
+                    cluster_id=_json_cluster_identity(payload.get("cluster_id")),
+                    record_id=raw_record_id,
                 )
-            except KeyError as exc:
-                raise ValueError(
-                    f"missing required field {exc.args[0]!r} on {resolved}:{line_number}"
-                ) from exc
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"invalid OPE row on {resolved}:{line_number}: {exc}") from exc
+            )
+        except KeyError as exc:
+            raise ValueError(
+                f"missing required field {exc.args[0]!r} on {source}"
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid OPE row on {source}: {exc}") from exc
     if not rows:
         raise ValueError(f"{resolved} produced no OPE records")
     return tuple(rows)
@@ -150,7 +125,7 @@ def _load_and_validate_plan(
         return None, None
 
     plan = load_ope_experiment_plan(experiment_plan_json)
-    manifest = _load_json_object(export_manifest_json, label="export manifest")
+    manifest = load_json_object(export_manifest_json, label="export manifest")
     plan.validate_runtime_contract(
         benchmark=benchmark,
         dataset=dataset,
@@ -229,7 +204,7 @@ def run_locked_ope_benchmark(
     experiment_plan_payload: dict[str, Any] | None = None
     export_manifest_fingerprint: str | None = None
     if plan is not None and export_manifest is not None:
-        export_manifest_fingerprint = _json_object_fingerprint(export_manifest)
+        export_manifest_fingerprint = fingerprint_json(export_manifest)
         metrics = dict(artifact.metrics)
         metrics.update(
             {
