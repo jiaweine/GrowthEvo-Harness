@@ -1,25 +1,39 @@
 # Security Policy
 
+GrowthEvo-Harness treats runtime security and research-evidence integrity as separate but complementary maintenance responsibilities.
+
 ## Supported versions
 
-GrowthEvo-Harness does not yet have a tagged public release series. Until one is published, security fixes target the current `main` branch. Historical evidence commits are immutable research records and may not receive unrelated maintenance changes.
+During the current pre-release development line, security fixes target the latest `main` branch. Tagged-release support information will be published alongside the release series.
+
+Historical accepted evidence commits remain immutable research records, while runtime, packaging, CI, and dependency fixes continue on current mainline code.
 
 ## Reporting a vulnerability
 
-Please do **not** publish exploit details, credentials, private data, or a working proof of concept in a public issue or pull request.
+Please keep exploit details, credentials, private data, and working proof-of-concept material out of public issues and pull requests.
 
 Preferred reporting path:
 
 1. Open the repository's **Security** tab.
 2. If GitHub shows **Report a vulnerability**, use that private vulnerability-reporting flow.
-3. If that private flow is not available, open a minimal public issue titled `Security contact request` with **no vulnerability details** and ask the repository owner for a private reporting channel.
+3. If the private flow is unavailable, open a minimal public issue titled `Security contact request` with no vulnerability details and request a private reporting channel from the repository owner.
 
-When reporting privately, include the affected commit/version, impact, reproduction conditions, and any proposed mitigation. Minimize real user data and secrets in reproductions.
+A useful private report includes:
+
+- affected commit or version;
+- expected security impact;
+- reproduction conditions;
+- relevant environment information;
+- proposed mitigation when available.
+
+Please minimize real user data and secrets in reproductions.
 
 ## Coordinated disclosure
 
-Please allow time for triage and remediation before public disclosure. Once a fix is available, the maintainer may use a GitHub Security Advisory to coordinate disclosure and document affected versions.
+Security reports are triaged privately so remediation and disclosure can be coordinated. When appropriate, a GitHub Security Advisory can document affected versions, remediation, and disclosure timing.
 
-## Research-evidence boundary
+## Research-evidence integrity
 
-Security fixes to runtime, packaging, CI, or dependencies must not silently rewrite accepted locked benchmark artifacts. If a vulnerability materially changes a benchmark dependency, source, model, split, estimator configuration, or evidence gate, any new headline result requires a new preregistered experiment identity under `docs/RESEARCH_RERUN_POLICY.md`.
+Runtime security maintenance does not rewrite accepted locked benchmark artifacts. When a security fix materially changes a benchmark dependency, source, model, split, estimator configuration, or evidence gate, subsequent headline benchmark evidence receives a new preregistered experiment identity under `docs/RESEARCH_RERUN_POLICY.md`.
+
+This preserves both objectives: current software can receive security fixes, and accepted research evidence remains tied to the exact environment and commit that produced it.
