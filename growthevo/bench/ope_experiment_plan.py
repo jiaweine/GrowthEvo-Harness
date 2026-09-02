@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from hashlib import blake2b
-from json import dumps, loads
 from math import isfinite
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from ._serialization import (
+    fingerprint_json,
+    load_json_object,
+    optional_number,
+    required_int,
+    required_number,
+    required_string,
+)
 from .locked_evaluation import OPECandidate
 from .ope_evidence_gate import OPEEvidenceGate
 
@@ -126,26 +132,18 @@ class OPEExperimentPlan:
 
     @property
     def fingerprint(self) -> str:
-        payload = dumps(
-            self.canonical_payload(),
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return blake2b(payload, digest_size=20).hexdigest()
+        return fingerprint_json(self.canonical_payload())
 
     def bind_protocol_fingerprint(self, locked_protocol_fingerprint: str) -> str:
         if not locked_protocol_fingerprint:
             raise ValueError("locked_protocol_fingerprint cannot be empty")
-        payload = dumps(
+        return fingerprint_json(
             {
                 "schema": "growthevo.bound-ope-protocol.v1",
                 "experiment_plan_fingerprint": self.fingerprint,
                 "locked_protocol_fingerprint": locked_protocol_fingerprint,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return blake2b(payload, digest_size=20).hexdigest()
+            }
+        )
 
     def validate_runtime_contract(
         self,
@@ -216,46 +214,6 @@ class OPEExperimentPlan:
             )
 
 
-def _required_string(payload: Mapping[str, Any], key: str) -> str:
-    value = payload[key]
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"experiment plan field {key!r} must be a non-empty string")
-    return value
-
-
-def _required_number(payload: Mapping[str, Any], key: str) -> float:
-    value = payload[key]
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"experiment plan field {key!r} must be a JSON number")
-    numeric = float(value)
-    if not isfinite(numeric):
-        raise ValueError(f"experiment plan field {key!r} must be finite")
-    return numeric
-
-
-def _required_int(payload: Mapping[str, Any], key: str) -> int:
-    value = payload[key]
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"experiment plan field {key!r} must be a JSON integer")
-    return value
-
-
-def _optional_number(payload: Mapping[str, Any], key: str, *, index: int) -> float | None:
-    value = payload.get(key)
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(
-            f"experiment plan candidate {index} field {key!r} must be a JSON number"
-        )
-    numeric = float(value)
-    if not isfinite(numeric):
-        raise ValueError(
-            f"experiment plan candidate {index} field {key!r} must be finite"
-        )
-    return numeric
-
-
 def _candidate_from_payload(payload: Mapping[str, Any], index: int) -> OPECandidate:
     unknown = set(payload).difference(_CANDIDATE_FIELDS)
     if unknown:
@@ -276,12 +234,21 @@ def _candidate_from_payload(payload: Mapping[str, Any], index: int) -> OPECandid
         raise ValueError(
             f"experiment plan candidate {index} beta_folds must be a JSON integer"
         )
+    scope = f"experiment plan candidate {index}"
     try:
         return OPECandidate(
             name=raw_name,
             estimator=estimator,
-            switch_threshold=_optional_number(payload, "switch_threshold", index=index),
-            dr_os_lambda=_optional_number(payload, "dr_os_lambda", index=index),
+            switch_threshold=optional_number(
+                payload,
+                "switch_threshold",
+                scope=scope,
+            ),
+            dr_os_lambda=optional_number(
+                payload,
+                "dr_os_lambda",
+                scope=scope,
+            ),
             beta_folds=raw_beta_folds,
         )
     except (TypeError, ValueError) as exc:
@@ -289,13 +256,7 @@ def _candidate_from_payload(payload: Mapping[str, Any], index: int) -> OPECandid
 
 
 def load_ope_experiment_plan(path: str | Path) -> OPEExperimentPlan:
-    resolved = Path(path)
-    try:
-        payload = loads(resolved.read_text(encoding="utf-8"))
-    except ValueError as exc:
-        raise ValueError(f"invalid experiment plan JSON: {resolved}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("experiment plan JSON must be an object")
+    payload = load_json_object(path, label="experiment plan")
 
     required = {
         "schema_version",
@@ -337,9 +298,15 @@ def load_ope_experiment_plan(path: str | Path) -> OPEExperimentPlan:
     if not isinstance(raw_positive_mass, bool):
         raise ValueError("require_positive_importance_mass must be a JSON boolean")
     evidence_gate = OPEEvidenceGate(
-        min_support_coverage=_required_number(gate_payload, "min_support_coverage"),
-        min_effective_sample_ratio=_required_number(
-            gate_payload, "min_effective_sample_ratio"
+        min_support_coverage=required_number(
+            gate_payload,
+            "min_support_coverage",
+            scope="experiment plan",
+        ),
+        min_effective_sample_ratio=required_number(
+            gate_payload,
+            "min_effective_sample_ratio",
+            scope="experiment plan",
         ),
         require_positive_importance_mass=raw_positive_mass,
     )
@@ -353,22 +320,27 @@ def load_ope_experiment_plan(path: str | Path) -> OPEExperimentPlan:
             raise ValueError(f"experiment plan candidate {index} must be an object")
         candidates.append(_candidate_from_payload(candidate, index))
 
+    scope = "experiment plan"
     return OPEExperimentPlan(
-        schema_version=_required_string(payload, "schema_version"),
-        benchmark=_required_string(payload, "benchmark"),
-        dataset=_required_string(payload, "dataset"),
-        dataset_source=_required_string(payload, "dataset_source"),
-        campaign=_required_string(payload, "campaign"),
-        behavior_policy=_required_string(payload, "behavior_policy"),
-        evaluation_policy=_required_string(payload, "evaluation_policy"),
-        reward_definition=_required_string(payload, "reward_definition"),
-        split_strategy=_required_string(payload, "split_strategy"),
-        validation_fraction=_required_number(payload, "validation_fraction"),
-        q_model=_required_string(payload, "q_model"),
-        q_folds=_required_int(payload, "q_folds"),
-        n_sim=_required_int(payload, "n_sim"),
-        random_state=_required_int(payload, "random_state"),
-        support_propensity_floor=_required_number(payload, "support_propensity_floor"),
+        schema_version=required_string(payload, "schema_version", scope=scope),
+        benchmark=required_string(payload, "benchmark", scope=scope),
+        dataset=required_string(payload, "dataset", scope=scope),
+        dataset_source=required_string(payload, "dataset_source", scope=scope),
+        campaign=required_string(payload, "campaign", scope=scope),
+        behavior_policy=required_string(payload, "behavior_policy", scope=scope),
+        evaluation_policy=required_string(payload, "evaluation_policy", scope=scope),
+        reward_definition=required_string(payload, "reward_definition", scope=scope),
+        split_strategy=required_string(payload, "split_strategy", scope=scope),
+        validation_fraction=required_number(payload, "validation_fraction", scope=scope),
+        q_model=required_string(payload, "q_model", scope=scope),
+        q_folds=required_int(payload, "q_folds", scope=scope),
+        n_sim=required_int(payload, "n_sim", scope=scope),
+        random_state=required_int(payload, "random_state", scope=scope),
+        support_propensity_floor=required_number(
+            payload,
+            "support_propensity_floor",
+            scope=scope,
+        ),
         evidence_gate=evidence_gate,
         candidates=tuple(candidates),
     )
