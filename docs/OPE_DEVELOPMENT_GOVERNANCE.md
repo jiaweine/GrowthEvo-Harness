@@ -1,49 +1,60 @@
 # OPE Development Cohort Governance
 
-GrowthEvo separates **development evidence** from accepted locked benchmark evidence. A development validation cohort can be useful for comparing a predeclared set of ideas, but repeated adaptive screening against the same revealed validation reference eventually makes that cohort unsuitable for further promotion decisions.
+GrowthEvo separates **development cohorts** from accepted locked benchmark evidence. This keeps rapid estimator engineering compatible with an independent promotion path.
 
-## Exhausted small Open Bandit cohort
+## Small Open Bandit development cohort
 
-The cohort identified by `benchmarks/ope/obd-small-all-random-to-bts.v1.json` is now **exhausted for promotion research**.
+The cohort identified by `benchmarks/ope/obd-small-all-random-to-bts.v1.json` is retained as a **regression and integration cohort**.
 
-Its machine-readable status is recorded in:
+Its machine-readable development record is stored at:
 
 `benchmarks/ope/development/obd-small-all-random-to-bts.v1.json`
 
-The base plan fingerprint is:
+Base plan fingerprint:
 
 `d8ac714101799258f5202723ca3490e3b6b3c600`
 
-The validation reference has already been revealed and the same cohort has been used for multiple sequential method screens, including Meta-OPE alignment, beta-DR, empirical-likelihood EMP, SNDR, RandomForest Q, and MRDR-trained Q. Each experiment was rejected without using the final holdout to rescue the method, but continuing to propose methods after observing these validation outcomes would itself create adaptive validation-shopping risk.
+The cohort has already supported multiple sequential method-development comparisons, including Meta-OPE alignment, beta-DR, empirical-likelihood EMP, SNDR, RandomForest Q, and MRDR-trained Q. That history makes it especially valuable as a stable regression surface for implementation behavior.
 
-## What exhausted means
+## Intended use
 
-The cohort may still be used for:
+The existing cohort is well suited to:
 
 - deterministic regression tests;
-- exporter/integration checks;
-- reproduction of an already recorded development attempt;
-- checking that an implementation change preserves an existing result within an explicitly stated numerical tolerance.
+- exporter and integration checks;
+- reproduction of recorded development attempts;
+- same-run baseline comparisons;
+- numerical-tolerance checks after implementation changes.
 
-It must **not** be used to justify promotion of:
+New promotion research uses a **fresh preregistered development identity** before validation evidence is opened. This keeps new estimator or Q-model selection independent of earlier method-development observations while preserving the existing cohort as a durable engineering asset.
 
-- a new OPE estimator;
-- a new Q-model backend or nuisance objective;
-- new estimator/Q hyperparameters;
-- a new candidate grid assembled after observing previous development results.
+## New development identities
 
-The normal CI small-OBD job is therefore still valid: it is an integration/regression gate, not a source of new promotion claims.
+A new empirical development identity freezes the choices material to the comparison, including:
 
-## Requirement for future OPE research
+- data source and release;
+- split definition;
+- target policy;
+- Q-model protocol;
+- candidate estimator set;
+- selection objective;
+- support and evidence gates.
 
-A future OPE method that needs empirical promotion evidence must use a **new preregistered development identity before its validation evidence is opened**. The new identity must freeze at least the data source/release, split, target policy, Q protocol, candidate set, selection objective, and evidence gates that are material to the comparison.
+Synthetic tests and faithful literature reproductions can be developed independently of a new real-world cohort. When empirical promotion evidence is needed, the new preregistered identity provides the validation surface for that decision.
 
-Synthetic tests and faithful literature reproductions can be developed without creating a new real-world cohort. They become promotion candidates only after a fresh preregistered empirical protocol exists.
+Accepted full OBD evidence remains a separate locked artifact with its own plan, validation selection, final holdout, and provenance chain.
 
-Accepted full OBD evidence remains separate and locked. The accepted full-data holdout must not be reused to compensate for an exhausted development cohort.
+## Same-run comparison and numerical stability
 
-## Same-run comparison and floating point
+Hosted research jobs can exhibit small cross-run floating-point differences even under matched numerical-package versions. Development comparisons therefore favor a baseline recomputed in the same run when a candidate is sensitive to numerical precision.
 
-Hosted research jobs may show tiny cross-run floating-point differences even when the declared numerical package versions match. Development decisions must therefore compare a candidate against a baseline **recomputed inside the same run**, rather than asserting an old absolute-error constant from another runner.
+Material reproducibility differences are investigated under `docs/RESEARCH_RERUN_POLICY.md`, while accepted evidence remains tied to its original persisted environment and fingerprints.
 
-Such numerical drift is not permission to retune thresholds or rerun until a candidate wins. Material reproducibility discrepancies should be investigated under `docs/RESEARCH_RERUN_POLICY.md`.
+## Why this structure matters
+
+The two-tier design gives GrowthEvo both:
+
+1. a stable small-data regression cohort for fast engineering iteration; and
+2. fresh preregistered development identities for statistically clean promotion comparisons.
+
+This keeps OPE research iterative without turning accepted benchmark evidence into an evolving tuning surface.
