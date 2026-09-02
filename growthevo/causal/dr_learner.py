@@ -3,145 +3,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import blake2b
 from math import ceil, fsum, isfinite, sqrt
-from typing import Callable, Iterable, Mapping, Protocol, Sequence
+from typing import Iterable, Mapping, Sequence
 
 from growthevo.models import Channel
 
-
-FeatureVector = tuple[float, ...]
-
-
-def _validate_features(features: Sequence[float], expected_dim: int | None = None) -> FeatureVector:
-    values = tuple(float(value) for value in features)
-    if not values:
-        raise ValueError("features cannot be empty")
-    if any(not isfinite(value) for value in values):
-        raise ValueError("features must be finite")
-    if expected_dim is not None and len(values) != expected_dim:
-        raise ValueError(f"expected {expected_dim} features, got {len(values)}")
-    return values
-
-
-def _solve_linear_system(matrix: list[list[float]], target: list[float]) -> list[float]:
-    n = len(target)
-    if len(matrix) != n or any(len(row) != n for row in matrix):
-        raise ValueError("matrix must be square and match target dimension")
-
-    augmented = [list(row) + [float(rhs)] for row, rhs in zip(matrix, target, strict=True)]
-    for col in range(n):
-        pivot = max(range(col, n), key=lambda row: abs(augmented[row][col]))
-        if abs(augmented[pivot][col]) < 1e-12:
-            raise ValueError("linear system is singular; increase ridge regularization")
-        augmented[col], augmented[pivot] = augmented[pivot], augmented[col]
-
-        scale = augmented[col][col]
-        augmented[col] = [value / scale for value in augmented[col]]
-        for row in range(n):
-            if row == col:
-                continue
-            factor = augmented[row][col]
-            if factor == 0.0:
-                continue
-            augmented[row] = [
-                value - factor * pivot_value
-                for value, pivot_value in zip(augmented[row], augmented[col], strict=True)
-            ]
-    return [augmented[row][-1] for row in range(n)]
-
-
-def _invert_matrix(matrix: list[list[float]]) -> tuple[tuple[float, ...], ...]:
-    n = len(matrix)
-    columns: list[list[float]] = []
-    for column in range(n):
-        target = [0.0] * n
-        target[column] = 1.0
-        columns.append(_solve_linear_system(matrix, target))
-    return tuple(
-        tuple(columns[column][row] for column in range(n))
-        for row in range(n)
-    )
-
-
-def _mahalanobis_distance(
-    features: Sequence[float],
-    center: Sequence[float],
-    precision: Sequence[Sequence[float]],
-) -> float:
-    delta = [float(value) - float(mean) for value, mean in zip(features, center, strict=True)]
-    transformed = [
-        fsum(weight * value for weight, value in zip(row, delta, strict=True))
-        for row in precision
-    ]
-    squared = fsum(
-        value * transformed_value
-        for value, transformed_value in zip(delta, transformed, strict=True)
-    )
-    return sqrt(max(0.0, squared))
-
-
-class Regressor(Protocol):
-    """Minimal backend contract for nuisance and second-stage CATE models."""
-
-    def fit(
-        self,
-        features: Iterable[Sequence[float]],
-        targets: Iterable[float],
-    ) -> "Regressor": ...
-
-    def predict_one(self, features: Sequence[float]) -> float: ...
-
-
-RegressorFactory = Callable[[], Regressor]
-
-
-class RidgeRegressor:
-    """Dependency-free auditable reference backend, not a performance ceiling."""
-
-    def __init__(self, ridge: float = 1e-3) -> None:
-        if ridge <= 0:
-            raise ValueError("ridge must be positive")
-        self.ridge = float(ridge)
-        self._coef: tuple[float, ...] | None = None
-        self._feature_dim: int | None = None
-
-    def fit(self, features: Iterable[Sequence[float]], targets: Iterable[float]) -> "RidgeRegressor":
-        rows = [tuple(float(value) for value in row) for row in features]
-        ys = [float(value) for value in targets]
-        if not rows or len(rows) != len(ys):
-            raise ValueError("features and targets must be non-empty and aligned")
-        if any(not isfinite(target) for target in ys):
-            raise ValueError("targets must be finite")
-        dim = len(rows[0])
-        if dim == 0 or any(len(row) != dim for row in rows):
-            raise ValueError("all feature rows must have one consistent non-zero dimension")
-
-        design = [(1.0, *row) for row in rows]
-        width = dim + 1
-        gram = [[0.0 for _ in range(width)] for _ in range(width)]
-        rhs = [0.0 for _ in range(width)]
-        for row, target in zip(design, ys, strict=True):
-            for left in range(width):
-                rhs[left] += row[left] * target
-                for right in range(width):
-                    gram[left][right] += row[left] * row[right]
-        for index in range(1, width):
-            gram[index][index] += self.ridge
-
-        self._coef = tuple(_solve_linear_system(gram, rhs))
-        self._feature_dim = dim
-        return self
-
-    def predict_one(self, features: Sequence[float]) -> float:
-        if self._coef is None or self._feature_dim is None:
-            raise RuntimeError("regressor must be fitted before prediction")
-        row = _validate_features(features, self._feature_dim)
-        return self._coef[0] + fsum(
-            coefficient * value
-            for coefficient, value in zip(self._coef[1:], row, strict=True)
-        )
-
-    def predict(self, features: Iterable[Sequence[float]]) -> tuple[float, ...]:
-        return tuple(self.predict_one(row) for row in features)
+from ._linear_algebra import (
+    invert_matrix as _invert_matrix,
+    mahalanobis_distance as _mahalanobis_distance,
+)
+from ._regression import (
+    FeatureVector,
+    Regressor,
+    RegressorFactory,
+    RidgeRegressor,
+    validate_features as _validate_features,
+)
 
 
 @dataclass(frozen=True, slots=True)
