@@ -1,180 +1,319 @@
 # GrowthEvo Frontier Algorithm Stack
 
-This file is the version-selection rule for the repository. GrowthEvo does **not** treat a branch, commit count, or newer-looking implementation as the canonical algorithm. The canonical stack is selected component by component using four criteria:
+This document defines the canonical algorithm choices used by GrowthEvo-Harness. Components are selected by statistical fit, leakage resistance, evidence efficiency, deployment compatibility, and reproducibility under the repository's test and benchmark contracts.
 
-1. statistical correctness and leakage resistance;
-2. algorithmic novelty / relevance to the current research frontier;
-3. expected efficiency or performance under the assumptions the method actually needs;
-4. compatibility with the current runtime and regression suite.
+## Canonical stack
 
-A newer paper is not automatically better for a different problem setting, and a larger research branch is not automatically more advanced.
-
-## Selected stack
-
-| Layer | Canonical implementation | Why this version wins |
+| Layer | Canonical implementation | Design rationale |
 | --- | --- | --- |
-| CATE | Hybrid cross-fitted DR learner | combines group-aware cross-fitting, pluggable nuisance/effect models, strict propensity semantics, second-stage OOF uncertainty, and Mahalanobis distributional support |
-| OPE | Cross-fitted beta*-IPS flagship + estimator panel | beta*-IPS is the primary low-variance additive-control-variate estimator; beta is cross-fitted by default to avoid same-sample plug-in bias; DR/IPS/SNIPS/SWITCH-DR/DR-OS remain robustness comparators |
-| OPE uncertainty | IID or protocol-defined cluster-robust SE | repeated observations can use defensible experiment clusters instead of pretending rows are independent |
-| OPE combination | Meta-OPE / BLUE-style diagnostic | correlated estimator combination is exposed as an efficiency diagnostic, not silently promoted as exact finite-sample evidence |
-| Safe PI | Calibrated support-anchored feasible policy search | consumes real lower/upper bounds when available, fails closed on missing support in explicit mode, and ranks every final feasible candidate instead of clipping a raw argmax afterwards |
-| Proposal policy | Optional SPIBB-style support anchoring | a learned proposal may be evaluated, but unsupported action probability cannot increase; proposal search never replaces the safer per-action candidates |
-| Long horizon | stochastic rollout + downside CVaR | ranks policies by downside return and constraint violation rather than mean reward alone |
-| Credit | dynamics-aware GAE | true dynamics boundaries stop recursive credit; ordinary export/window boundaries do not alter the learning target |
-| Sequential offline RL | backend-neutral KuaiRand export | CQL/IQL/Decision Transformer remain external research backends because no single offline-RL learner is universally best across support/action-space regimes |
+| **CATE** | Group-aware cross-fitted Doubly Robust learner | orthogonal held-out estimation, pluggable learners, explicit propensity semantics, OOF diagnostics, distributional support |
+| **CATE serving** | Support-aware uplift serving bridge | preserves raw treatment effects while exposing uncertainty and support to runtime policy layers |
+| **Safe PI** | Calibrated support-anchored final-feasible search | combines explicit bounds, support, TV trust regions, cost constraints, and direct ranking of deployable policies |
+| **OPE** | Cross-fitted β*-IPS flagship plus estimator panel | efficient additive-control-variate estimator backed by DR/IPS/SNIPS/SWITCH-DR/DR-OS robustness candidates |
+| **OPE uncertainty** | Estimator-specific IID or protocol-defined cluster-robust SE | aligns uncertainty with the experiment's repeated-unit structure |
+| **OPE combination** | Meta-OPE / BLUE-style candidate | enables correlated-estimator combination under the same validation-governed benchmark contract |
+| **Verification** | One-sided conformal calibration + counterfactual verifier | attaches explicit lower/upper margins to value, cost, and risk quantities |
+| **Long horizon** | Stochastic rollout + downside CVaR | ranks plans by lower-tail return and constraint-violation probability |
+| **Trajectory credit** | Dynamics-aware GAE | resets recursive credit only at declared dynamics discontinuities |
+| **Sequential offline RL** | Backend-neutral KuaiRand export contract | supports specialized BC/IQL/CQL/Decision-Transformer trainers without coupling them to runtime evidence semantics |
 
-## 1. CATE: hybrid DR rather than old branch vs main
+## Selection principles
 
-The stale research branch had stronger *estimation semantics* than the old main implementation:
+GrowthEvo's component choices follow six repository-wide principles:
 
-- optional `group_id` so repeated users/units stay in one cross-fitting fold;
+1. **Orthogonality and held-out estimation** for causal nuisance and effect learning.
+2. **Support-aware optimization** so policy updates remain grounded in logged evidence.
+3. **Explicit uncertainty contracts** so diagnostics, calibrated bounds, and inferential quantities remain distinguishable.
+4. **Final-feasible ranking** so optimization compares policies after deployment constraints are applied.
+5. **Validation-governed empirical selection** for benchmark-specific estimator/model choices.
+6. **Locked evidence promotion** so headline results remain tied to predeclared protocol and independent final holdout.
+
+---
+
+## 1. CATE · Group-aware cross-fitted DR
+
+`growthevo/causal/dr_learner.py` implements a one-vs-control Doubly Robust treatment-effect contract with group-aware cross-fitting.
+
+For treatment `a` and `NO_TREATMENT` control `a₀`, the pairwise propensity is:
+
+```math
+e_a(x)
+=
+\frac{\mu(a\mid x)}{\mu(a\mid x)+\mu(a_0\mid x)}.
+```
+
+Held-out pseudo-outcomes use the standard DR/AIPW form:
+
+```math
+\widetilde\tau_i
+=
+\widehat m_1(x_i)-\widehat m_0(x_i)
++
+\frac{A_i(Y_i-\widehat m_1(x_i))}{\widehat e(x_i)}
+-
+\frac{(1-A_i)(Y_i-\widehat m_0(x_i))}{1-\widehat e(x_i)}.
+```
+
+The canonical contract includes:
+
+- optional `group_id` fold assignment for repeated users/units;
 - balanced group-aware folds;
-- pluggable nuisance and second-stage regressors;
-- strict pairwise positivity;
-- practical overlap separated from numerical propensity clipping;
-- explicit clipping-rate diagnostics.
+- pluggable treatment/control nuisance learners;
+- pluggable second-stage effect learners;
+- explicit strict positivity and practical-overlap diagnostics;
+- explicit propensity stabilization choices;
+- out-of-fold second-stage residual diagnostics;
+- regularized Mahalanobis distributional support.
 
-The evolved main implementation had stronger *distribution-shift semantics*:
+The bundled Ridge learner is the dependency-light reference implementation. Specialized CATE backends can be injected without changing the cross-fitting or serving contracts.
 
-- second-stage out-of-fold residual scale rather than in-sample effect residuals;
-- regularized Mahalanobis distance;
-- support radius estimated from the training distribution;
-- uncertainty inflation and support decay away from the training manifold.
+### Distributional support
 
-The canonical implementation now contains both. Ridge regression is retained only as a dependency-free auditable backend. It is not treated as the predictive performance ceiling; nonlinear / tree / neural nuisance and effect models can be injected without changing the cross-fitting contract.
+Serving-time support uses a regularized Mahalanobis distance:
 
-### Important separation
+```math
+d_M(x)
+=
+\sqrt{(x-\bar x)^\top(\Sigma+\lambda I)^{-1}(x-\bar x)}.
+```
 
-`strict positivity`, `practical overlap`, and `propensity clipping` are different concepts.
+With training support radius `r_q`, an extrapolation factor can be written as:
 
-- Positivity is an identification requirement.
-- Practical overlap is an evidence/support diagnostic.
-- Clipping is an explicit numerical stabilization choice.
+```math
+\xi(x)=\max\left(0,\frac{d_M(x)}{r_q}-1\right),
+```
 
-The default learner therefore does not silently clip propensities.
+and combined with overlap coverage to form a support score. This gives policy layers a continuous signal for training-manifold proximity rather than relying on feature-wise min/max checks.
 
-## 2. OPE: cross-fitted beta*-IPS is the flagship estimator
+---
 
-The repository previously had two partially competing OPE directions:
+## 2. Safe Policy Improvement · calibrated final-feasible search
 
-- current main: IPS / DR / beta*-IPS with strong overlap diagnostics;
-- stale research branch: DM / SNIPS / DR / SWITCH-DR / DR optimistic shrinkage / cluster uncertainty, but without the strongest beta*-IPS default semantics.
+`growthevo/rl/safe_policy_improvement.py` evaluates constrained candidate policies around the behavior policy.
 
-The canonical stack combines them without treating all estimators as equally preferred.
+In calibrated-bound mode:
 
-### Primary estimator
+```math
+Q_a^- = L_a,
+\qquad
+C_a^+ = U_a.
+```
 
-`beta_ips` uses the variance-minimizing additive control variate with `w - 1`, but the beta coefficient is now **cross-fitted by default**. Each evaluation fold is corrected using a beta estimated without that fold.
+A point-mass direction toward action `a` is represented as:
 
-This follows the 2026 beta*-IPS direction while addressing the finite-sample same-sample plug-in bias discussed in that work. A fixed beta estimated on an independent tuning cohort is also supported for strict holdout evaluation.
+```math
+\pi_a^{(\eta)}=(1-\eta)\mu+\eta\delta_a.
+```
 
-The same-sample beta*-IPS estimate remains available only as a diagnostic/reproduction field.
+The feasible update mass is determined by action support, total-variation trust region, conservative expected cost, and minimum pessimistic improvement.
 
-### Robustness panel
+For the TV constraint:
 
-The same evaluation returns:
+```math
+\eta
+\le
+\frac{\epsilon_{TV}}{1-\mu(a\mid x)}.
+```
+
+The final selector compares each constrained candidate after its feasible update mass is resolved. This aligns optimization directly with the policy that can actually be executed.
+
+`NO_TREATMENT` remains a native action and participates in the same feasibility logic.
+
+---
+
+## 3. OPE · cross-fitted β*-IPS and robustness panel
+
+The primary efficient estimator in `growthevo/rl/ope.py` is cross-fitted β*-IPS.
+
+For importance weight
+
+```math
+w_i=\frac{\pi(a_i\mid x_i)}{\mu(a_i\mid x_i)},
+```
+
+define
+
+```math
+Z_i=w_i-1.
+```
+
+The β coefficient for an evaluation row is estimated using data outside that row's evaluation fold:
+
+```math
+\widehat\beta^*_{-f(i)}
+=
+\frac{\widehat{\mathrm{Cov}}_{-f(i)}(wR,Z)}
+{\widehat{\mathrm{Var}}_{-f(i)}(Z)}.
+```
+
+The cross-fitted estimate is:
+
+```math
+\widehat V_{\beta,CF}
+=
+\frac{1}{n}\sum_{i=1}^{n}
+\left[w_i r_i-\widehat\beta^*_{-f(i)}(w_i-1)\right].
+```
+
+The same evaluation surface also provides:
 
 - Direct Method;
 - IPS;
-- self-normalized IPS;
+- SNIPS;
 - Doubly Robust;
 - SWITCH-DR;
-- optimistic DR shrinkage / DR-OS;
-- cross-fitted beta*-IPS;
-- same-sample beta*-IPS diagnostic;
-- Meta-OPE / BLUE-style combination diagnostic.
+- DR-OS;
+- cross-fitted β*-IPS;
+- Meta-OPE / BLUE-style candidates;
+- same-sample β*-IPS diagnostic fields for reproduction analysis.
 
-SWITCH-DR thresholds and DR-OS shrinkage parameters are experiment hyperparameters and must be selected without final-test leakage.
+### Evidence diagnostics
 
-### Why Meta-OPE is not the promotion default
+Each policy evaluation can report:
 
-The BLUE-style combination can improve statistical efficiency when estimators are correlated, but the current implementation estimates its covariance-combination weights on the evaluation cohort. It is therefore exposed as an efficiency diagnostic. Promotion remains anchored to an independently calibrated evidence protocol rather than pretending the plug-in combination has an exact finite-sample guarantee.
+- estimator-specific standard error;
+- ESS and ESS ratio;
+- target-policy-mass support coverage;
+- maximum importance weight;
+- mean importance weight and normalization error;
+- importance-weight coefficient of variation;
+- protocol-defined cluster-robust uncertainty.
 
-## 3. Safe policy improvement: calibrated bounds + final-feasible ranking
-
-Two older implementations each solved only half of the problem.
-
-The evolved main implementation correctly evaluated each action **after** TV/cost feasibility constraints. This prevents an action with the highest raw lower bound but almost zero feasible update mass from hiding a slightly lower-valued action that can actually be deployed safely.
-
-The stale branch was stronger about evidence semantics: it could consume supplied lower/upper bounds and explicit support rather than automatically interpreting generic model uncertainty as a confidence interval.
-
-The canonical implementation now has both properties.
-
-### Strong mode
-
-Use:
-
-```text
-bound_mode = provided
-support_mode = explicit
+```math
+ESS=\frac{(\sum_i w_i)^2}{\sum_i w_i^2}.
 ```
 
-Then every action value must carry an upstream lower bound and every constrained cost must carry an upper bound. These may come from one-sided conformal calibration, causal inference, a variance-adaptive confidence procedure, or another protocol whose assumptions are explicit.
+These diagnostics are first-class inputs to the locked evidence gate.
 
-Missing treatment support fails closed in explicit mode.
+### Benchmark-specific estimator selection
 
-### Reference compatibility mode
+The library-level canonical estimator and the benchmark-specific validation winner serve different roles. A benchmark may predeclare several credible estimators and choose the one that best satisfies its validation objective.
 
-`gaussian_reference` remains available for deterministic synthetic tests and backwards compatibility. It computes `value - z * uncertainty` and `cost + z * uncertainty`, but the code and documentation do not claim that arbitrary model residuals are causal confidence intervals.
+The current full Open Bandit Dataset locked benchmark illustrates this contract: IPS won its frozen validation cohort and was therefore the estimator evaluated on final holdout. The estimator library still retains cross-fitted β*-IPS as its flagship efficient OPE implementation.
 
-### Candidate search
+---
 
-The improver evaluates:
+## 4. Conformal verification
 
-1. every supported single-action direction;
-2. optionally, a learned proposal after support anchoring.
+`growthevo/rl/conformal.py` supports one-sided residual calibration.
 
-Each direction is interpolated from the behavior policy only as far as allowed by:
+Lower-bound residual:
 
-- total-variation trust region;
-- hard expected-cost constraint;
-- minimum final pessimistic improvement.
-
-The final policy is selected by constrained pessimistic policy value.
-
-## 4. What is deliberately not merged just because it is newer
-
-### Betting / freezing confidence procedures
-
-Recent second-order contextual-bandit work develops betting-style, variance-adaptive confidence bounds and freezing. Those ideas are attractive for small-sample policy selection, but they require their exact assumptions and confidence construction. GrowthEvo's Safe PI is therefore designed to **consume** such provided bounds without fabricating an approximate imitation from residual standard deviations.
-
-### Online pessimistic policy learning
-
-Recent online/adaptive pessimistic contextual-bandit methods address sequential data collection and fast regret. GrowthEvo's current Safe PI kernel is an offline deployment-improvement layer over logged behavior. An online regret algorithm should be added only with a real online collection protocol rather than renamed and inserted into an offline API.
-
-### One universal CATE learner
-
-There is no defensible single universally best S/T/X/R/DR/forest/neural CATE learner across all overlap, sample-size, and heterogeneity regimes. GrowthEvo therefore makes the orthogonal cross-fitting contract canonical and the predictive backend pluggable. Benchmark selection decides the backend; the causal protocol does not hard-code one model family.
-
-## 5. Evidence and performance rule
-
-A method is not promoted because its paper is newer or its point estimate is larger.
-
-For a candidate algorithm change to replace the canonical implementation, it should satisfy all applicable checks:
-
-```text
-statistical assumptions are explicit
-no new train/evaluation or temporal leakage
-support / overlap semantics are not weakened
-synthetic ground-truth regression does not degrade
-real-data protocol can reproduce the claimed metric
-uncertainty is calibrated to the quantity it claims to bound
-hard safety fallbacks remain available
-Python 3.11 and 3.12 full CI pass
-runtime and training demos pass
+```math
+r_i^{lower}=\widehat y_i-y_i.
 ```
 
-For real-data performance comparisons, report estimator/model selection on validation data and final metrics on an untouched evaluation split. Do not choose the winning algorithm from final-test error and then report that same final-test error as unbiased evidence.
+Upper-bound residual:
 
-## Research directions represented in this selection
+```math
+r_i^{upper}=y_i-\widehat y_i.
+```
 
-The current stack is informed by the following research directions rather than by branch age:
+The finite-sample order-statistic quantile is:
 
-- additive control variates / beta*-IPS for efficient OPE (SIGIR 2026);
-- correlated-estimator Meta-OPE / BLUE-style efficiency (RecSys 2025);
-- variance-adaptive second-order contextual-bandit confidence and freezing (COLT 2025);
-- decision-point / support-restricted safe policy improvement (AISTATS 2025 direction);
-- modern orthogonal / doubly robust heterogeneous-treatment estimation with cross-fitting;
-- downside-CVaR model-based planning and dynamics-aware long-horizon credit.
+```math
+q_{1-\alpha}=r_{(\lceil(n+1)(1-\alpha)\rceil)}.
+```
 
-The exact theorem from a paper should be claimed only when its assumptions and estimator are actually implemented. "Frontier" in GrowthEvo therefore means **newest defensible method for this contract**, not newest citation pasted into the README.
+The resulting margins can be attached to value, ROI, spend, fatigue, churn, or other quantities through explicit runtime fields. Multiple constraints can use family-wise correction when required by the verification protocol.
+
+---
+
+## 5. Long-horizon planning · downside CVaR
+
+`growthevo/rl/model_based.py` evaluates candidate sequences through stochastic rollout with stateful fatigue, churn, spend, touch-count, intent, and treatment-response dynamics.
+
+Downside CVaR is:
+
+```math
+CVaR_\alpha(R)=\mathbb E[R\mid R\le VaR_\alpha(R)].
+```
+
+Candidate plans are ranked with a risk-sensitive objective:
+
+```math
+Score(\pi)
+=
+CVaR_\alpha(R_\pi)
+-\lambda\Pr(\mathrm{constraint\ violation}\mid\pi).
+```
+
+This provides a consistent long-horizon ranking surface for normal and stress scenarios.
+
+---
+
+## 6. Trajectory credit · dynamics-aware GAE
+
+Potential shaping uses:
+
+```math
+F_t=\gamma\Phi(s_{t+1})-\Phi(s_t).
+```
+
+GAE uses:
+
+```math
+\delta_t=r_t+\gamma V(s_{t+1})-V(s_t),
+```
+
+```math
+A_t=\delta_t+\gamma\lambda A_{t+1}.
+```
+
+`credit_boundary` marks declared dynamics discontinuities such as rollback, reset, user/segment switch, or delayed-outcome attribution boundaries. Ordinary export windows remain truncation metadata, preserving the underlying learning target across data batching choices.
+
+---
+
+## 7. Sequential offline-RL interface
+
+KuaiRand adapters expose backend-neutral sequential training data. This keeps dataset and trajectory semantics stable while allowing research-specific trainers to vary.
+
+Candidate backends include:
+
+- Behavior Cloning;
+- IQL;
+- CQL;
+- Decision Transformer;
+- other sequence or value-based offline-RL systems.
+
+The common contract preserves chronological state construction, action identity, reward timing, next-state semantics, truncation metadata, and planner credit boundaries.
+
+---
+
+## 8. Evidence-governed evolution
+
+Algorithm evolution is evaluated at two levels:
+
+### Implementation level
+
+- mathematical invariants;
+- deterministic regression tests;
+- support and constraint behavior;
+- Python/package compatibility;
+- runtime and training demos.
+
+### Empirical level
+
+- predeclared candidate configuration;
+- validation-only comparison;
+- evidence eligibility gates;
+- frozen winner;
+- independent final holdout;
+- persisted provenance and fingerprints.
+
+This lets GrowthEvo incorporate new methods without coupling repository progress to novelty alone. New components enter the canonical stack when they improve the relevant statistical or operational contract and survive the corresponding evidence path.
+
+## Current research directions
+
+The stack aligns with research directions in:
+
+- additive control variates and β*-IPS for efficient OPE;
+- correlated-estimator combination / Meta-OPE;
+- support-restricted safe policy improvement;
+- orthogonal heterogeneous-treatment estimation with cross-fitting;
+- calibrated one-sided verification;
+- downside-CVaR model-based planning;
+- dynamics-aware long-horizon credit assignment;
+- backend-neutral agent and offline-RL training interfaces.
+
+Exact benchmark outcomes remain recorded in the repository's locked evidence artifacts and `docs/REAL_WORLD_BENCHMARKS.md`.
