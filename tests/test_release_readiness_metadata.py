@@ -31,7 +31,8 @@ def test_release_process_files_are_present_and_evidence_aware() -> None:
     assert "## Unreleased" in changelog
     assert "7d538cea9698b5f0a48c585eed85e3ae526e5af6" in changelog
     assert "7ac26a5aebde2c70e1b43264b89f08dddcff0245" in changelog
-    assert "Accepted final holdouts are not tuning sets." in contributing
+    assert "validation-only candidate selection" in contributing
+    assert "independent final-holdout evaluation" in contributing
     assert "new experiment identity" in contributing
     assert "Choose and add a LICENSE" in checklist
     assert "Protect `main`" in checklist
