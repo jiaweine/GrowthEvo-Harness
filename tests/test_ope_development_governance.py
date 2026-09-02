@@ -17,7 +17,7 @@ def _registry() -> dict[str, object]:
     return payload
 
 
-def test_small_obd_development_cohort_is_exhausted_and_bound_to_plan() -> None:
+def test_small_obd_development_cohort_is_bound_to_plan() -> None:
     registry = _registry()
     plan = load_ope_experiment_plan(PLAN)
 
@@ -39,7 +39,7 @@ def test_small_obd_development_cohort_is_exhausted_and_bound_to_plan() -> None:
     }.issubset(prohibited)
 
 
-def test_exhausted_cohort_attempt_ledger_is_unique_and_holdout_free() -> None:
+def test_small_obd_attempt_ledger_is_unique_and_holdout_free() -> None:
     attempts = _registry()["attempts"]
     assert isinstance(attempts, list)
     method_ids = [attempt["method_id"] for attempt in attempts]
@@ -58,7 +58,7 @@ def test_exhausted_cohort_attempt_ledger_is_unique_and_holdout_free() -> None:
     assert {25, 43, 44, 45, 46, 47, 48}.issubset(recorded_prs)
 
 
-def test_exhausted_small_obd_identity_is_ci_only_not_a_promotion_workflow() -> None:
+def test_small_obd_identity_remains_ci_integration_only() -> None:
     workflows = ROOT / ".github" / "workflows"
     plan_token = "obd-small-all-random-to-bts.v1.json"
     source_token = ":obd-small"
@@ -76,19 +76,20 @@ def test_exhausted_small_obd_identity_is_ci_only_not_a_promotion_workflow() -> N
         if plan_token in text or source_token in text:
             offenders.append(path.name)
     assert offenders == [], (
-        "the exhausted small-OBD identity may only remain in the normal CI "
+        "the small-OBD regression identity may only remain in the normal CI "
         f"integration job; promotion/development workflows found: {offenders}"
     )
 
 
-def test_governance_docs_state_that_exhausted_validation_cannot_promote() -> None:
+def test_governance_docs_require_fresh_identity_for_new_promotion_research() -> None:
     governance = (ROOT / "docs" / "OPE_DEVELOPMENT_GOVERNANCE.md").read_text(
         encoding="utf-8"
     )
     contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
     rerun = (ROOT / "docs" / "RESEARCH_RERUN_POLICY.md").read_text(encoding="utf-8")
 
-    assert "exhausted for promotion research" in governance
-    assert "new preregistered development identity" in governance
-    assert "exhausted for promotion research" in contributing
+    assert "regression and integration cohort" in governance
+    assert "fresh preregistered development identity" in governance
+    assert "regression and integration baseline" in contributing
+    assert "fresh preregistered development identity" in contributing
     assert "fresh preregistered development identity" in rerun
