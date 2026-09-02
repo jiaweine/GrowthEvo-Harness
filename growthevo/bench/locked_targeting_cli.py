@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
-from hashlib import blake2b
 from json import dumps, loads
 from math import isfinite
 from pathlib import Path
@@ -11,27 +10,12 @@ from typing import Any, Mapping, Sequence
 from growthevo.causal.dr_learner import LoggedTreatmentRecord
 from growthevo.models import Channel
 
+from ._serialization import fingerprint_json, iter_jsonl_objects, load_json_object
 from .locked_evaluation import LockedTargetingProtocol
 from .targeting_experiment_plan import (
     TargetingExperimentPlan,
     load_targeting_experiment_plan,
 )
-
-
-def _json_object(path: str | Path, *, label: str) -> dict[str, Any]:
-    resolved = Path(path)
-    try:
-        payload = loads(resolved.read_text(encoding="utf-8"))
-    except ValueError as exc:
-        raise ValueError(f"invalid {label} JSON: {resolved}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError(f"{label} JSON must be an object")
-    return payload
-
-
-def _fingerprint_json_object(payload: Mapping[str, Any]) -> str:
-    encoded = dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return blake2b(encoded, digest_size=20).hexdigest()
 
 
 def _record_from_payload(payload: Mapping[str, Any], *, source: str) -> LoggedTreatmentRecord:
@@ -82,36 +66,26 @@ def _load_tuning_jsonl(
     score_rows: list[dict[str, float]] = []
     candidate_names: set[str] | None = None
 
-    with resolved.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            source = f"{resolved}:{line_number}"
-            try:
-                payload = loads(line)
-            except ValueError as exc:
-                raise ValueError(f"invalid JSON on {source}") from exc
-            if not isinstance(payload, dict):
-                raise ValueError(f"expected JSON object on {source}")
-            records.append(_record_from_payload(payload, source=source))
+    for payload, source in iter_jsonl_objects(resolved):
+        records.append(_record_from_payload(payload, source=source))
 
-            raw_scores = payload.get("scores")
-            if not isinstance(raw_scores, dict) or not raw_scores:
-                raise ValueError(f"scores must be a non-empty JSON object on {source}")
-            scores: dict[str, float] = {}
-            for name, value in raw_scores.items():
-                if not isinstance(name, str) or not name:
-                    raise ValueError(f"candidate names must be non-empty strings on {source}")
-                score = float(value)
-                if not isfinite(score):
-                    raise ValueError(f"candidate score must be finite on {source}")
-                scores[name] = score
-            names = set(scores)
-            if candidate_names is None:
-                candidate_names = names
-            elif names != candidate_names:
-                raise ValueError("every tuning row must contain the same candidate score set")
-            score_rows.append(scores)
+        raw_scores = payload.get("scores")
+        if not isinstance(raw_scores, dict) or not raw_scores:
+            raise ValueError(f"scores must be a non-empty JSON object on {source}")
+        scores: dict[str, float] = {}
+        for name, value in raw_scores.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"candidate names must be non-empty strings on {source}")
+            score = float(value)
+            if not isfinite(score):
+                raise ValueError(f"candidate score must be finite on {source}")
+            scores[name] = score
+        names = set(scores)
+        if candidate_names is None:
+            candidate_names = names
+        elif names != candidate_names:
+            raise ValueError("every tuning row must contain the same candidate score set")
+        score_rows.append(scores)
 
     if not records or candidate_names is None:
         raise ValueError(f"{resolved} produced no tuning records")
@@ -131,31 +105,21 @@ def _load_test_jsonl(
     records: list[LoggedTreatmentRecord] = []
     scores: list[float] = []
 
-    with resolved.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            source = f"{resolved}:{line_number}"
-            try:
-                payload = loads(line)
-            except ValueError as exc:
-                raise ValueError(f"invalid JSON on {source}") from exc
-            if not isinstance(payload, dict):
-                raise ValueError(f"expected JSON object on {source}")
-            declared = payload.get("selected_candidate")
-            if declared != selected_candidate:
-                raise ValueError(
-                    f"holdout row on {source} declares {declared!r}; "
-                    f"frozen winner is {selected_candidate!r}"
-                )
-            try:
-                score = float(payload["score"])
-            except KeyError as exc:
-                raise ValueError(f"missing required field 'score' on {source}") from exc
-            if not isfinite(score):
-                raise ValueError(f"holdout score must be finite on {source}")
-            records.append(_record_from_payload(payload, source=source))
-            scores.append(score)
+    for payload, source in iter_jsonl_objects(resolved):
+        declared = payload.get("selected_candidate")
+        if declared != selected_candidate:
+            raise ValueError(
+                f"holdout row on {source} declares {declared!r}; "
+                f"frozen winner is {selected_candidate!r}"
+            )
+        try:
+            score = float(payload["score"])
+        except KeyError as exc:
+            raise ValueError(f"missing required field 'score' on {source}") from exc
+        if not isfinite(score):
+            raise ValueError(f"holdout score must be finite on {source}")
+        records.append(_record_from_payload(payload, source=source))
+        scores.append(score)
 
     if not records:
         raise ValueError(f"{resolved} produced no holdout records")
@@ -178,7 +142,10 @@ def _load_and_validate_plan(
     if experiment_plan_json is None:
         return None, None
     plan = load_targeting_experiment_plan(experiment_plan_json)
-    manifest = _json_object(export_manifest_json, label="targeting export manifest")
+    manifest = load_json_object(
+        export_manifest_json,
+        label="targeting export manifest",
+    )
     plan.validate_runtime_contract(
         benchmark=benchmark,
         dataset=dataset,
@@ -244,7 +211,7 @@ def run_locked_targeting_benchmark(
 
     plan_payload: dict[str, Any] | None = None
     if plan is not None and manifest is not None:
-        manifest_fingerprint = _fingerprint_json_object(manifest)
+        manifest_fingerprint = fingerprint_json(manifest)
         metrics = dict(artifact.metrics)
         metrics.update(
             {
