@@ -2,6 +2,19 @@
 
 from .criteo import CriteoUpliftData, load_criteo_uplift
 from .kuairand_features import load_kuairand_user_features, load_kuairand_video_features
+from .llm_evaluation import (
+    CausalOptionEvidence,
+    LLMBenchmarkCase,
+    LLMCandidateScore,
+    LLMDecision,
+    LLMExperimentPlan,
+    LLMHoldoutResult,
+    LLMPolicyCandidate,
+    LockedLLMBenchmarkArtifact,
+    LockedLLMPolicyProtocol,
+    collect_planner_decisions,
+    evaluate_llm_candidate,
+)
 from .locked_evaluation import (
     LockedBenchmarkArtifact,
     LockedOPEProtocol,
@@ -60,6 +73,7 @@ from .synthetic import (
 
 __all__ = [
     "CATEBenchmarkResult",
+    "CausalOptionEvidence",
     "CriteoUpliftData",
     "DEFAULT_KUAIRAND_REWARD_WEIGHTS",
     "DatasetSplit",
@@ -69,7 +83,15 @@ __all__ = [
     "KuaiRandHistory",
     "KuaiRandInteraction",
     "KuaiRandPlannerRecord",
+    "LLMBenchmarkCase",
+    "LLMCandidateScore",
+    "LLMDecision",
+    "LLMExperimentPlan",
+    "LLMHoldoutResult",
+    "LLMPolicyCandidate",
     "LockedBenchmarkArtifact",
+    "LockedLLMBenchmarkArtifact",
+    "LockedLLMPolicyProtocol",
     "LockedOPEProtocol",
     "LockedTargetingProtocol",
     "OPECandidate",
@@ -87,10 +109,12 @@ __all__ = [
     "TargetingInferenceResult",
     "TargetingValidationScore",
     "bootstrap_randomized_targeting",
+    "collect_planner_decisions",
     "default_kuairand_state_builder",
     "default_planner_observation",
     "deterministic_stratified_split",
     "evaluate_cate",
+    "evaluate_llm_candidate",
     "evaluate_randomized_targeting",
     "infer_randomized_targeting",
     "kuairand_reward",
