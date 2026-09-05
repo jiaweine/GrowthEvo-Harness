@@ -4,6 +4,7 @@ The LLM layer is deliberately upstream of the deterministic policy and legal
 safety gates. Importing this package does not require any model-provider SDK.
 """
 
+from .contracts import planner_contract_fingerprint, planner_contract_payload
 from .planner import (
     GuardedLLMGrowthPlanner,
     LLMPlannerConfig,
@@ -20,4 +21,6 @@ __all__ = [
     "LLMPlannerTrace",
     "OpenAIResponsesClient",
     "StructuredLLMClient",
+    "planner_contract_fingerprint",
+    "planner_contract_payload",
 ]
