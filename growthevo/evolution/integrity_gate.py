@@ -128,11 +128,18 @@ class BetaBinomialAssignmentEProcess:
         f = self.observations - s
         a = self.prior_alpha
         b = self.prior_beta
-        log_beta_posterior = lgamma(a + s) + lgamma(b + f) - lgamma(a + b + self.observations)
+        log_beta_posterior = (
+            lgamma(a + s)
+            + lgamma(b + f)
+            - lgamma(a + b + self.observations)
+        )
         log_beta_prior = lgamma(a) + lgamma(b) - lgamma(a + b)
-        log_null = s * log(self.expected_probability) + f * log(1.0 - self.expected_probability)
+        log_null = (
+            s * log(self.expected_probability)
+            + f * log(1.0 - self.expected_probability)
+        )
         value = log_beta_posterior - log_beta_prior - log_null
-        if value != value:  # NaN guard without importing another helper.
+        if value != value:
             raise ValueError("assignment e-process became non-finite")
         return value
 
@@ -217,6 +224,8 @@ class ExperimentIntegrityGate:
             prior_alpha=spec.beta_prior_alpha,
             prior_beta=spec.beta_prior_beta,
         )
+        self._enrollment_tripped = False
+        self._matured_tripped = False
         self._seen_enrollment: set[bytes] = set()
         self._seen_matured: set[bytes] = set()
         self._events: list[IntegrityAuditEvent] = []
@@ -238,7 +247,12 @@ class ExperimentIntegrityGate:
         ).digest()
 
     @staticmethod
-    def _digest(sequence: int, kind: str, payload: Mapping[str, Any], previous_hash: str) -> str:
+    def _digest(
+        sequence: int,
+        kind: str,
+        payload: Mapping[str, Any],
+        previous_hash: str,
+    ) -> str:
         encoded = json.dumps(
             {
                 "sequence": sequence,
@@ -270,17 +284,22 @@ class ExperimentIntegrityGate:
         enrollment = self._enrollment.evidence(
             alpha=self.spec.enrollment_alpha,
             minimum_observations=self.spec.minimum_enrollment_observations,
-            sticky_tripped=self.status is IntegrityStatus.BLOCKED,
+            sticky_tripped=self._enrollment_tripped,
         )
         matured = self._matured.evidence(
             alpha=self.spec.matured_population_alpha,
             minimum_observations=self.spec.minimum_matured_observations,
-            sticky_tripped=self.status is IntegrityStatus.BLOCKED,
+            sticky_tripped=self._matured_tripped,
         )
-        reasons: list[str] = []
         if enrollment.eligible_to_trip and enrollment.e_value >= enrollment.threshold:
-            reasons.append("enrollment_sample_ratio_mismatch")
+            self._enrollment_tripped = True
         if matured.eligible_to_trip and matured.e_value >= matured.threshold:
+            self._matured_tripped = True
+
+        reasons: list[str] = []
+        if self._enrollment_tripped:
+            reasons.append("enrollment_sample_ratio_mismatch")
+        if self._matured_tripped:
             reasons.append("matured_population_sample_ratio_mismatch")
         if reasons and self.status is IntegrityStatus.CLEAR:
             self.status = IntegrityStatus.BLOCKED
@@ -292,8 +311,6 @@ class ExperimentIntegrityGate:
                     "matured_population": asdict(matured),
                 },
             )
-        if self.status is IntegrityStatus.BLOCKED and not reasons:
-            reasons.append("integrity_gate_previously_blocked")
         return ExperimentIntegritySnapshot(
             status=self.status,
             enrollment=enrollment,
@@ -301,17 +318,29 @@ class ExperimentIntegrityGate:
             reasons=tuple(reasons),
         )
 
-    def observe_enrollment(self, analysis_unit_id: str, *, assigned_to_challenger: bool) -> ExperimentIntegritySnapshot:
+    def observe_enrollment(
+        self,
+        analysis_unit_id: str,
+        *,
+        assigned_to_challenger: bool,
+    ) -> ExperimentIntegritySnapshot:
         if self.status is IntegrityStatus.BLOCKED:
             raise RuntimeError("experiment integrity gate is blocked")
         token = self._token(analysis_unit_id, "enrollment")
         if token in self._seen_enrollment:
-            raise ValueError("analysis_unit_id has already been registered for enrollment integrity")
+            raise ValueError(
+                "analysis_unit_id has already been registered for enrollment integrity"
+            )
         self._seen_enrollment.add(token)
         self._enrollment.update(assigned_to_challenger)
         return self._evaluate()
 
-    def observe_matured_population(self, analysis_unit_id: str, *, assigned_to_challenger: bool) -> ExperimentIntegritySnapshot:
+    def observe_matured_population(
+        self,
+        analysis_unit_id: str,
+        *,
+        assigned_to_challenger: bool,
+    ) -> ExperimentIntegritySnapshot:
         if self.status is IntegrityStatus.BLOCKED:
             raise RuntimeError("experiment integrity gate is blocked")
         enrollment_token = self._token(analysis_unit_id, "enrollment")
@@ -335,7 +364,15 @@ class ExperimentIntegrityGate:
         for expected_sequence, event in enumerate(self._events):
             if event.sequence != expected_sequence or event.previous_hash != previous_hash:
                 return False
-            if self._digest(event.sequence, event.kind, event.payload, event.previous_hash) != event.event_hash:
+            if (
+                self._digest(
+                    event.sequence,
+                    event.kind,
+                    event.payload,
+                    event.previous_hash,
+                )
+                != event.event_hash
+            ):
                 return False
             previous_hash = event.event_hash
         return True
@@ -419,7 +456,9 @@ class _IntegrityAuthority:
             float(challenger_probability),
         )
         if registered != expected:
-            raise ValueError("matured population record does not match integrity enrollment ticket")
+            raise ValueError(
+                "matured population record does not match integrity enrollment ticket"
+            )
         snapshot = self.integrity.observe_matured_population(
             analysis_unit_id,
             assigned_to_challenger=assigned_to_challenger,
@@ -428,7 +467,11 @@ class _IntegrityAuthority:
             self._blocked = True
         return snapshot
 
-    def _combined(self, canary: CanarySnapshot, integrity: ExperimentIntegritySnapshot) -> IntegrityGuardedSnapshot:
+    def _combined(
+        self,
+        canary: CanarySnapshot,
+        integrity: ExperimentIntegritySnapshot,
+    ) -> IntegrityGuardedSnapshot:
         if integrity.status is IntegrityStatus.BLOCKED or self._blocked:
             reasons = integrity.reasons or ("experiment_integrity_gate_blocked",)
             return IntegrityGuardedSnapshot(
@@ -560,7 +603,10 @@ class IntegrityGuardedHighPowerPromotionController(_IntegrityAuthority):
     def route(self, analysis_unit_id: str) -> IntegrityEnrollment:
         return self.enroll(analysis_unit_id)
 
-    def observe(self, observation: HighPowerCanaryObservation) -> IntegrityGuardedSnapshot:
+    def observe(
+        self,
+        observation: HighPowerCanaryObservation,
+    ) -> IntegrityGuardedSnapshot:
         if self._blocked:
             raise RuntimeError("experiment integrity gate is blocked")
         integrity = self._preflight_matured(
