@@ -12,7 +12,6 @@ from .online_promotion import (
     CanaryDecision,
     CanaryObservation,
     CanaryPlan,
-    CanaryRouter,
     CanarySnapshot,
     CanaryStatus,
     OnlineCanaryMonitor,
@@ -25,7 +24,7 @@ class FrozenCUPEDSpec:
     """Pre-experiment variance-reduction contract for the primary metric.
 
     ``theta`` and ``center`` must be estimated from pre-exposure/reference data
-    and frozen before online outcomes are inspected.  Keeping the transform fixed
+    and frozen before online outcomes are inspected. Keeping the transform fixed
     at every group-sequential look avoids the inconsistent-adjustment failure mode
     where the analysis itself changes after seeing interim results.
     """
@@ -81,7 +80,7 @@ class GroupSequentialSpec:
     """Pre-registered primary-success analysis for the final rollout stage.
 
     The dependency-free reference implementation uses a small number of planned
-    Welch-z looks and conservative alpha spending.  Safety/deterioration remains
+    Welch-z looks and conservative alpha spending. Safety/deterioration remains
     on the base anytime-valid e-process; this object is only the *success* gate.
     """
 
@@ -153,6 +152,13 @@ class HighPowerCanaryPlan:
             raise ValueError("analysis_unit_name cannot be empty")
         if self.group_sequential.alpha > self.base_plan.promotion_alpha + 1e-12:
             raise ValueError("group-sequential alpha cannot exceed base promotion_alpha")
+        if (
+            self.group_sequential.expected_final_stage_observations
+            < self.base_plan.min_observations_per_stage
+        ):
+            raise ValueError(
+                "expected final-stage observations cannot be below the base stage minimum"
+            )
 
     @property
     def fingerprint(self) -> str:
@@ -277,8 +283,8 @@ class GroupSequentialEvidence:
 class GroupSequentialPrimaryMonitor:
     """Final-stage primary gate with optional *frozen* CUPED adjustment.
 
-    This is an asymptotic Welch-z reference implementation.  It deliberately
-    analyzes only at pre-registered looks.  Per-look alpha allocations sum to at
+    This is an asymptotic Welch-z reference implementation. It deliberately
+    analyzes only at pre-registered looks. Per-look alpha allocations sum to at
     most the configured family alpha, so the reference remains conservative even
     without a multivariate-normal boundary dependency.
     """
@@ -305,6 +311,9 @@ class GroupSequentialPrimaryMonitor:
             else raw
         )
         return adjusted if self.metric.higher_is_better else -adjusted
+
+    def validate_observation(self, observation: HighPowerCanaryObservation) -> None:
+        self._adjusted_oriented_value(observation)
 
     def observe(self, observation: HighPowerCanaryObservation) -> GroupSequentialEvidence:
         value = self._adjusted_oriented_value(observation)
@@ -416,6 +425,24 @@ class HighPowerOnlineCanaryMonitor(OnlineCanaryMonitor):
             reasons=reasons,
         )
 
+    def _preflight_observation(self, observation: HighPowerCanaryObservation) -> None:
+        expected_metrics = {metric.name for metric in self.plan.metrics}
+        if set(observation.metrics) != expected_metrics:
+            missing = sorted(expected_metrics.difference(observation.metrics))
+            unexpected = sorted(set(observation.metrics).difference(expected_metrics))
+            raise ValueError(
+                f"observation metrics do not match plan; missing={missing}, unexpected={unexpected}"
+            )
+        for metric in self.plan.metrics:
+            value = float(observation.metrics[metric.name])
+            if value < metric.outcome_min - 1e-12 or value > metric.outcome_max + 1e-12:
+                raise ValueError(
+                    f"metric {metric.name!r} is outside pre-registered outcome bounds"
+                )
+        final_stage_index = len(self.plan.stages) - 1
+        if observation.routing_stage_index == final_stage_index:
+            self.primary_group_sequential.validate_observation(observation)
+
     def observe(self, observation: HighPowerCanaryObservation) -> CanarySnapshot:
         if self.status is not CanaryStatus.RUNNING:
             raise RuntimeError("canary observations require RUNNING status")
@@ -431,13 +458,7 @@ class HighPowerOnlineCanaryMonitor(OnlineCanaryMonitor):
         expected_traffic = self.plan.stages[observation.routing_stage_index]
         if abs(observation.traffic_fraction - expected_traffic) > 1e-12:
             raise ValueError("observation traffic fraction differs from routing stage")
-        expected_metrics = {metric.name for metric in self.plan.metrics}
-        if set(observation.metrics) != expected_metrics:
-            missing = sorted(expected_metrics.difference(observation.metrics))
-            unexpected = sorted(set(observation.metrics).difference(expected_metrics))
-            raise ValueError(
-                f"observation metrics do not match plan; missing={missing}, unexpected={unexpected}"
-            )
+        self._preflight_observation(observation)
 
         self._seen_unit_tokens.add(unit_token)
         self._total_observations += 1
