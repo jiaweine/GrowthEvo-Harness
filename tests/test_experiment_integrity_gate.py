@@ -74,6 +74,15 @@ def _integrity_spec() -> ExperimentIntegritySpec:
     )
 
 
+def test_integrity_stream_alphas_cannot_exceed_family_budget() -> None:
+    with pytest.raises(ValueError, match="cannot exceed family_alpha"):
+        ExperimentIntegritySpec(
+            family_alpha=0.01,
+            enrollment_alpha=0.007,
+            matured_population_alpha=0.007,
+        )
+
+
 def test_beta_binomial_assignment_eprocess_stays_small_for_balanced_split() -> None:
     process = BetaBinomialAssignmentEProcess(
         expected_probability=0.5,
