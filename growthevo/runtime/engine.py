@@ -73,7 +73,13 @@ class GrowthEvoRuntime:
         self.event_store.append(EventType.BELIEF_UPDATED, {"belief": belief})
 
         hypothesis = self.planner.plan(belief, goal)
-        self.event_store.append(EventType.HYPOTHESIS_PLANNED, {"hypothesis": hypothesis})
+        hypothesis_event: dict[str, object] = {"hypothesis": hypothesis}
+        audit_snapshot = getattr(self.planner, "audit_snapshot", None)
+        if callable(audit_snapshot):
+            planner_audit = audit_snapshot()
+            if planner_audit is not None:
+                hypothesis_event["planner_audit"] = planner_audit
+        self.event_store.append(EventType.HYPOTHESIS_PLANNED, hypothesis_event)
 
         proposed = self.policy.select_action(belief, hypothesis, goal.constraints)
         self.event_store.append(EventType.ACTION_PROPOSED, {"action": proposed})
