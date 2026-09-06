@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from statistics import pvariance
 
 import pytest
@@ -313,6 +314,109 @@ def test_randomization_cluster_can_contribute_only_one_matured_outcome() -> None
 
     with pytest.raises(ValueError, match="already been observed"):
         controller.observe(observation)
+
+
+def _controller_with_delayed_exposure():
+    controller = HighPowerOnlinePromotionController(
+        champion_name="deterministic-baseline",
+        candidate=_candidate(),
+        plan=_high_power_plan(stages=(0.5, 1.0)),
+    )
+    controller.start()
+    delayed = None
+    excluded = None
+    for index in range(1000):
+        ticket = controller.enroll(f"exposure-boundary-{index}")
+        if not ticket.in_canary:
+            excluded = ticket
+            continue
+        if delayed is None:
+            delayed = ticket
+            continue
+        snapshot = controller.observe(_observation_from_ticket(ticket))
+        if snapshot.decision is CanaryDecision.ADVANCE:
+            assert delayed is not None
+            assert excluded is not None
+            return controller, delayed, excluded
+    raise AssertionError("stage 0 never advanced")
+
+
+def test_delayed_exposure_cannot_be_relabelled_as_final_stage() -> None:
+    controller, delayed, _ = _controller_with_delayed_exposure()
+    original = _observation_from_ticket(delayed)
+    forged = replace(original, routing_stage_index=1, traffic_fraction=1.0)
+    before = controller.monitor.snapshot()
+    primary_before = controller.monitor.primary_group_sequential.evidence()
+    events_before = controller.events()
+
+    with pytest.raises(ValueError, match="registered exposure stage"):
+        controller.observe(forged)
+
+    assert controller.monitor.snapshot() == before
+    assert controller.monitor.primary_group_sequential.evidence() == primary_before
+    assert controller.events() == events_before
+
+    # Rejection leaves the real delayed outcome retryable and confined to safety.
+    accepted = controller.observe(original)
+    assert accepted.total_observations == before.total_observations + 1
+    assert accepted.stage_observations == 0
+    assert controller.monitor.primary_group_sequential.evidence() == primary_before
+
+
+def test_reenrollment_preserves_first_admitted_exposure_stage() -> None:
+    controller, delayed, _ = _controller_with_delayed_exposure()
+
+    assert controller.enroll(delayed.analysis_unit_id) == delayed
+    assert controller.route(delayed.analysis_unit_id) == delayed
+    accepted = controller.observe(_observation_from_ticket(delayed))
+    assert accepted.stage_observations == 0
+    assert controller.monitor.primary_group_sequential.evidence().observations == 0
+    # Observing a unit must not discard its first-exposure record either.
+    assert controller.enroll(delayed.analysis_unit_id) == delayed
+    with pytest.raises(ValueError, match="already been observed"):
+        controller.observe(_observation_from_ticket(delayed))
+
+
+def test_previously_excluded_unit_can_first_enroll_in_final_stage() -> None:
+    controller, _, excluded = _controller_with_delayed_exposure()
+
+    admitted = controller.enroll(excluded.analysis_unit_id)
+    assert admitted.in_canary is True
+    assert admitted.routing_stage_index == 1
+    assert controller.enroll(excluded.analysis_unit_id) == admitted
+    accepted = controller.observe(_observation_from_ticket(admitted))
+    assert accepted.stage_observations == 1
+    assert controller.monitor.primary_group_sequential.evidence().observations == 1
+
+
+def test_matching_route_without_enrollment_is_rejected_atomically() -> None:
+    controller = HighPowerOnlinePromotionController(
+        champion_name="deterministic-baseline",
+        candidate=_candidate(),
+        plan=_high_power_plan(),
+    )
+    controller.start()
+    route = controller.router.route("never-enrolled", stage_index=0)
+    forged = HighPowerCanaryObservation(
+        analysis_unit_id=route.analysis_unit_id,
+        routing_stage_index=0,
+        assigned_to_challenger=route.assigned_to_challenger,
+        assignment_probability=route.challenger_probability,
+        traffic_fraction=route.traffic_fraction,
+        metrics={"incremental_value": 0.5},
+    )
+    before = controller.monitor.snapshot()
+    primary_before = controller.monitor.primary_group_sequential.evidence()
+    events_before = controller.events()
+
+    with pytest.raises(ValueError, match="no registered exposure"):
+        controller.observe(forged)
+
+    assert controller.monitor.snapshot() == before
+    assert controller.monitor.primary_group_sequential.evidence() == primary_before
+    assert controller.events() == events_before
+    ticket = controller.enroll(route.analysis_unit_id)
+    assert controller.observe(_observation_from_ticket(ticket)).total_observations == 1
 
 
 def test_high_power_audit_binds_advanced_plan_and_contains_no_raw_outcomes() -> None:

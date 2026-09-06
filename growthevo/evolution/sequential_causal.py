@@ -163,7 +163,7 @@ class HighPowerCanaryPlan:
     @property
     def fingerprint(self) -> str:
         payload = {
-            "schema": "growthevo.high-power-canary-plan.v1",
+            "schema": "growthevo.high-power-canary-plan.v2",
             "base_plan": asdict(self.base_plan),
             "group_sequential": asdict(self.group_sequential),
             "cuped": asdict(self.cuped) if self.cuped is not None else None,
@@ -181,7 +181,7 @@ class HighPowerCanaryPlan:
 
 @dataclass(frozen=True, slots=True)
 class HighPowerExposureTicket:
-    """Ephemeral assignment receipt; routing stage is frozen at exposure time."""
+    """Assignment receipt; admitted units retain their first exposure stage."""
 
     analysis_unit_id: str
     routing_stage_index: int
@@ -539,6 +539,10 @@ class HighPowerOnlinePromotionController(OnlinePromotionController):
         )
         self.high_power_plan = plan
         self.monitor = HighPowerOnlineCanaryMonitor(plan)
+        # Keep the first admitted stage for the controller's lifetime, including
+        # after maturation. Tokens share the monitor's plan-scoped dedupe identity;
+        # raw analysis-unit IDs are not retained in this registry or audit events.
+        self._exposure_stages: dict[bytes, int] = {}
         self._append(
             "high_power_inference_registered",
             {
@@ -559,8 +563,11 @@ class HighPowerOnlinePromotionController(OnlinePromotionController):
     def enroll(self, analysis_unit_id: str) -> HighPowerExposureTicket:
         if self.monitor.status is not CanaryStatus.RUNNING:
             raise RuntimeError("routing requires a running canary")
-        stage_index = self.monitor.stage_index
+        unit_token = self.monitor._unit_token(analysis_unit_id)
+        stage_index = self._exposure_stages.get(unit_token, self.monitor.stage_index)
         route = self.router.route(analysis_unit_id, stage_index=stage_index)
+        if route.in_canary:
+            self._exposure_stages[unit_token] = stage_index
         return HighPowerExposureTicket(
             analysis_unit_id=analysis_unit_id,
             routing_stage_index=stage_index,
@@ -585,9 +592,15 @@ class HighPowerOnlinePromotionController(OnlinePromotionController):
             raise RuntimeError("canary observations require RUNNING status")
         if observation.routing_stage_index > self.monitor.stage_index:
             raise ValueError("outcome cannot reference a future rollout stage")
+        unit_token = self.monitor._unit_token(observation.analysis_unit_id)
+        registered_stage = self._exposure_stages.get(unit_token)
+        if registered_stage is None:
+            raise ValueError("analysis unit has no registered exposure; call enroll first")
+        if observation.routing_stage_index != registered_stage:
+            raise ValueError("outcome does not match the registered exposure stage")
         expected_route = self.router.route(
             observation.analysis_unit_id,
-            stage_index=observation.routing_stage_index,
+            stage_index=registered_stage,
         )
         if not expected_route.in_canary:
             raise ValueError("analysis unit was not admitted by its exposure stage")

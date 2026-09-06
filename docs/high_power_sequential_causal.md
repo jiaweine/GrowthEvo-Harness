@@ -70,6 +70,8 @@ Changing from always-valid inference to group-sequential inference changes the s
 
 A change to expected sample size, look schedule, alpha, CUPED coefficient, CUPED centering, source reference data, or analysis unit creates a different plan fingerprint.
 
+The current fingerprint schema is `growthevo.high-power-canary-plan.v2`. It binds the first-admitted exposure-stage contract described below. Identical plan parameters under the earlier v1 controller therefore do not share this protocol identity.
+
 ## Frozen CUPED variance reduction
 
 `FrozenCUPEDSpec` supports pre-exposure variance reduction for the primary metric:
@@ -101,11 +103,15 @@ At exposure time, the ticket freezes:
 - traffic fraction;
 - randomized arm probability.
 
-A matured outcome carries that original `routing_stage_index`. The controller recomputes the deterministic route for the **exposure stage**, not the stage that happens to be active when the delayed outcome arrives.
+Call `controller.enroll(unit_id)` (or its `route` alias) before exposure. For an admitted unit, the controller records the first exposure stage under a plan-scoped hashed unit token. Repeated calls return that original assignment receipt, including after a stage advance or outcome maturation. A unit excluded from the canary has no admission record and can first enroll when a later traffic stage includes it.
+
+A matured outcome carries the original `routing_stage_index`. Before statistical state or deduplication changes, the controller requires a registered admission and an exact match to its recorded stage, then recomputes the deterministic route for that stage to verify the arm, traffic fraction, and propensity. Matching a caller-selected stage's route alone does not establish exposure provenance.
 
 A valid old-stage delayed outcome may still update cumulative safety evidence, but it does **not** count toward the current stage's minimum matured-outcome quota and does not enter the final-stage primary group-sequential test unless it was originally exposed in the final stage.
 
 This prevents pipeline outcomes from artificially filling a later-stage quota.
+
+The registry has the same in-memory lifetime as the controller's statistical state. Submit outcomes to the controller that enrolled the units; a new controller rejects unregistered outcomes. The registry stores hashed tokens and stage indices, and the aggregate audit chain contains no raw unit IDs or outcome vectors. Integrations must serialize enrollment and observation calls on the controller. The lower-level monitor is a statistical component and does not verify enrollment; production ingestion uses the controller.
 
 ## Repeated-user / cluster contract
 
