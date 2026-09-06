@@ -1,3 +1,13 @@
+from .evidence_lab import (
+    BernoulliSequentialScenario,
+    MonteCarloAcceptanceGate,
+    MonteCarloRate,
+    ProtocolOperatingCharacteristics,
+    SequentialEvidenceLabArtifact,
+    SequentialEvidenceLabPlan,
+    SequentialProtocolCertificate,
+    run_sequential_evidence_lab,
+)
 from .failure_miner import FailureMiner, FailureTrace
 from .online_promotion import (
     CanaryCandidate,
@@ -32,6 +42,7 @@ from .sequential_causal import (
 __all__ = [
     "EVOLVABLE_COORDINATES",
     "FROZEN_COORDINATES",
+    "BernoulliSequentialScenario",
     "CanaryCandidate",
     "CanaryDecision",
     "CanaryMetricSpec",
@@ -56,7 +67,14 @@ __all__ = [
     "HighPowerOnlinePromotionController",
     "HoeffdingMixtureEProcess",
     "MetricSequentialEvidence",
+    "MonteCarloAcceptanceGate",
+    "MonteCarloRate",
     "OnlineCanaryMonitor",
     "OnlinePromotionController",
     "PromotionAuditEvent",
+    "ProtocolOperatingCharacteristics",
+    "SequentialEvidenceLabArtifact",
+    "SequentialEvidenceLabPlan",
+    "SequentialProtocolCertificate",
+    "run_sequential_evidence_lab",
 ]
