@@ -29,6 +29,30 @@ class ShadowPlannerEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class ShadowBenchmarkPlan:
+    """Pre-register the LLM experiment together with its evidence policy."""
+
+    llm_plan: LLMExperimentPlan
+    require_promotion_evidence: bool = True
+    evidence_contract: str = "tiered-causal-option-evidence-v1"
+
+    def __post_init__(self) -> None:
+        if not self.evidence_contract.strip():
+            raise ValueError("evidence_contract cannot be empty")
+
+    @property
+    def fingerprint(self) -> str:
+        return fingerprint_json(
+            {
+                "schema": "growthevo.shadow-benchmark-plan.v1",
+                "llm_plan_fingerprint": self.llm_plan.fingerprint,
+                "require_promotion_evidence": self.require_promotion_evidence,
+                "evidence_contract": self.evidence_contract,
+            }
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class LockedShadowBenchmarkRun:
     """Complete validation-selection + one-shot holdout shadow benchmark result."""
 
@@ -37,9 +61,18 @@ class LockedShadowBenchmarkRun:
     selected_candidate: LLMPolicyCandidate
     validation_decisions: tuple[LLMDecision, ...]
     holdout_decisions: tuple[LLMDecision, ...]
+    shadow_plan_fingerprint: str
     validation_evidence_fingerprint: str
     holdout_evidence_fingerprint: str
     evidence_manifest_fingerprint: str
+
+
+def _normalize_shadow_plan(
+    plan: LLMExperimentPlan | ShadowBenchmarkPlan,
+) -> ShadowBenchmarkPlan:
+    if isinstance(plan, ShadowBenchmarkPlan):
+        return plan
+    return ShadowBenchmarkPlan(llm_plan=plan, require_promotion_evidence=True)
 
 
 def _entry_map(
@@ -102,12 +135,14 @@ def _evidence_fingerprint(
     producer: CausalOptionEvidenceProducer,
     bundles: Sequence[CausalEvidenceBundle],
     require_promotion_evidence: bool,
+    shadow_plan_fingerprint: str,
 ) -> str:
     return fingerprint_json(
         {
             "schema": "growthevo.llm-evidence-manifest.v1",
             "split": split,
             "producer": {"name": producer.name, "version": producer.version},
+            "shadow_plan_fingerprint": shadow_plan_fingerprint,
             "require_promotion_evidence": require_promotion_evidence,
             "bundles": [
                 {
@@ -123,13 +158,12 @@ def _evidence_fingerprint(
 
 def run_locked_shadow_benchmark(
     *,
-    plan: LLMExperimentPlan,
+    plan: LLMExperimentPlan | ShadowBenchmarkPlan,
     entries: Sequence[ShadowPlannerEntry],
     producer: CausalOptionEvidenceProducer,
     validation_specs: Sequence[EvidenceCaseSpec],
     holdout_specs: Sequence[EvidenceCaseSpec],
     commit_sha: str,
-    require_promotion_evidence: bool = True,
 ) -> LockedShadowBenchmarkRun:
     """Run a locked semantic-policy tournament without exposing causal labels.
 
@@ -138,13 +172,18 @@ def run_locked_shadow_benchmark(
     model+harness variants. Evidence is constructed evaluator-side and
     ``collect_planner_decisions`` passes only ``belief`` and ``goal`` to planners.
 
-    Diagnostic runs may opt into Tier-C/D evidence, but such a run can never emit
-    ``promotion_eligible=True`` regardless of its observed score.
+    A plain ``LLMExperimentPlan`` is interpreted as promotion-grade evidence for
+    backwards compatibility. Diagnostic Tier-C/D runs must explicitly use a
+    ``ShadowBenchmarkPlan(require_promotion_evidence=False)``, making the evidence
+    policy part of the pre-registered shadow-plan fingerprint.
     """
 
     if not commit_sha.strip():
         raise ValueError("commit_sha cannot be empty")
-    registry = _entry_map(plan, entries)
+    shadow_plan = _normalize_shadow_plan(plan)
+    llm_plan = shadow_plan.llm_plan
+    require_promotion_evidence = shadow_plan.require_promotion_evidence
+    registry = _entry_map(llm_plan, entries)
 
     validation_cases, validation_bundles = _build_cases(
         validation_specs,
@@ -168,27 +207,29 @@ def run_locked_shadow_benchmark(
         producer=producer,
         bundles=validation_bundles,
         require_promotion_evidence=require_promotion_evidence,
+        shadow_plan_fingerprint=shadow_plan.fingerprint,
     )
     holdout_evidence_fingerprint = _evidence_fingerprint(
         split="holdout",
         producer=producer,
         bundles=holdout_bundles,
         require_promotion_evidence=require_promotion_evidence,
+        shadow_plan_fingerprint=shadow_plan.fingerprint,
     )
 
     validation_decisions: list[LLMDecision] = []
-    for candidate in plan.candidates:
+    for candidate in llm_plan.candidates:
         entry = registry[candidate.name]
         validation_decisions.extend(
             collect_planner_decisions(
                 candidate_name=candidate.name,
                 planner=entry.planner,
                 cases=validation_cases,
-                trials_per_case=plan.trials_per_case,
+                trials_per_case=llm_plan.trials_per_case,
             )
         )
 
-    protocol = LockedLLMPolicyProtocol(plan)
+    protocol = LockedLLMPolicyProtocol(llm_plan)
     winner = protocol.tune(validation_cases, tuple(validation_decisions))
 
     winner_entry = registry[winner.name]
@@ -196,7 +237,7 @@ def run_locked_shadow_benchmark(
         candidate_name=winner.name,
         planner=winner_entry.planner,
         cases=holdout_cases,
-        trials_per_case=plan.trials_per_case,
+        trials_per_case=llm_plan.trials_per_case,
     )
     holdout = protocol.evaluate_once(holdout_cases, holdout_decisions)
 
@@ -205,7 +246,8 @@ def run_locked_shadow_benchmark(
             "schema": "growthevo.llm-evidence-pair.v1",
             "validation": validation_evidence_fingerprint,
             "holdout": holdout_evidence_fingerprint,
-            "plan": plan.fingerprint,
+            "llm_plan": llm_plan.fingerprint,
+            "shadow_plan": shadow_plan.fingerprint,
             "selected_candidate": winner.name,
             "commit_sha": commit_sha,
         }
@@ -217,6 +259,7 @@ def run_locked_shadow_benchmark(
         "evidence_mode": (
             "promotion_grade" if require_promotion_evidence else "diagnostic_only"
         ),
+        "shadow_plan_fingerprint": shadow_plan.fingerprint,
         "validation_evidence_fingerprint": validation_evidence_fingerprint,
         "holdout_evidence_fingerprint": holdout_evidence_fingerprint,
         "evidence_manifest_fingerprint": evidence_manifest_fingerprint,
@@ -237,6 +280,7 @@ def run_locked_shadow_benchmark(
         selected_candidate=winner,
         validation_decisions=tuple(validation_decisions),
         holdout_decisions=holdout_decisions,
+        shadow_plan_fingerprint=shadow_plan.fingerprint,
         validation_evidence_fingerprint=validation_evidence_fingerprint,
         holdout_evidence_fingerprint=holdout_evidence_fingerprint,
         evidence_manifest_fingerprint=evidence_manifest_fingerprint,
