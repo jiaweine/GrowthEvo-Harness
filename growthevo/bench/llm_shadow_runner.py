@@ -167,10 +167,10 @@ def run_locked_shadow_benchmark(
 ) -> LockedShadowBenchmarkRun:
     """Run a locked semantic-policy tournament without exposing causal labels.
 
-    Every declared candidate is evaluated on validation. Only the frozen winner
-    is invoked on holdout, so the final causal split is never used to compare all
-    model+harness variants. Evidence is constructed evaluator-side and
-    ``collect_planner_decisions`` passes only ``belief`` and ``goal`` to planners.
+    Every declared candidate is evaluated on validation. Only after the
+    validation winner is frozen does the runner ask the evidence producer for the
+    holdout split. Only that frozen winner is then invoked on holdout. This keeps
+    final causal labels out of memory during candidate selection.
 
     A plain ``LLMExperimentPlan`` is interpreted as promotion-grade evidence for
     backwards compatibility. Diagnostic Tier-C/D runs must explicitly use a
@@ -185,34 +185,18 @@ def run_locked_shadow_benchmark(
     require_promotion_evidence = shadow_plan.require_promotion_evidence
     registry = _entry_map(llm_plan, entries)
 
+    # Validation evidence is the only causal evidence materialized before model
+    # selection. Holdout evidence is intentionally not requested yet.
     validation_cases, validation_bundles = _build_cases(
         validation_specs,
         producer,
         require_promotion_evidence=require_promotion_evidence,
     )
-    holdout_cases, holdout_bundles = _build_cases(
-        holdout_specs,
-        producer,
-        require_promotion_evidence=require_promotion_evidence,
-    )
-
     validation_ids = {case.case_id for case in validation_cases}
-    holdout_ids = {case.case_id for case in holdout_cases}
-    overlap = validation_ids.intersection(holdout_ids)
-    if overlap:
-        raise ValueError(f"validation and holdout case ids overlap: {sorted(overlap)[:3]}")
-
     validation_evidence_fingerprint = _evidence_fingerprint(
         split="validation",
         producer=producer,
         bundles=validation_bundles,
-        require_promotion_evidence=require_promotion_evidence,
-        shadow_plan_fingerprint=shadow_plan.fingerprint,
-    )
-    holdout_evidence_fingerprint = _evidence_fingerprint(
-        split="holdout",
-        producer=producer,
-        bundles=holdout_bundles,
         require_promotion_evidence=require_promotion_evidence,
         shadow_plan_fingerprint=shadow_plan.fingerprint,
     )
@@ -231,6 +215,24 @@ def run_locked_shadow_benchmark(
 
     protocol = LockedLLMPolicyProtocol(llm_plan)
     winner = protocol.tune(validation_cases, tuple(validation_decisions))
+
+    # Final evidence is revealed only after the winner is frozen.
+    holdout_cases, holdout_bundles = _build_cases(
+        holdout_specs,
+        producer,
+        require_promotion_evidence=require_promotion_evidence,
+    )
+    holdout_ids = {case.case_id for case in holdout_cases}
+    overlap = validation_ids.intersection(holdout_ids)
+    if overlap:
+        raise ValueError(f"validation and holdout case ids overlap: {sorted(overlap)[:3]}")
+    holdout_evidence_fingerprint = _evidence_fingerprint(
+        split="holdout",
+        producer=producer,
+        bundles=holdout_bundles,
+        require_promotion_evidence=require_promotion_evidence,
+        shadow_plan_fingerprint=shadow_plan.fingerprint,
+    )
 
     winner_entry = registry[winner.name]
     holdout_decisions = collect_planner_decisions(
