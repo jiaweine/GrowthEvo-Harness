@@ -39,9 +39,17 @@ class ClusterOutcomeSpec:
     def __post_init__(self) -> None:
         if not self.metric_name.strip():
             raise ValueError("metric_name cannot be empty")
-        if isinstance(self.window_seconds, bool) or not isinstance(self.window_seconds, int) or self.window_seconds <= 0:
+        if (
+            isinstance(self.window_seconds, bool)
+            or not isinstance(self.window_seconds, int)
+            or self.window_seconds <= 0
+        ):
             raise ValueError("window_seconds must be a positive integer")
-        if isinstance(self.max_events, bool) or not isinstance(self.max_events, int) or self.max_events <= 0:
+        if (
+            isinstance(self.max_events, bool)
+            or not isinstance(self.max_events, int)
+            or self.max_events <= 0
+        ):
             raise ValueError("max_events must be a positive integer")
         for name, value in (
             ("event_min", self.event_min),
@@ -69,10 +77,10 @@ class ClusterOutcomeSpec:
                 self.max_events * self.event_min,
                 self.max_events * self.event_max,
             )
-            required_min = min(possible)
-            required_max = max(possible)
-            if self.outcome_min > required_min or self.outcome_max < required_max:
-                raise ValueError("sum outcome bounds must contain all preregistered event-count sums")
+            if self.outcome_min > min(possible) or self.outcome_max < max(possible):
+                raise ValueError(
+                    "sum outcome bounds must contain all preregistered event-count sums"
+                )
         elif self.aggregation is ClusterAggregationMode.BINARY_ANY:
             if self.event_min < 0.0 or self.event_max > 1.0:
                 raise ValueError("binary_any event bounds must lie in [0, 1]")
@@ -155,6 +163,14 @@ class ClusterOutcomeResult:
 
 
 @dataclass(frozen=True, slots=True)
+class _FinalizedClusterOutcome:
+    value: float
+    event_count: int
+    finalized_at: int
+    result_fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
 class _ClusterRecord:
     token_hex: str
     assigned_to_challenger: bool
@@ -163,7 +179,7 @@ class _ClusterRecord:
     ticket_fingerprint: str
     events: tuple[tuple[str, int, float], ...] = ()
     event_tokens: frozenset[bytes] = frozenset()
-    finalized: ClusterOutcomeResult | None = None
+    finalized: _FinalizedClusterOutcome | None = None
 
 
 def _fingerprint(payload: Mapping[str, object]) -> str:
@@ -183,12 +199,7 @@ def _timestamp(value: int, name: str) -> int:
 
 
 class ClusterOutcomeAccumulator:
-    """Aggregates repeated events into exactly one randomized-cluster outcome.
-
-    Internal state stores only experiment-scoped cluster/event hashes. Raw IDs are
-    returned to the caller in tickets/results for routing integration but are not
-    retained in the internal records.
-    """
+    """Aggregates repeated events into exactly one randomized-cluster outcome."""
 
     def __init__(self, *, experiment_id: str, spec: ClusterOutcomeSpec) -> None:
         if not experiment_id.strip():
@@ -223,6 +234,20 @@ class ClusterOutcomeAccumulator:
             ticket_fingerprint=record.ticket_fingerprint,
         )
 
+    def _result(self, cluster_id: str, record: _ClusterRecord) -> ClusterOutcomeResult:
+        if record.finalized is None:
+            raise RuntimeError("cluster outcome is not finalized")
+        return ClusterOutcomeResult(
+            cluster_id=cluster_id,
+            assigned_to_challenger=record.assigned_to_challenger,
+            metric_name=self.spec.metric_name,
+            value=record.finalized.value,
+            event_count=record.finalized.event_count,
+            finalized_at=record.finalized.finalized_at,
+            ticket_fingerprint=record.ticket_fingerprint,
+            result_fingerprint=record.finalized.result_fingerprint,
+        )
+
     def register_cluster(
         self,
         cluster_id: str,
@@ -252,15 +277,14 @@ class ClusterOutcomeAccumulator:
                 "spec_fingerprint": self.spec.fingerprint,
             }
         )
-        record = _ClusterRecord(
+        self._records[token] = _ClusterRecord(
             token_hex=token.hex(),
             assigned_to_challenger=bool(assigned_to_challenger),
             exposure_at=exposure_at,
             window_end=window_end,
             ticket_fingerprint=ticket_fingerprint,
         )
-        self._records[token] = record
-        return self._ticket(cluster_id, record)
+        return self._ticket(cluster_id, self._records[token])
 
     def ingest_event(
         self,
@@ -289,14 +313,13 @@ class ClusterOutcomeAccumulator:
             raise ValueError("event_id has already been ingested for this cluster")
         if len(record.events) >= self.spec.max_events:
             raise ValueError("cluster exceeded preregistered max_events")
-        encoded_event = (event_token.hex(), event_at, value)
         self._records[token] = _ClusterRecord(
             token_hex=record.token_hex,
             assigned_to_challenger=record.assigned_to_challenger,
             exposure_at=record.exposure_at,
             window_end=record.window_end,
             ticket_fingerprint=record.ticket_fingerprint,
-            events=record.events + (encoded_event,),
+            events=record.events + ((event_token.hex(), event_at, value),),
             event_tokens=record.event_tokens | frozenset((event_token,)),
         )
 
@@ -327,7 +350,7 @@ class ClusterOutcomeAccumulator:
         if record.finalized is not None:
             if record.finalized.finalized_at != as_of:
                 raise ValueError("cluster finalization timestamp cannot change")
-            return record.finalized
+            return self._result(cluster_id, record)
         if as_of < record.window_end:
             raise ValueError("cluster outcome window is not mature")
         value = self._aggregate(record)
@@ -343,14 +366,10 @@ class ClusterOutcomeAccumulator:
                 "finalized_at": as_of,
             }
         )
-        result = ClusterOutcomeResult(
-            cluster_id=cluster_id,
-            assigned_to_challenger=record.assigned_to_challenger,
-            metric_name=self.spec.metric_name,
+        finalized = _FinalizedClusterOutcome(
             value=value,
             event_count=len(event_manifest),
             finalized_at=as_of,
-            ticket_fingerprint=record.ticket_fingerprint,
             result_fingerprint=result_fingerprint,
         )
         self._records[token] = _ClusterRecord(
@@ -361,9 +380,9 @@ class ClusterOutcomeAccumulator:
             ticket_fingerprint=record.ticket_fingerprint,
             events=record.events,
             event_tokens=record.event_tokens,
-            finalized=result,
+            finalized=finalized,
         )
-        return result
+        return self._result(cluster_id, self._records[token])
 
     def event_count(self, cluster_id: str) -> int:
         token = self._cluster_token(cluster_id)
