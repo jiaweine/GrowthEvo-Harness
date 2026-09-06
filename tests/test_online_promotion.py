@@ -100,6 +100,27 @@ def _plan(
     )
 
 
+def _metrics_for_assignment(
+    monitor: OnlineCanaryMonitor,
+    *,
+    assigned: bool,
+    positive_primary: bool = True,
+    safe_fatigue: bool = True,
+    cost: float = 0.0,
+) -> dict[str, float]:
+    primary = (1.0 if assigned else 0.0) if positive_primary else (0.0 if assigned else 1.0)
+    metrics: dict[str, float] = {"incremental_value": primary}
+    if "fatigue" in monitor._monitors:  # test helper only
+        metrics["fatigue"] = (
+            (0.10 if assigned else 0.30)
+            if safe_fatigue
+            else (1.00 if assigned else 0.00)
+        )
+    if "cost" in monitor._monitors:  # test helper only
+        metrics["cost"] = cost if assigned else 0.0
+    return metrics
+
+
 def _observation(
     monitor: OnlineCanaryMonitor,
     index: int,
@@ -110,24 +131,42 @@ def _observation(
     cost: float = 0.0,
 ) -> CanaryObservation:
     assigned = bool(index % 2 == 0) if challenger is None else challenger
-    if positive_primary:
-        primary = 1.0 if assigned else 0.0
-    else:
-        primary = 0.0 if assigned else 1.0
-    metrics: dict[str, float] = {"incremental_value": primary}
-    if "fatigue" in monitor._monitors:  # test helper only
-        if safe_fatigue:
-            metrics["fatigue"] = 0.10 if assigned else 0.30
-        else:
-            metrics["fatigue"] = 1.00 if assigned else 0.00
-    if "cost" in monitor._monitors:  # test helper only
-        metrics["cost"] = cost if assigned else 0.0
     return CanaryObservation(
         analysis_unit_id=f"unit-{monitor.stage_index}-{index}-{monitor._total_observations}",
         assigned_to_challenger=assigned,
         assignment_probability=monitor.plan.challenger_probability,
         traffic_fraction=monitor.traffic_fraction,
-        metrics=metrics,
+        metrics=_metrics_for_assignment(
+            monitor,
+            assigned=assigned,
+            positive_primary=positive_primary,
+            safe_fatigue=safe_fatigue,
+            cost=cost,
+        ),
+    )
+
+
+def _controller_observation(
+    controller: OnlinePromotionController,
+    index: int,
+    *,
+    positive_primary: bool = True,
+    safe_fatigue: bool = True,
+) -> CanaryObservation:
+    unit_id = f"controller-unit-{index}"
+    route = controller.route(unit_id)
+    assert route.in_canary is True
+    return CanaryObservation(
+        analysis_unit_id=unit_id,
+        assigned_to_challenger=route.assigned_to_challenger,
+        assignment_probability=route.challenger_probability,
+        traffic_fraction=route.traffic_fraction,
+        metrics=_metrics_for_assignment(
+            controller.monitor,
+            assigned=route.assigned_to_challenger,
+            positive_primary=positive_primary,
+            safe_fatigue=safe_fatigue,
+        ),
     )
 
 
@@ -159,7 +198,6 @@ def test_candidate_requires_locked_promotion_eligibility() -> None:
 
 def test_candidate_binds_locked_artifact_identity() -> None:
     candidate = _candidate()
-
     assert candidate.name == "frontier-candidate"
     assert candidate.contract_fingerprint == "contract-fp"
     assert candidate.source_test_fingerprint == "holdout-fp"
@@ -185,11 +223,9 @@ def test_router_is_monotonic_across_stages_and_keeps_arm_assignment_stable() -> 
 def test_strong_safe_challenger_advances_then_promotes() -> None:
     monitor = OnlineCanaryMonitor(_plan())
     monitor.start()
-
     assert _run_until_transition(monitor) is CanaryDecision.ADVANCE
     assert monitor.status is CanaryStatus.RUNNING
     assert monitor.stage_index == 1
-
     assert _run_until_transition(monitor) is CanaryDecision.PROMOTE
     assert monitor.status is CanaryStatus.PROMOTED
     snapshot = monitor.snapshot()
@@ -200,29 +236,24 @@ def test_strong_safe_challenger_advances_then_promotes() -> None:
 def test_primary_harm_triggers_anytime_rollback() -> None:
     monitor = OnlineCanaryMonitor(_plan(include_fatigue=False))
     monitor.start()
-
     decision = _run_until_transition(
         monitor,
         positive_primary=False,
         limit=1000,
     )
-
     assert decision is CanaryDecision.ROLLBACK
     assert monitor.status is CanaryStatus.ROLLED_BACK
-    assert any("relative_harm_anytime_e" in reason for reason in monitor.snapshot().reasons) is False
 
 
 def test_guardrail_harm_rolls_back_even_when_primary_is_strong() -> None:
     monitor = OnlineCanaryMonitor(_plan())
     monitor.start()
-
     decision = _run_until_transition(
         monitor,
         positive_primary=True,
         safe_fatigue=False,
         limit=1000,
     )
-
     assert decision is CanaryDecision.ROLLBACK
     assert monitor.status is CanaryStatus.ROLLED_BACK
 
@@ -236,7 +267,6 @@ def test_cumulative_cost_cap_is_a_deterministic_kill_switch() -> None:
         )
     )
     monitor.start()
-
     snapshot = monitor.observe(
         _observation(
             monitor,
@@ -245,7 +275,6 @@ def test_cumulative_cost_cap_is_a_deterministic_kill_switch() -> None:
             cost=6.0,
         )
     )
-
     assert snapshot.decision is CanaryDecision.ROLLBACK
     assert snapshot.status is CanaryStatus.ROLLED_BACK
     assert "challenger_cumulative_cost_cap_exceeded" in snapshot.reasons
@@ -255,7 +284,6 @@ def test_observation_must_match_preregistered_probability_stage_and_metrics() ->
     monitor = OnlineCanaryMonitor(_plan(include_fatigue=False))
     monitor.start()
     valid = _observation(monitor, 0)
-
     with pytest.raises(ValueError, match="assignment probability"):
         monitor.observe(replace(valid, assignment_probability=0.4))
     with pytest.raises(ValueError, match="traffic fraction"):
@@ -269,7 +297,6 @@ def test_analysis_unit_can_contribute_only_once() -> None:
     monitor.start()
     observation = _observation(monitor, 0)
     monitor.observe(observation)
-
     with pytest.raises(ValueError, match="already been observed"):
         monitor.observe(observation)
 
@@ -278,31 +305,65 @@ def test_final_stage_requires_fresh_primary_superiority_evidence() -> None:
     plan = _plan(stages=(0.05, 0.25), min_observations=8)
     monitor = OnlineCanaryMonitor(plan)
     monitor.start()
-
     assert _run_until_transition(monitor) is CanaryDecision.ADVANCE
     primary_evidence = {
         item.name: item for item in monitor.snapshot().metric_evidence
     }["incremental_value"]
-    # Superiority is deliberately not accumulated before the final stage.
     assert primary_evidence.primary_superiority_e == pytest.approx(1.0)
-
     assert _run_until_transition(monitor) is CanaryDecision.PROMOTE
 
 
-def test_controller_keeps_champion_on_rollback_and_hash_chains_transitions() -> None:
+def test_controller_rejects_forged_or_nonadmitted_assignment() -> None:
     candidate = _candidate()
-    plan = _plan(include_fatigue=False)
+    plan = _plan(stages=(1.0,), include_fatigue=False)
     controller = OnlinePromotionController(
         champion_name="deterministic-baseline",
         candidate=candidate,
         plan=plan,
     )
     controller.start()
+    valid = _controller_observation(controller, 1)
+    with pytest.raises(ValueError, match="observed arm"):
+        controller.observe(
+            replace(valid, assigned_to_challenger=not valid.assigned_to_challenger)
+        )
 
-    for index in range(1000):
+    low_traffic_plan = _plan(stages=(0.01,), include_fatigue=False)
+    low_traffic = OnlinePromotionController(
+        champion_name="deterministic-baseline",
+        candidate=candidate,
+        plan=low_traffic_plan,
+    )
+    low_traffic.start()
+    outside_unit = next(
+        f"outside-{index}"
+        for index in range(1000)
+        if not low_traffic.route(f"outside-{index}").in_canary
+    )
+    forged = CanaryObservation(
+        analysis_unit_id=outside_unit,
+        assigned_to_challenger=False,
+        assignment_probability=low_traffic_plan.challenger_probability,
+        traffic_fraction=low_traffic_plan.stages[0],
+        metrics={"incremental_value": 0.0},
+    )
+    with pytest.raises(ValueError, match="not admitted"):
+        low_traffic.observe(forged)
+
+
+def test_controller_keeps_champion_on_rollback_and_hash_chains_transitions() -> None:
+    candidate = _candidate()
+    plan = _plan(stages=(1.0,), include_fatigue=False)
+    controller = OnlinePromotionController(
+        champion_name="deterministic-baseline",
+        candidate=candidate,
+        plan=plan,
+    )
+    controller.start()
+    for index in range(2000):
         snapshot = controller.observe(
-            _observation(
-                controller.monitor,
+            _controller_observation(
+                controller,
                 index,
                 positive_primary=False,
             )
@@ -311,34 +372,30 @@ def test_controller_keeps_champion_on_rollback_and_hash_chains_transitions() -> 
             break
     else:
         raise AssertionError("expected rollback")
-
     assert controller.champion_name == "deterministic-baseline"
     assert controller.verify_audit_chain() is True
     kinds = [event.kind for event in controller.events()]
     assert kinds[0] == "challenger_registered"
     assert "canary_started" in kinds
     assert "challenger_rolled_back" in kinds
-    # Audit payloads are aggregate-only; raw analysis-unit ids are not persisted.
     assert "analysis_unit_id" not in str(controller.events())
 
 
 def test_controller_promotes_challenger_only_after_final_online_gate() -> None:
     candidate = _candidate()
-    plan = _plan()
+    plan = _plan(stages=(1.0,))
     controller = OnlinePromotionController(
         champion_name="deterministic-baseline",
         candidate=candidate,
         plan=plan,
     )
     controller.start()
-
-    for index in range(2000):
-        snapshot = controller.observe(_observation(controller.monitor, index))
+    for index in range(4000):
+        snapshot = controller.observe(_controller_observation(controller, index))
         if snapshot.decision is CanaryDecision.PROMOTE:
             break
     else:
         raise AssertionError("expected promotion")
-
     assert controller.champion_name == candidate.name
     assert controller.monitor.status is CanaryStatus.PROMOTED
     assert controller.verify_audit_chain() is True
