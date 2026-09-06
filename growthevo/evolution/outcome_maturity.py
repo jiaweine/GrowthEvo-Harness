@@ -28,13 +28,17 @@ class OutcomeMaturitySpec:
             raise ValueError("endpoint_name cannot be empty")
         if not self.clock_contract.strip():
             raise ValueError("clock_contract cannot be empty")
-        if isinstance(self.maturity_delay_seconds, bool) or self.maturity_delay_seconds <= 0:
+        if (
+            isinstance(self.maturity_delay_seconds, bool)
+            or not isinstance(self.maturity_delay_seconds, int)
+            or self.maturity_delay_seconds <= 0
+        ):
             raise ValueError("maturity_delay_seconds must be a positive integer")
-        if not isinstance(self.maturity_delay_seconds, int):
-            raise ValueError("maturity_delay_seconds must be a positive integer")
-        if isinstance(self.ingestion_grace_seconds, bool) or self.ingestion_grace_seconds < 0:
-            raise ValueError("ingestion_grace_seconds must be a non-negative integer")
-        if not isinstance(self.ingestion_grace_seconds, int):
+        if (
+            isinstance(self.ingestion_grace_seconds, bool)
+            or not isinstance(self.ingestion_grace_seconds, int)
+            or self.ingestion_grace_seconds < 0
+        ):
             raise ValueError("ingestion_grace_seconds must be a non-negative integer")
 
     @property
@@ -143,18 +147,29 @@ def _timestamp(value: int, field_name: str) -> int:
     return value
 
 
+def _receipt_fingerprint(
+    *,
+    ticket_fingerprint: str,
+    observed_at: int,
+    outcome_fingerprint: str,
+) -> str:
+    return _fingerprint(
+        {
+            "schema": "growthevo.outcome-receipt.v1",
+            "ticket_fingerprint": ticket_fingerprint,
+            "observed_at": observed_at,
+            "outcome_fingerprint": outcome_fingerprint,
+        }
+    )
+
+
 class OutcomeMaturityLedger:
     """Privacy-preserving cohort ledger for delayed primary outcomes.
 
-    The ledger never stores raw analysis-unit IDs. The caller receives a ticket
-    carrying the raw ID for transport, while internal state is keyed by a
-    deterministic experiment-scoped BLAKE2 token.
-
-    The v1 complete-case authority is intentionally strict: after enrollment is
-    closed, every frozen unit must complete the preregistered follow-up and its
-    endpoint must arrive no later than the frozen ingestion cutoff. Missing or
-    late endpoints require a different estimand/protocol rather than silent
-    deletion from the analysis population.
+    The v1 complete-case authority is intentionally strict. After enrollment is
+    frozen, every analysis unit must finish the preregistered follow-up and its
+    endpoint must arrive by the preregistered ingestion cutoff. Missing or late
+    endpoints require a different estimand/protocol rather than silent deletion.
     """
 
     def __init__(self, *, experiment_id: str, spec: OutcomeMaturitySpec) -> None:
@@ -250,17 +265,18 @@ class OutcomeMaturityLedger:
 
         maturity_at = exposure_at + self.spec.maturity_delay_seconds
         accept_until = maturity_at + self.spec.ingestion_grace_seconds
-        ticket_payload = {
-            "schema": "growthevo.outcome-maturity-ticket.v1",
-            "experiment_id": self.experiment_id,
-            "unit_token": token.hex(),
-            "assigned_to_challenger": bool(assigned_to_challenger),
-            "exposure_at": exposure_at,
-            "maturity_at": maturity_at,
-            "accept_until": accept_until,
-            "maturity_spec_fingerprint": self.spec.fingerprint,
-        }
-        ticket_fingerprint = _fingerprint(ticket_payload)
+        ticket_fingerprint = _fingerprint(
+            {
+                "schema": "growthevo.outcome-maturity-ticket.v1",
+                "experiment_id": self.experiment_id,
+                "unit_token": token.hex(),
+                "assigned_to_challenger": bool(assigned_to_challenger),
+                "exposure_at": exposure_at,
+                "maturity_at": maturity_at,
+                "accept_until": accept_until,
+                "maturity_spec_fingerprint": self.spec.fingerprint,
+            }
+        )
         record = _MaturityRecord(
             unit_token_hex=token.hex(),
             assigned_to_challenger=bool(assigned_to_challenger),
@@ -320,15 +336,13 @@ class OutcomeMaturityLedger:
         record = self._records.get(token)
         if record is None:
             raise ValueError("analysis unit was not registered for maturity tracking")
+        candidate_fingerprint = _receipt_fingerprint(
+            ticket_fingerprint=record.ticket_fingerprint,
+            observed_at=observed_at,
+            outcome_fingerprint=outcome_fingerprint,
+        )
         if record.receipt is not None:
-            candidate = _fingerprint(
-                {
-                    "ticket_fingerprint": record.ticket_fingerprint,
-                    "observed_at": observed_at,
-                    "outcome_fingerprint": outcome_fingerprint,
-                }
-            )
-            if candidate != record.receipt.receipt_fingerprint:
+            if candidate_fingerprint != record.receipt.receipt_fingerprint:
                 raise ValueError("outcome receipt changed after first acceptance")
             return record.receipt
         if observed_at < record.maturity_at:
@@ -336,19 +350,11 @@ class OutcomeMaturityLedger:
         if observed_at > record.accept_until:
             raise ValueError("outcome arrived after preregistered ingestion cutoff")
 
-        receipt_fingerprint = _fingerprint(
-            {
-                "schema": "growthevo.outcome-receipt.v1",
-                "ticket_fingerprint": record.ticket_fingerprint,
-                "observed_at": observed_at,
-                "outcome_fingerprint": outcome_fingerprint,
-            }
-        )
         receipt = OutcomeReceipt(
             ticket_fingerprint=record.ticket_fingerprint,
             observed_at=observed_at,
             outcome_fingerprint=outcome_fingerprint,
-            receipt_fingerprint=receipt_fingerprint,
+            receipt_fingerprint=candidate_fingerprint,
         )
         self._records[token] = _MaturityRecord(
             unit_token_hex=record.unit_token_hex,
@@ -372,25 +378,26 @@ class OutcomeMaturityLedger:
 
     def snapshot(self, *, as_of: int) -> OutcomeMaturitySnapshot:
         as_of = _timestamp(as_of, "as_of")
-        states = [self._state(record, as_of=as_of) for record in self._records.values()]
+        records = tuple(self._records.values())
+        states = [self._state(record, as_of=as_of) for record in records]
         matured = sum(state is OutcomeFollowupState.MATURED_ON_TIME for state in states)
         pending = sum(state is OutcomeFollowupState.PENDING_FOLLOWUP for state in states)
         awaiting = sum(state is OutcomeFollowupState.AWAITING_INGESTION for state in states)
         overdue = sum(state is OutcomeFollowupState.OVERDUE_MISSING for state in states)
-        challenger_units = sum(record.assigned_to_challenger for record in self._records.values())
+        challenger_units = sum(record.assigned_to_challenger for record in records)
         challenger_matured = sum(
             record.assigned_to_challenger and record.receipt is not None
-            for record in self._records.values()
+            for record in records
         )
         control_matured = sum(
             (not record.assigned_to_challenger) and record.receipt is not None
-            for record in self._records.values()
+            for record in records
         )
 
         reasons: list[str] = []
         if self._enrollment_closed_at is None:
             reasons.append("enrollment_not_closed")
-        if not self._records:
+        if not records:
             reasons.append("empty_analysis_cohort")
         ready_at = self.required_ready_at
         if ready_at is not None and as_of < ready_at:
@@ -401,16 +408,16 @@ class OutcomeMaturityLedger:
             reasons.append("matured_outcomes_awaiting_ingestion")
         if overdue:
             reasons.append("outcomes_missing_after_preregistered_cutoff")
-        if matured != len(self._records):
+        if matured != len(records):
             reasons.append("complete_case_cohort_incomplete")
 
         return OutcomeMaturitySnapshot(
             as_of=as_of,
             enrollment_closed=self._enrollment_closed_at is not None,
             enrollment_closed_at=self._enrollment_closed_at,
-            total_units=len(self._records),
+            total_units=len(records),
             challenger_units=challenger_units,
-            control_units=len(self._records) - challenger_units,
+            control_units=len(records) - challenger_units,
             matured_on_time=matured,
             pending_followup=pending,
             awaiting_ingestion=awaiting,
@@ -462,11 +469,12 @@ class OutcomeMaturityLedger:
                 + ",".join(snapshot.reasons)
             )
         assert self._enrollment_closed_at is not None
+        cohort_fingerprint = self.cohort_fingerprint
         seal_payload = {
             "schema": "growthevo.complete-case-maturity-seal.v1",
             "endpoint_name": self.spec.endpoint_name,
             "maturity_spec_fingerprint": self.spec.fingerprint,
-            "cohort_fingerprint": self.cohort_fingerprint,
+            "cohort_fingerprint": cohort_fingerprint,
             "enrollment_closed_at": self._enrollment_closed_at,
             "analysis_as_of": snapshot.as_of,
             "total_units": snapshot.total_units,
@@ -477,7 +485,7 @@ class OutcomeMaturityLedger:
         seal = CompleteCaseMaturitySeal(
             endpoint_name=self.spec.endpoint_name,
             maturity_spec_fingerprint=self.spec.fingerprint,
-            cohort_fingerprint=self.cohort_fingerprint,
+            cohort_fingerprint=cohort_fingerprint,
             enrollment_closed_at=self._enrollment_closed_at,
             analysis_as_of=snapshot.as_of,
             total_units=snapshot.total_units,
