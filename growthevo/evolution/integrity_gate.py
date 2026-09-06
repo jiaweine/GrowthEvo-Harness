@@ -26,6 +26,16 @@ from .sequential_causal import (
 )
 
 
+def _fingerprint(payload: Mapping[str, object]) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return blake2b(encoded, digest_size=20).hexdigest()
+
+
 class IntegrityStatus(str, Enum):
     CLEAR = "clear"
     BLOCKED = "blocked"
