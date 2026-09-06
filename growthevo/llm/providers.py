@@ -169,12 +169,8 @@ class GeminiStructuredClient:
             contents=user,
             config={
                 "system_instruction": system,
-                "response_format": {
-                    "text": {
-                        "mime_type": "application/json",
-                        "schema": dict(schema),
-                    }
-                },
+                "response_mime_type": "application/json",
+                "response_json_schema": dict(schema),
                 "temperature": 0,
             },
         )

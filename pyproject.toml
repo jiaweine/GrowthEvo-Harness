@@ -59,12 +59,12 @@ llm-anthropic = [
   "anthropic>=0.60",
 ]
 llm-gemini = [
-  "google-genai>=1.0",
+  "google-genai>=2.22.0",
 ]
 llm = [
   "openai>=2.0",
   "anthropic>=0.60",
-  "google-genai>=1.0",
+  "google-genai>=2.22.0",
 ]
 
 [tool.setuptools.dynamic]

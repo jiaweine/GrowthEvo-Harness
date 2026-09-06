@@ -16,6 +16,9 @@ GrowthEvo-Harness provides an integrated causal decision stack for incremental u
 | **Long-horizon planning** | Stateful stochastic rollout, downside CVaR, stress scenarios, and constraint-aware MPC |
 | **Trajectory credit** | Potential shaping, GAE, and dynamics-aware credit boundaries |
 | **Benchmark bridges** | Criteo Uplift, Open Bandit Dataset, KuaiRand, and GrowthAgentBench |
+| **Optional LLM proposals** | Provider adapters, guarded semantic proposals, shadow candidate factory, model+harness fingerprints |
+| **Causal LLM evaluation** | Typed evidence tiers, validation-only candidate selection, deferred one-shot holdout |
+| **Online promotion** | In-memory randomized canary controllers, continuous safety, frozen CUPED, planned sequential success and terminal rollback |
 
 ## Runtime and decision contracts
 
@@ -25,6 +28,16 @@ GrowthEvo-Harness provides an integrated causal decision stack for incremental u
 - Legal-action gates cover consent, budget, offer limits, fatigue, churn risk, and frequency caps.
 - The event layer uses append-only hash-chained records for decision and evaluation provenance.
 - Harness evolution operates through bounded, reviewable proposal coordinates.
+
+## Optional LLM and online promotion
+
+The guarded proposal layer supports OpenAI, Anthropic, and Gemini through optional SDK adapters. It proposes only semantic growth options; the default runtime planner, numeric policy, legal gates, and existing evidence contracts remain authoritative.
+
+The locked shadow runner binds typed causal evidence to exact model+harness identities, freezes one validation winner, and accesses final holdout evidence afterward. Diagnostic Tier-C/D results cannot create promotable online candidates.
+
+The online controllers provide stable randomized routing, one outcome per analysis unit, continuous safety monitoring, and hashed aggregate audit events. The advanced controller adds registered first-exposure stages, frozen CUPED, and planned primary-success looks. Promotion requires primary and safety gates at the same planned look; the final sample budget ends in promotion or rollback. Invalid metric mappings or unrepresentable adjusted statistics are rejected before state changes.
+
+These components have synthetic end-to-end coverage from the actual guarded provider adapter and shadow candidate factory through locked evidence into online promotion, null-result rollback, harm rollback, and diagnostic-evidence rejection. They are in-memory reference components: durable execution, serialized ingestion, production data collection, and real model promotion evidence remain integration responsibilities.
 
 ## Causal learning and serving
 

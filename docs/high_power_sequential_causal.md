@@ -6,7 +6,7 @@ The design goal is narrower:
 
 > when a credible final-stage sample size can be pre-registered, use fewer planned success looks and frozen pre-exposure variance reduction to obtain more power without weakening continuous safety monitoring.
 
-The original `OnlinePromotionController` remains unchanged. The advanced path is enabled only by constructing `HighPowerOnlinePromotionController` with a `HighPowerCanaryPlan`.
+The original `OnlinePromotionController` retains its anytime-valid success gate. The advanced path is enabled only by constructing `HighPowerOnlinePromotionController` with a `HighPowerCanaryPlan`.
 
 ## Split the safety question from the success question
 
@@ -55,6 +55,8 @@ The dependency-free reference implementation computes a Welch-style one-sided z 
 
 The implementation deliberately uses each incremental alpha allocation as a per-look rejection threshold. The allocations sum to no more than the configured family alpha, so this reference is conservative without requiring SciPy or a multivariate-normal integration dependency.
 
+Sample and arm-count limits must be integers. The O'Brien-Fleming-shaped schedule requires `alpha < 0.5` so cumulative spending is monotone. Gaussian upper tails use [`math.erfc`](https://docs.python.org/3/library/math.html#math.erfc) to avoid cancellation from subtracting a CDF near one. A look with zero representable alpha allocation cannot authorize success. Small nonzero standard errors retain their actual scale rather than being treated as deterministic outcomes.
+
 It is **not** presented as an exact Lan-DeMets correlated-boundary implementation. A production platform with a validated numerical statistics stack can add an exact boundary calculator behind a new fingerprinted protocol identity.
 
 ## Why a separate protocol identity matters
@@ -70,7 +72,7 @@ Changing from always-valid inference to group-sequential inference changes the s
 
 A change to expected sample size, look schedule, alpha, CUPED coefficient, CUPED centering, source reference data, or analysis unit creates a different plan fingerprint.
 
-The current fingerprint schema is `growthevo.high-power-canary-plan.v2`. It binds the first-admitted exposure-stage contract described below. Identical plan parameters under the earlier v1 controller therefore do not share this protocol identity.
+The current fingerprint schema is `growthevo.high-power-canary-plan.v3`. It binds first-admitted exposure stages, promotion only at planned looks, the final sample-budget stop, and the numerical testing contract. Earlier v1/v2 controllers therefore do not share this protocol identity even with identical plan parameters.
 
 ## Frozen CUPED variance reduction
 
@@ -87,6 +89,8 @@ The coefficient `theta`, center, covariate bounds, and source fingerprint must b
 The online controller does not refit CUPED after interim looks. This is intentional. Changing covariate adjustment after seeing interim data can invalidate group-sequential Type-I-error guarantees and can create biased or anti-conservative inference.
 
 If the frozen covariate is missing, non-finite, or outside its pre-registered bounds, the advanced primary analysis fails closed for that observation instead of silently imputing or clipping it.
+
+Both canary paths snapshot caller-owned metric mappings and revalidate every metric before updating deduplication, counters, costs, or safety evidence. The advanced path also snapshots covariates and preflights adjusted values, running moments, and the effect estimate for arithmetic overflow. Rejected observations leave the statistical state unchanged and can be corrected and retried.
 
 ## Delayed outcomes: freeze the exposure stage
 
@@ -139,10 +143,13 @@ Earlier-stage units still contribute to safety/non-inferiority evidence, but the
 During the final stage:
 
 - if continuous safety evidence detects harm, rollback immediately;
-- if a planned primary look crosses its allocated success threshold and all safety gates pass, promote the challenger;
-- if the final planned look is exhausted without superiority, stop the challenger and keep the original champion.
+- if the newly completed planned primary look crosses its allocated success threshold and all safety gates pass at that look, promote the challenger;
+- if an interim look passes primary superiority while safety remains unresolved, continue to the next pre-registered look; later safety evidence alone cannot trigger promotion between looks;
+- at the final planned sample count, stop unless the joint primary and safety gate passes. Missing superiority or unresolved safety both retain the original champion.
 
-The last case is represented as a fail-closed rollback because the candidate has consumed its pre-registered success budget without earning promotion authority.
+An early primary crossing does not carry success into a later failed look. `GroupSequentialEvidence.success` describes the most recent look, and each later look spends only its own allocation. The primary monitor accepts no observations after its final planned look.
+
+Budget exhaustion is represented as a fail-closed rollback because the candidate has consumed its pre-registered success budget without earning promotion authority. The controller's terminal state rejects further outcomes and enrollment; it cannot silently extend the experiment while waiting for safety.
 
 ## Sequential-estimation caveat
 

@@ -120,6 +120,8 @@ pip install -e '.[llm-gemini]'
 pip install -e '.[llm]'
 ```
 
+The Gemini extra requires `google-genai>=2.22.0`, the validated SDK floor for this adapter. Its `models.generate_content` request uses `response_mime_type="application/json"` and `response_json_schema`; `response_format` belongs to a different request surface. CI validates both proposal and critic requests with the real SDK's `GenerateContentConfig`, using a fake transport and no credentials or API calls.
+
 ## OpenAI example
 
 Pin a model identifier that has passed your own evals; do not silently move production traffic

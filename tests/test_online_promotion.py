@@ -196,6 +196,25 @@ def test_candidate_requires_locked_promotion_eligibility() -> None:
         CanaryCandidate.from_locked_artifact(_artifact(eligible=False))
 
 
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf"), 1.1])
+def test_invalid_later_metric_preserves_all_state_and_can_be_retried(invalid_value) -> None:
+    controller = OnlinePromotionController(
+        champion_name="baseline", candidate=_candidate(),
+        plan=_plan(stages=(1.0,), min_observations=100),
+    )
+    controller.start()
+    observation = _controller_observation(controller, 0)
+    observation.metrics["fatigue"] = invalid_value
+    before = controller.monitor.snapshot()
+    events_before = controller.events()
+    with pytest.raises(ValueError):
+        controller.observe(observation)
+    assert controller.monitor.snapshot() == before
+    assert controller.events() == events_before
+    observation.metrics["fatigue"] = 0.1
+    assert controller.observe(observation).total_observations == 1
+
+
 def test_candidate_binds_locked_artifact_identity() -> None:
     candidate = _candidate()
     assert candidate.name == "frontier-candidate"

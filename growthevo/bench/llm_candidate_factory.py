@@ -60,7 +60,7 @@ class LLMEndpointSpec:
         else:
             # Gemini adapter currently pins temperature=0 and strict JSON schema
             # in code; those settings are captured by the factory schema/version.
-            base["structured_output_mode"] = "json_schema_temperature_0"
+            base["structured_output_mode"] = "generate_content_response_json_schema_temperature_0"
         return base
 
 

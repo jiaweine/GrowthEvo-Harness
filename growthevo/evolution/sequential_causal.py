@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from hashlib import blake2b
 import json
-from math import ceil, inf, isfinite, sqrt
+from math import ceil, erfc, inf, isfinite, sqrt
 from statistics import NormalDist
 from typing import Literal, Mapping
 
@@ -55,6 +55,8 @@ class FrozenCUPEDSpec:
             raise ValueError("center must lie inside the frozen covariate bounds")
 
     def adjust(self, outcome: float, covariates: Mapping[str, float]) -> float:
+        if not isfinite(outcome):
+            raise ValueError("CUPED outcome must be finite")
         if self.covariate_name not in covariates:
             raise ValueError(f"missing frozen CUPED covariate: {self.covariate_name}")
         value = float(covariates[self.covariate_name])
@@ -62,7 +64,10 @@ class FrozenCUPEDSpec:
             raise ValueError("CUPED covariate must be finite")
         if value < self.covariate_min - 1e-12 or value > self.covariate_max + 1e-12:
             raise ValueError("CUPED covariate is outside pre-registered bounds")
-        return outcome - self.theta * (value - self.center)
+        adjusted = outcome - self.theta * (value - self.center)
+        if not isfinite(adjusted):
+            raise ValueError("CUPED adjusted outcome must be finite")
+        return adjusted
 
     @property
     def fingerprint(self) -> str:
@@ -91,6 +96,12 @@ class GroupSequentialSpec:
     min_arm_observations: int = 20
 
     def __post_init__(self) -> None:
+        for name, value in (
+            ("expected_final_stage_observations", self.expected_final_stage_observations),
+            ("min_arm_observations", self.min_arm_observations),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer")
         if self.expected_final_stage_observations <= 0:
             raise ValueError("expected_final_stage_observations must be positive")
         if not self.look_fractions:
@@ -112,6 +123,8 @@ class GroupSequentialSpec:
             raise ValueError("alpha must be in (0, 1)")
         if self.spending not in {"equal", "obrien_fleming"}:
             raise ValueError("unsupported group-sequential spending rule")
+        if self.spending == "obrien_fleming" and self.alpha >= 0.5:
+            raise ValueError("O'Brien-Fleming alpha must be below 0.5")
         if self.min_arm_observations < 2:
             raise ValueError("min_arm_observations must be at least 2")
 
@@ -127,10 +140,11 @@ class GroupSequentialSpec:
             raise ValueError("look_index outside pre-registered looks")
         if self.spending == "equal":
             return self.alpha * (look_index + 1) / len(self.look_fractions)
+        if look_index == len(self.look_fractions) - 1:
+            return self.alpha
         fraction = self.look_fractions[look_index]
-        normal = NormalDist()
-        z_alpha = normal.inv_cdf(1.0 - self.alpha)
-        return 1.0 - normal.cdf(z_alpha / sqrt(fraction))
+        z_alpha = -NormalDist().inv_cdf(self.alpha)
+        return 0.5 * erfc(z_alpha / sqrt(2.0 * fraction))
 
     def incremental_alpha(self, look_index: int) -> float:
         current = self.cumulative_alpha(look_index)
@@ -163,7 +177,7 @@ class HighPowerCanaryPlan:
     @property
     def fingerprint(self) -> str:
         payload = {
-            "schema": "growthevo.high-power-canary-plan.v2",
+            "schema": "growthevo.high-power-canary-plan.v3",
             "base_plan": asdict(self.base_plan),
             "group_sequential": asdict(self.group_sequential),
             "cuped": asdict(self.cuped) if self.cuped is not None else None,
@@ -303,6 +317,8 @@ class GroupSequentialPrimaryMonitor:
 
     def _adjusted_oriented_value(self, observation: HighPowerCanaryObservation) -> float:
         raw = float(observation.metrics[self.metric.name])
+        if not isfinite(raw):
+            raise ValueError("primary metric must be finite")
         if raw < self.metric.outcome_min - 1e-12 or raw > self.metric.outcome_max + 1e-12:
             raise ValueError("primary metric is outside pre-registered outcome bounds")
         adjusted = (
@@ -312,16 +328,32 @@ class GroupSequentialPrimaryMonitor:
         )
         return adjusted if self.metric.higher_is_better else -adjusted
 
+    def _updated_moments(self, observation: HighPowerCanaryObservation) -> _RunningMoments:
+        if self._next_look >= len(self.spec.look_targets):
+            raise RuntimeError("primary analysis has consumed its final planned look")
+        value = self._adjusted_oriented_value(observation)
+        target = replace(self.challenger if observation.assigned_to_challenger else self.control)
+        target.update(value)
+        challenger = target if observation.assigned_to_challenger else self.challenger
+        control = self.control if observation.assigned_to_challenger else target
+        if not all(isfinite(item) for item in (
+            target.mean, target.m2, challenger.mean - control.mean,
+        )):
+            raise ValueError("primary running moments and effect must remain finite")
+        return target
+
     def validate_observation(self, observation: HighPowerCanaryObservation) -> None:
-        self._adjusted_oriented_value(observation)
+        self._updated_moments(observation)
 
     def observe(self, observation: HighPowerCanaryObservation) -> GroupSequentialEvidence:
-        value = self._adjusted_oriented_value(observation)
-        target = self.challenger if observation.assigned_to_challenger else self.control
-        target.update(value)
+        target = self._updated_moments(observation)
+        if observation.assigned_to_challenger:
+            self.challenger = target
+        else:
+            self.control = target
         self._observations += 1
 
-        if not self._success and self._next_look < len(self.spec.look_targets):
+        if self._next_look < len(self.spec.look_targets):
             look_target = self.spec.look_targets[self._next_look]
             if self._observations >= look_target:
                 self._evaluate_look(self._next_look)
@@ -343,15 +375,17 @@ class GroupSequentialPrimaryMonitor:
                 + self.control.variance / self.control.n
             )
             null = self.plan.base_plan.primary_min_improvement
-            if standard_error <= 1e-15:
+            if standard_error == 0.0:
                 z_score = inf if estimate > null else float("-inf")
             else:
                 z_score = (estimate - null) / standard_error
-            p_value = 0.0 if z_score == inf else 1.0 - NormalDist().cdf(z_score)
+            p_value = 0.5 * erfc(z_score / sqrt(2.0))
 
         alpha = self.spec.incremental_alpha(look_index)
-        success = bool(enough and p_value <= alpha)
-        self._success = self._success or success
+        success = bool(enough and alpha > 0.0 and p_value <= alpha)
+        # Each look earns its own decision. An earlier primary crossing cannot
+        # bypass a later look if the joint safety gate previously kept us running.
+        self._success = success
         self._looks.append(
             GroupSequentialLook(
                 look_index=look_index,
@@ -425,23 +459,18 @@ class HighPowerOnlineCanaryMonitor(OnlineCanaryMonitor):
             reasons=reasons,
         )
 
-    def _preflight_observation(self, observation: HighPowerCanaryObservation) -> None:
-        expected_metrics = {metric.name for metric in self.plan.metrics}
-        if set(observation.metrics) != expected_metrics:
-            missing = sorted(expected_metrics.difference(observation.metrics))
-            unexpected = sorted(set(observation.metrics).difference(expected_metrics))
-            raise ValueError(
-                f"observation metrics do not match plan; missing={missing}, unexpected={unexpected}"
-            )
-        for metric in self.plan.metrics:
-            value = float(observation.metrics[metric.name])
-            if value < metric.outcome_min - 1e-12 or value > metric.outcome_max + 1e-12:
-                raise ValueError(
-                    f"metric {metric.name!r} is outside pre-registered outcome bounds"
-                )
+    def _preflight_observation(
+        self, observation: HighPowerCanaryObservation,
+    ) -> HighPowerCanaryObservation:
+        observation = replace(
+            observation,
+            metrics=self._validated_metrics(observation.metrics),
+            covariates={name: float(value) for name, value in observation.covariates.items()},
+        )
         final_stage_index = len(self.plan.stages) - 1
         if observation.routing_stage_index == final_stage_index:
             self.primary_group_sequential.validate_observation(observation)
+        return observation
 
     def observe(self, observation: HighPowerCanaryObservation) -> CanarySnapshot:
         if self.status is not CanaryStatus.RUNNING:
@@ -458,7 +487,7 @@ class HighPowerOnlineCanaryMonitor(OnlineCanaryMonitor):
         expected_traffic = self.plan.stages[observation.routing_stage_index]
         if abs(observation.traffic_fraction - expected_traffic) > 1e-12:
             raise ValueError("observation traffic fraction differs from routing stage")
-        self._preflight_observation(observation)
+        observation = self._preflight_observation(observation)
 
         self._seen_unit_tokens.add(unit_token)
         self._total_observations += 1
@@ -479,8 +508,11 @@ class HighPowerOnlineCanaryMonitor(OnlineCanaryMonitor):
             )
 
         final_stage_index = len(self.plan.stages) - 1
+        previous_looks = len(self.primary_group_sequential.evidence().looks)
         if observation.routing_stage_index == final_stage_index:
             self.primary_group_sequential.observe(observation)
+        primary = self.primary_group_sequential.evidence()
+        new_primary_look = len(primary.looks) > previous_looks
 
         rollback_reasons = self._rollback_reasons()
         if rollback_reasons:
@@ -494,22 +526,27 @@ class HighPowerOnlineCanaryMonitor(OnlineCanaryMonitor):
             )
 
         if self.stage_index == final_stage_index:
-            safe, reasons = self._safe_to_ramp()
-            if not safe:
-                return self.snapshot(CanaryDecision.HOLD, reasons)
-            primary = self.primary_group_sequential.evidence()
-            if primary.success:
-                self.status = CanaryStatus.PROMOTED
-                return self.snapshot(
-                    CanaryDecision.PROMOTE,
-                    ("planned_group_sequential_primary_gate_passed",),
-                )
             if primary.exhausted:
                 self.status = CanaryStatus.ROLLED_BACK
                 return self.snapshot(
                     CanaryDecision.ROLLBACK,
                     ("group_sequential_primary_exhausted_without_superiority",),
                 )
+            safe, reasons = self._safe_to_ramp()
+            if new_primary_look and primary.success and safe:
+                self.status = CanaryStatus.PROMOTED
+                return self.snapshot(
+                    CanaryDecision.PROMOTE,
+                    ("planned_group_sequential_primary_gate_passed",),
+                )
+            if primary.next_target is None:
+                self.status = CanaryStatus.ROLLED_BACK
+                return self.snapshot(
+                    CanaryDecision.ROLLBACK,
+                    ("group_sequential_final_safety_gates_not_established", *reasons),
+                )
+            if not safe:
+                return self.snapshot(CanaryDecision.HOLD, reasons)
             return self.snapshot(
                 CanaryDecision.HOLD,
                 ("waiting_for_planned_group_sequential_primary_look",),

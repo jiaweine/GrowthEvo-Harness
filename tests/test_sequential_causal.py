@@ -434,3 +434,166 @@ def test_high_power_audit_binds_advanced_plan_and_contains_no_raw_outcomes() -> 
     assert "analysis_unit_id" not in str(events)
     assert "metrics" not in str(events)
     assert controller.verify_audit_chain() is True
+
+
+def _balanced_final_observations(controller, count: int):
+    submitted = 0
+    for index in range(10000):
+        unit_id = f"completion-{index}"
+        route = controller.router.route(unit_id, stage_index=0)
+        if route.assigned_to_challenger != (submitted % 2 == 0):
+            continue
+        yield _observation_from_ticket(controller.enroll(unit_id))
+        submitted += 1
+        if submitted == count:
+            return
+    raise AssertionError("could not construct balanced randomized fixture")
+
+
+@pytest.mark.parametrize("superior", [False, True])
+def test_final_sample_budget_stops_even_when_safety_is_not_established(superior) -> None:
+    controller = HighPowerOnlinePromotionController(
+        champion_name="baseline",
+        candidate=_candidate(),
+        plan=_high_power_plan(expected_final=4, looks=(1.0,)),
+    )
+    controller.start()
+    for observation in _balanced_final_observations(controller, 4):
+        if not superior:
+            observation = replace(observation, metrics={"incremental_value": 0.5})
+        snapshot = controller.observe(observation)
+
+    assert controller.monitor.primary_group_sequential.evidence().success is superior
+    assert controller.monitor._safe_to_ramp()[0] is False
+    assert snapshot.decision is CanaryDecision.ROLLBACK
+    assert snapshot.status is CanaryStatus.ROLLED_BACK
+    assert controller.champion_name == "baseline"
+    assert controller.events()[-1].kind == "challenger_rolled_back"
+    assert controller.verify_audit_chain()
+    before = controller.monitor.snapshot()
+    with pytest.raises(RuntimeError, match="RUNNING"):
+        controller.observe(replace(observation, analysis_unit_id="past-max-n"))
+    assert controller.monitor.snapshot() == before
+
+
+def test_early_primary_success_waits_for_next_planned_look_if_safety_lags() -> None:
+    controller = HighPowerOnlinePromotionController(
+        champion_name="baseline",
+        candidate=_candidate(),
+        plan=_high_power_plan(expected_final=20, looks=(0.2, 1.0)),
+    )
+    controller.start()
+    saw_safe_between_looks = False
+    for count, observation in enumerate(_balanced_final_observations(controller, 20), 1):
+        snapshot = controller.observe(observation)
+        if count == 4:
+            assert controller.monitor.primary_group_sequential.evidence().success
+            assert not controller.monitor._safe_to_ramp()[0]
+        if 4 < count < 20 and controller.monitor._safe_to_ramp()[0]:
+            saw_safe_between_looks = True
+        if count < 20:
+            assert snapshot.decision is CanaryDecision.HOLD
+            assert controller.champion_name == "baseline"
+
+    assert saw_safe_between_looks
+    assert snapshot.decision is CanaryDecision.PROMOTE
+    assert [look.observed for look in controller.monitor.primary_group_sequential.evidence().looks] == [4, 20]
+
+
+@pytest.mark.parametrize("superior", [False, True])
+def test_primary_monitor_cannot_extend_its_final_sample_budget(superior) -> None:
+    monitor = GroupSequentialPrimaryMonitor(_high_power_plan(expected_final=4, looks=(1.0,)))
+    for index in range(4):
+        observation = HighPowerCanaryObservation(
+            analysis_unit_id=f"bounded-{index}",
+            routing_stage_index=0,
+            assigned_to_challenger=index % 2 == 0,
+            assignment_probability=0.5,
+            traffic_fraction=1.0,
+            metrics={"incremental_value": float(index % 2 == 0) if superior else 0.5},
+        )
+        monitor.observe(observation)
+    before = monitor.evidence()
+    with pytest.raises(RuntimeError, match="final planned look"):
+        monitor.observe(replace(observation, analysis_unit_id="unplanned-extra-unit"))
+    assert monitor.evidence() == before
+
+
+def test_zero_spending_look_cannot_authorize_success() -> None:
+    plan = _high_power_plan(expected_final=10000, looks=(0.0004, 1.0))
+    plan = replace(plan, group_sequential=replace(plan.group_sequential, spending="obrien_fleming", alpha=0.05))
+    monitor = GroupSequentialPrimaryMonitor(plan)
+    assert plan.group_sequential.incremental_alpha(0) == 0.0
+    for index in range(4):
+        monitor.observe(HighPowerCanaryObservation(
+            analysis_unit_id=f"zero-alpha-{index}",
+            routing_stage_index=0,
+            assigned_to_challenger=index % 2 == 0,
+            assignment_probability=0.5,
+            traffic_fraction=1.0,
+            metrics={"incremental_value": float(index % 2 == 0)},
+        ))
+    assert monitor.evidence().looks[0].sufficient_arm_counts
+    assert not monitor.evidence().success
+
+
+def test_very_small_alpha_remains_representable() -> None:
+    spec = GroupSequentialSpec(expected_final_stage_observations=100, alpha=1e-20)
+    increments = [spec.incremental_alpha(index) for index in range(4)]
+    assert all(value >= 0 for value in increments)
+    assert sum(increments) == pytest.approx(spec.alpha, rel=1e-12, abs=0.0)
+
+
+def test_obrien_fleming_rejects_nonmonotone_alpha_regime() -> None:
+    with pytest.raises(ValueError, match="below 0.5"):
+        GroupSequentialSpec(expected_final_stage_observations=100, alpha=0.6)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("expected_final_stage_observations", 100.5),
+    ("expected_final_stage_observations", True),
+    ("min_arm_observations", 2.5),
+    ("min_arm_observations", True),
+])
+def test_group_sequential_counts_must_be_integers(field, value) -> None:
+    kwargs = {"expected_final_stage_observations": 100, field: value}
+    with pytest.raises(ValueError, match="integer"):
+        GroupSequentialSpec(**kwargs)
+
+
+def test_nonzero_standard_error_keeps_the_same_test_under_small_units() -> None:
+    plan = _high_power_plan(expected_final=4, looks=(1.0,))
+    plan = replace(
+        plan,
+        base_plan=replace(plan.base_plan, primary_min_improvement=0.0),
+        group_sequential=replace(plan.group_sequential, alpha=0.05),
+    )
+    monitor = GroupSequentialPrimaryMonitor(plan)
+    for index, value in enumerate((2e-16, 0.0, 0.0, 0.0)):
+        monitor.observe(HighPowerCanaryObservation(
+            analysis_unit_id=f"small-unit-{index}", routing_stage_index=0,
+            assigned_to_challenger=index % 2 == 0,
+            assignment_probability=0.5, traffic_fraction=1.0,
+            metrics={"incremental_value": value},
+        ))
+    look = monitor.evidence().looks[0]
+    assert look.z_score == pytest.approx(1.0)
+    assert look.one_sided_p_value == pytest.approx(0.15865525393145707)
+    assert not look.success
+
+
+def test_later_failed_look_does_not_inherit_an_earlier_success() -> None:
+    monitor = GroupSequentialPrimaryMonitor(_high_power_plan(expected_final=20, looks=(0.2, 1.0)))
+    for index in range(20):
+        challenger = index % 2 == 0
+        value = float(challenger) if index < 4 else float(not challenger)
+        monitor.observe(HighPowerCanaryObservation(
+            analysis_unit_id=f"reversal-{index}", routing_stage_index=0,
+            assigned_to_challenger=challenger,
+            assignment_probability=0.5, traffic_fraction=1.0,
+            metrics={"incremental_value": value},
+        ))
+    evidence = monitor.evidence()
+    assert [look.success for look in evidence.looks] == [True, False]
+    assert not evidence.success
+    assert evidence.exhausted

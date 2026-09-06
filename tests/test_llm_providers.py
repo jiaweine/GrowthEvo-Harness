@@ -67,7 +67,7 @@ def test_anthropic_adapter_forces_schema_tool_call() -> None:
     assert capture.kwargs["tools"][0]["input_schema"] == SCHEMA
 
 
-def test_gemini_adapter_uses_current_response_format_json_schema_contract() -> None:
+def test_gemini_adapter_uses_generate_content_json_schema_contract() -> None:
     capture = _Capture(SimpleNamespace(parsed=None, text='{"option":"retain"}'))
     client = SimpleNamespace(models=capture)
     adapter = GeminiStructuredClient(model="pinned-gemini-model", client=client)
@@ -79,7 +79,7 @@ def test_gemini_adapter_uses_current_response_format_json_schema_contract() -> N
     assert capture.kwargs["model"] == "pinned-gemini-model"
     config = capture.kwargs["config"]
     assert config["temperature"] == 0
-    assert config["response_format"]["text"]["mime_type"] == "application/json"
-    assert config["response_format"]["text"]["schema"] == SCHEMA
+    assert config["response_mime_type"] == "application/json"
+    assert config["response_json_schema"] == SCHEMA
     assert "response_schema" not in config
-    assert "response_json_schema" not in config
+    assert "response_format" not in config

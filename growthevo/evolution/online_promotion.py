@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from hashlib import blake2b, sha256
 import json
@@ -656,6 +656,25 @@ class OnlineCanaryMonitor:
             return False, ("primary_superiority_not_established",)
         return True, ()
 
+    def _validated_metrics(self, metrics: Mapping[str, float]) -> dict[str, float]:
+        expected_metrics = {metric.name for metric in self.plan.metrics}
+        if set(metrics) != expected_metrics:
+            missing = sorted(expected_metrics.difference(metrics))
+            unexpected = sorted(set(metrics).difference(expected_metrics))
+            raise ValueError(
+                f"observation metrics do not match plan; missing={missing}, unexpected={unexpected}"
+            )
+        values = {name: float(value) for name, value in metrics.items()}
+        for metric in self.plan.metrics:
+            value = values[metric.name]
+            if not isfinite(value):
+                raise ValueError(f"metric {metric.name!r} must be finite")
+            if value < metric.outcome_min - 1e-12 or value > metric.outcome_max + 1e-12:
+                raise ValueError(
+                    f"metric {metric.name!r} is outside pre-registered outcome bounds"
+                )
+        return values
+
     def observe(self, observation: CanaryObservation) -> CanarySnapshot:
         if self.status is not CanaryStatus.RUNNING:
             raise RuntimeError("canary observations require RUNNING status")
@@ -666,13 +685,11 @@ class OnlineCanaryMonitor:
             raise ValueError("observation assignment probability differs from canary plan")
         if abs(observation.traffic_fraction - self.traffic_fraction) > 1e-12:
             raise ValueError("observation traffic fraction differs from active canary stage")
-        expected_metrics = {metric.name for metric in self.plan.metrics}
-        if set(observation.metrics) != expected_metrics:
-            missing = sorted(expected_metrics.difference(observation.metrics))
-            unexpected = sorted(set(observation.metrics).difference(expected_metrics))
-            raise ValueError(
-                f"observation metrics do not match plan; missing={missing}, unexpected={unexpected}"
-            )
+        # Snapshot caller-owned mappings and validate every metric before any
+        # dedupe token, cost, counter, or per-metric e-process is changed.
+        observation = replace(
+            observation, metrics=self._validated_metrics(observation.metrics)
+        )
 
         self._seen_unit_tokens.add(unit_token)
         self._total_observations += 1
