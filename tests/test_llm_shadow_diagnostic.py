@@ -10,7 +10,11 @@ from growthevo.bench.causal_evidence import (
     fixed_reference_estimate,
 )
 from growthevo.bench.llm_evaluation import LLMExperimentPlan, LLMPolicyCandidate
-from growthevo.bench.llm_shadow_runner import ShadowPlannerEntry, run_locked_shadow_benchmark
+from growthevo.bench.llm_shadow_runner import (
+    ShadowBenchmarkPlan,
+    ShadowPlannerEntry,
+    run_locked_shadow_benchmark,
+)
 from growthevo.models import Channel, GrowthConstraints, GrowthGoal, GrowthOption, UserObservation
 from growthevo.runtime.belief_state import build_causal_belief
 from growthevo.runtime.planner import GrowthHypothesis
@@ -113,12 +117,16 @@ def test_diagnostic_shadow_run_can_score_but_never_promote() -> None:
         model="fake-v1",
         contract_fingerprint="contract-v1",
     )
-    plan = LLMExperimentPlan(
+    llm_plan = LLMExperimentPlan(
         benchmark="diagnostic-shadow",
         dataset="simulator",
         dataset_source="unit-test",
         candidates=(candidate,),
         max_fallback_rate=1.0,
+    )
+    plan = ShadowBenchmarkPlan(
+        llm_plan=llm_plan,
+        require_promotion_evidence=False,
     )
 
     run = run_locked_shadow_benchmark(
@@ -128,9 +136,9 @@ def test_diagnostic_shadow_run_can_score_but_never_promote() -> None:
         validation_specs=(validation,),
         holdout_specs=(holdout,),
         commit_sha="deadbeef",
-        require_promotion_evidence=False,
     )
 
     assert run.holdout.score.incremental_lcb > 0.0
     assert run.artifact.promotion_eligible is False
     assert run.artifact.metrics["evidence_mode"] == "diagnostic_only"
+    assert run.artifact.metrics["shadow_plan_fingerprint"] == plan.fingerprint
