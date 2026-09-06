@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Mapping, Sequence
+from dataclasses import dataclass, replace
+from typing import Sequence
 
 from ._serialization import fingerprint_json
 from .causal_evidence import (
@@ -137,6 +137,9 @@ def run_locked_shadow_benchmark(
     is invoked on holdout, so the final causal split is never used to compare all
     model+harness variants. Evidence is constructed evaluator-side and
     ``collect_planner_decisions`` passes only ``belief`` and ``goal`` to planners.
+
+    Diagnostic runs may opt into Tier-C/D evidence, but such a run can never emit
+    ``promotion_eligible=True`` regardless of its observed score.
     """
 
     if not commit_sha.strip():
@@ -159,6 +162,19 @@ def run_locked_shadow_benchmark(
     overlap = validation_ids.intersection(holdout_ids)
     if overlap:
         raise ValueError(f"validation and holdout case ids overlap: {sorted(overlap)[:3]}")
+
+    validation_evidence_fingerprint = _evidence_fingerprint(
+        split="validation",
+        producer=producer,
+        bundles=validation_bundles,
+        require_promotion_evidence=require_promotion_evidence,
+    )
+    holdout_evidence_fingerprint = _evidence_fingerprint(
+        split="holdout",
+        producer=producer,
+        bundles=holdout_bundles,
+        require_promotion_evidence=require_promotion_evidence,
+    )
 
     validation_decisions: list[LLMDecision] = []
     for candidate in plan.candidates:
@@ -183,20 +199,7 @@ def run_locked_shadow_benchmark(
         trials_per_case=plan.trials_per_case,
     )
     holdout = protocol.evaluate_once(holdout_cases, holdout_decisions)
-    artifact = protocol.artifact(holdout, commit_sha=commit_sha)
 
-    validation_evidence_fingerprint = _evidence_fingerprint(
-        split="validation",
-        producer=producer,
-        bundles=validation_bundles,
-        require_promotion_evidence=require_promotion_evidence,
-    )
-    holdout_evidence_fingerprint = _evidence_fingerprint(
-        split="holdout",
-        producer=producer,
-        bundles=holdout_bundles,
-        require_promotion_evidence=require_promotion_evidence,
-    )
     evidence_manifest_fingerprint = fingerprint_json(
         {
             "schema": "growthevo.llm-evidence-pair.v1",
@@ -206,6 +209,26 @@ def run_locked_shadow_benchmark(
             "selected_candidate": winner.name,
             "commit_sha": commit_sha,
         }
+    )
+
+    raw_artifact = protocol.artifact(holdout, commit_sha=commit_sha)
+    artifact_metrics = {
+        **dict(raw_artifact.metrics),
+        "evidence_mode": (
+            "promotion_grade" if require_promotion_evidence else "diagnostic_only"
+        ),
+        "validation_evidence_fingerprint": validation_evidence_fingerprint,
+        "holdout_evidence_fingerprint": holdout_evidence_fingerprint,
+        "evidence_manifest_fingerprint": evidence_manifest_fingerprint,
+        "evidence_producer": producer.name,
+        "evidence_producer_version": producer.version,
+    }
+    artifact = replace(
+        raw_artifact,
+        promotion_eligible=(
+            raw_artifact.promotion_eligible if require_promotion_evidence else False
+        ),
+        metrics=artifact_metrics,
     )
 
     return LockedShadowBenchmarkRun(
