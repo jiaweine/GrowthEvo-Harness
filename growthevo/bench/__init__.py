@@ -13,6 +13,12 @@ from .causal_evidence import (
 )
 from .criteo import CriteoUpliftData, load_criteo_uplift
 from .kuairand_features import load_kuairand_user_features, load_kuairand_video_features
+from .llm_candidate_factory import (
+    BuiltShadowCandidate,
+    LLMEndpointSpec,
+    ShadowCandidateSpec,
+    build_shadow_candidate,
+)
 from .llm_evaluation import (
     CausalOptionEvidence,
     LLMBenchmarkCase,
@@ -89,6 +95,7 @@ from .synthetic import (
 )
 
 __all__ = [
+    "BuiltShadowCandidate",
     "CATEBenchmarkResult",
     "CausalEvidenceBundle",
     "CausalOptionEstimate",
@@ -108,6 +115,7 @@ __all__ = [
     "LLMBenchmarkCase",
     "LLMCandidateScore",
     "LLMDecision",
+    "LLMEndpointSpec",
     "LLMExperimentPlan",
     "LLMHoldoutResult",
     "LLMPolicyCandidate",
@@ -127,6 +135,7 @@ __all__ = [
     "PolicyBenchmarkResult",
     "RandomizedTargetingResult",
     "ShadowBenchmarkPlan",
+    "ShadowCandidateSpec",
     "ShadowPlannerEntry",
     "StaticCausalOptionEvidenceProducer",
     "SyntheticGrowthSample",
@@ -135,6 +144,7 @@ __all__ = [
     "TargetingInferenceResult",
     "TargetingValidationScore",
     "bootstrap_randomized_targeting",
+    "build_shadow_candidate",
     "collect_planner_decisions",
     "default_kuairand_state_builder",
     "default_planner_observation",
