@@ -16,6 +16,18 @@ from .online_promotion import (
     PromotionAuditEvent,
 )
 from .optimizer import EVOLVABLE_COORDINATES, FROZEN_COORDINATES, HarnessEvolver
+from .sequential_causal import (
+    FrozenCUPEDSpec,
+    GroupSequentialEvidence,
+    GroupSequentialLook,
+    GroupSequentialPrimaryMonitor,
+    GroupSequentialSpec,
+    HighPowerCanaryObservation,
+    HighPowerCanaryPlan,
+    HighPowerExposureTicket,
+    HighPowerOnlineCanaryMonitor,
+    HighPowerOnlinePromotionController,
+)
 
 __all__ = [
     "EVOLVABLE_COORDINATES",
@@ -31,7 +43,17 @@ __all__ = [
     "CanaryStatus",
     "FailureMiner",
     "FailureTrace",
+    "FrozenCUPEDSpec",
+    "GroupSequentialEvidence",
+    "GroupSequentialLook",
+    "GroupSequentialPrimaryMonitor",
+    "GroupSequentialSpec",
     "HarnessEvolver",
+    "HighPowerCanaryObservation",
+    "HighPowerCanaryPlan",
+    "HighPowerExposureTicket",
+    "HighPowerOnlineCanaryMonitor",
+    "HighPowerOnlinePromotionController",
     "HoeffdingMixtureEProcess",
     "MetricSequentialEvidence",
     "OnlineCanaryMonitor",
