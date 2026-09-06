@@ -16,6 +16,16 @@ from .online_promotion import (
     PromotionAuditEvent,
 )
 from .optimizer import EVOLVABLE_COORDINATES, FROZEN_COORDINATES, HarnessEvolver
+from .outcome_maturity import (
+    CompleteCaseMaturitySeal,
+    MaturityAuditEvent,
+    OutcomeFollowupState,
+    OutcomeMaturityLedger,
+    OutcomeMaturitySnapshot,
+    OutcomeMaturitySpec,
+    OutcomeMaturityTicket,
+    OutcomeReceipt,
+)
 from .sequential_causal import (
     FrozenCUPEDSpec,
     GroupSequentialEvidence,
@@ -41,6 +51,7 @@ __all__ = [
     "CanaryRouter",
     "CanarySnapshot",
     "CanaryStatus",
+    "CompleteCaseMaturitySeal",
     "FailureMiner",
     "FailureTrace",
     "FrozenCUPEDSpec",
@@ -55,8 +66,15 @@ __all__ = [
     "HighPowerOnlineCanaryMonitor",
     "HighPowerOnlinePromotionController",
     "HoeffdingMixtureEProcess",
+    "MaturityAuditEvent",
     "MetricSequentialEvidence",
     "OnlineCanaryMonitor",
     "OnlinePromotionController",
+    "OutcomeFollowupState",
+    "OutcomeMaturityLedger",
+    "OutcomeMaturitySnapshot",
+    "OutcomeMaturitySpec",
+    "OutcomeMaturityTicket",
+    "OutcomeReceipt",
     "PromotionAuditEvent",
 ]
