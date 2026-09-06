@@ -28,6 +28,7 @@ from .llm_evaluation import (
 )
 from .llm_shadow_runner import (
     LockedShadowBenchmarkRun,
+    ShadowBenchmarkPlan,
     ShadowPlannerEntry,
     run_locked_shadow_benchmark,
 )
@@ -125,6 +126,7 @@ __all__ = [
     "OpenBanditInteraction",
     "PolicyBenchmarkResult",
     "RandomizedTargetingResult",
+    "ShadowBenchmarkPlan",
     "ShadowPlannerEntry",
     "StaticCausalOptionEvidenceProducer",
     "SyntheticGrowthSample",
