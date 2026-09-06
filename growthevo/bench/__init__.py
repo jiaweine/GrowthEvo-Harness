@@ -1,5 +1,16 @@
 """Benchmark fixtures and real-world dataset adapters for growth-policy research."""
 
+from .causal_evidence import (
+    CausalEvidenceBundle,
+    CausalOptionEstimate,
+    CausalOptionEvidenceProducer,
+    EvidenceCaseSpec,
+    EvidenceTier,
+    StaticCausalOptionEvidenceProducer,
+    fixed_reference_estimate,
+    preregistered_ope_estimate,
+    randomized_targeting_estimate,
+)
 from .criteo import CriteoUpliftData, load_criteo_uplift
 from .kuairand_features import load_kuairand_user_features, load_kuairand_video_features
 from .llm_evaluation import (
@@ -14,6 +25,11 @@ from .llm_evaluation import (
     LockedLLMPolicyProtocol,
     collect_planner_decisions,
     evaluate_llm_candidate,
+)
+from .llm_shadow_runner import (
+    LockedShadowBenchmarkRun,
+    ShadowPlannerEntry,
+    run_locked_shadow_benchmark,
 )
 from .locked_evaluation import (
     LockedBenchmarkArtifact,
@@ -73,11 +89,16 @@ from .synthetic import (
 
 __all__ = [
     "CATEBenchmarkResult",
+    "CausalEvidenceBundle",
+    "CausalOptionEstimate",
     "CausalOptionEvidence",
+    "CausalOptionEvidenceProducer",
     "CriteoUpliftData",
     "DEFAULT_KUAIRAND_REWARD_WEIGHTS",
     "DatasetSplit",
+    "EvidenceCaseSpec",
     "EvidenceGatedOPEProtocol",
+    "EvidenceTier",
     "GrowthAgentBench",
     "HistorySummary",
     "KuaiRandHistory",
@@ -93,6 +114,7 @@ __all__ = [
     "LockedLLMBenchmarkArtifact",
     "LockedLLMPolicyProtocol",
     "LockedOPEProtocol",
+    "LockedShadowBenchmarkRun",
     "LockedTargetingProtocol",
     "OPECandidate",
     "OPEEvidenceGate",
@@ -103,6 +125,8 @@ __all__ = [
     "OpenBanditInteraction",
     "PolicyBenchmarkResult",
     "RandomizedTargetingResult",
+    "ShadowPlannerEntry",
+    "StaticCausalOptionEvidenceProducer",
     "SyntheticGrowthSample",
     "TargetingBootstrapResult",
     "TargetingHoldoutResult",
@@ -116,6 +140,7 @@ __all__ = [
     "evaluate_cate",
     "evaluate_llm_candidate",
     "evaluate_randomized_targeting",
+    "fixed_reference_estimate",
     "infer_randomized_targeting",
     "kuairand_reward",
     "kuairand_to_offline_rl",
@@ -132,6 +157,9 @@ __all__ = [
     "open_bandit_to_ope",
     "oracle_policy_value",
     "ordered_split",
+    "preregistered_ope_estimate",
+    "randomized_targeting_estimate",
+    "run_locked_shadow_benchmark",
     "targeting_evidence_fingerprint",
     "treatment_records_fingerprint",
 ]
