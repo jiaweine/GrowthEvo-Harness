@@ -26,12 +26,7 @@ class CanaryDecision(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class CanaryCandidate:
-    """One holdout-qualified model+harness challenger.
-
-    A candidate can only be created from an LLM benchmark artifact that already
-    passed the locked holdout promotion gate. Online canary testing is therefore
-    an additional safety layer, never a substitute for offline causal evidence.
-    """
+    """One locked-holdout-qualified model+harness challenger."""
 
     name: str
     provider: str
@@ -52,40 +47,38 @@ class CanaryCandidate:
         metrics = dict(artifact.metrics)
         provider = str(metrics.get("provider", ""))
         model = str(metrics.get("model", ""))
-        contract_fingerprint = str(metrics.get("contract_fingerprint", ""))
+        contract = str(metrics.get("contract_fingerprint", ""))
         evidence_manifest = str(metrics.get("evidence_manifest_fingerprint", ""))
-        for name, value in (
+        for field_name, value in (
             ("provider", provider),
             ("model", model),
-            ("contract_fingerprint", contract_fingerprint),
+            ("contract_fingerprint", contract),
             ("evidence_manifest_fingerprint", evidence_manifest),
         ):
             if not value:
-                raise ValueError(f"promotion artifact lacks {name}")
-        serialized = artifact.to_json().encode("utf-8")
+                raise ValueError(f"promotion artifact lacks {field_name}")
+        artifact_fingerprint = sha256(artifact.to_json().encode("utf-8")).hexdigest()
         return cls(
             name=artifact.selected_candidate,
             provider=provider,
             model=model,
-            contract_fingerprint=contract_fingerprint,
+            contract_fingerprint=contract,
             source_commit_sha=artifact.commit_sha,
             source_test_fingerprint=artifact.test_fingerprint,
             source_evidence_manifest_fingerprint=evidence_manifest,
-            promotion_artifact_fingerprint=sha256(serialized).hexdigest(),
+            promotion_artifact_fingerprint=artifact_fingerprint,
         )
 
 
 @dataclass(frozen=True, slots=True)
 class CanaryMetricSpec:
-    """One bounded randomized canary metric.
+    """Bounded randomized metric with relative and optional absolute safety gates.
 
-    ``higher_is_better`` orients every treatment-control contrast so positive
-    values mean the challenger is better. ``noninferiority_margin`` is the largest
-    tolerated deterioration in that oriented scale.
-
-    Optional absolute bounds are challenger-arm mean constraints. They are useful
-    for metrics such as spend, fatigue, churn risk, error rate, or latency where a
-    relative comparison alone is not enough.
+    Every treatment-control contrast is oriented so that positive means the
+    challenger is better. ``noninferiority_margin`` is the largest tolerated
+    deterioration on that oriented scale. Optional absolute bounds apply to the
+    challenger-arm mean and are useful for spend, fatigue, churn, error rate,
+    latency, or other hard operational guardrails.
     """
 
     name: str
@@ -99,13 +92,13 @@ class CanaryMetricSpec:
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("metric name cannot be empty")
-        for name, value in (
+        for field_name, value in (
             ("outcome_min", self.outcome_min),
             ("outcome_max", self.outcome_max),
             ("noninferiority_margin", self.noninferiority_margin),
         ):
             if not isfinite(value):
-                raise ValueError(f"{name} must be finite")
+                raise ValueError(f"{field_name} must be finite")
         if self.outcome_max <= self.outcome_min:
             raise ValueError("outcome_max must be greater than outcome_min")
         if self.noninferiority_margin < 0:
@@ -130,7 +123,7 @@ class CanaryMetricSpec:
 
 @dataclass(frozen=True, slots=True)
 class CanaryPlan:
-    """Pre-registered online rollout and sequential testing contract."""
+    """Pre-registered online rollout and sequential-testing contract."""
 
     experiment_id: str
     candidate_name: str
@@ -151,7 +144,7 @@ class CanaryPlan:
     max_challenger_cumulative_cost: float | None = None
 
     def __post_init__(self) -> None:
-        for name, value in (
+        for field_name, value in (
             ("experiment_id", self.experiment_id),
             ("candidate_name", self.candidate_name),
             ("candidate_contract_fingerprint", self.candidate_contract_fingerprint),
@@ -160,13 +153,13 @@ class CanaryPlan:
             ("routing_salt", self.routing_salt),
         ):
             if not value.strip():
-                raise ValueError(f"{name} cannot be empty")
+                raise ValueError(f"{field_name} cannot be empty")
         if not self.metrics:
             raise ValueError("at least one canary metric is required")
-        names = [metric.name for metric in self.metrics]
-        if len(set(names)) != len(names):
+        metric_names = [metric.name for metric in self.metrics]
+        if len(set(metric_names)) != len(metric_names):
             raise ValueError("canary metric names must be unique")
-        if self.primary_metric not in set(names):
+        if self.primary_metric not in set(metric_names):
             raise ValueError("primary_metric must reference a declared metric")
         if not self.stages:
             raise ValueError("at least one rollout stage is required")
@@ -183,18 +176,19 @@ class CanaryPlan:
             raise ValueError("min_observations_per_stage must be positive")
         if not isfinite(self.primary_min_improvement):
             raise ValueError("primary_min_improvement must be finite")
-        for name, alpha in (
+        for field_name, alpha in (
             ("ramp_alpha", self.ramp_alpha),
             ("promotion_alpha", self.promotion_alpha),
             ("rollback_family_alpha", self.rollback_family_alpha),
         ):
             if not isfinite(alpha) or not 0 < alpha < 1:
-                raise ValueError(f"{name} must be in (0, 1)")
+                raise ValueError(f"{field_name} must be in (0, 1)")
         if not self.e_bet_grid:
             raise ValueError("e_bet_grid cannot be empty")
-        for value in self.e_bet_grid:
-            if not isfinite(value) or value <= 0:
+        for bet in self.e_bet_grid:
+            if not isfinite(bet) or bet <= 0:
                 raise ValueError("e_bet_grid values must be positive and finite")
+        metric_by_name = {metric.name: metric for metric in self.metrics}
         if self.max_challenger_cumulative_cost is not None:
             if (
                 not isfinite(self.max_challenger_cumulative_cost)
@@ -204,7 +198,6 @@ class CanaryPlan:
             if self.cumulative_cost_metric is None:
                 raise ValueError("cumulative_cost_metric is required with a cost cap")
         if self.cumulative_cost_metric is not None:
-            metric_by_name = {metric.name: metric for metric in self.metrics}
             if self.cumulative_cost_metric not in metric_by_name:
                 raise ValueError("cumulative_cost_metric must reference a declared metric")
             if metric_by_name[self.cumulative_cost_metric].outcome_min < 0:
@@ -212,10 +205,7 @@ class CanaryPlan:
 
     @property
     def fingerprint(self) -> str:
-        payload = {
-            "schema": "growthevo.online-canary-plan.v1",
-            **asdict(self),
-        }
+        payload = {"schema": "growthevo.online-canary-plan.v1", **asdict(self)}
         encoded = json.dumps(
             payload,
             sort_keys=True,
@@ -235,17 +225,12 @@ class CanaryRoute:
 
 
 class CanaryRouter:
-    """Stable two-hash routing for monotonic staged exposure.
-
-    One hash decides whether an analysis unit is inside the current stage, while
-    an independent hash decides champion/challenger assignment. Increasing the
-    stage therefore adds units without reshuffling existing arm assignments.
-    """
+    """Stable two-hash routing for monotonic staged exposure and fixed arms."""
 
     def __init__(self, plan: CanaryPlan) -> None:
         self.plan = plan
 
-    def _uniform(self, *, analysis_unit_id: str, namespace: str) -> float:
+    def _uniform(self, analysis_unit_id: str, namespace: str) -> float:
         if not analysis_unit_id:
             raise ValueError("analysis_unit_id cannot be empty")
         material = (
@@ -259,16 +244,13 @@ class CanaryRouter:
         if not 0 <= stage_index < len(self.plan.stages):
             raise ValueError("stage_index is outside the pre-registered rollout stages")
         traffic = self.plan.stages[stage_index]
-        in_canary = self._uniform(
-            analysis_unit_id=analysis_unit_id,
-            namespace="inclusion",
-        ) < traffic
+        in_canary = self._uniform(analysis_unit_id, "inclusion") < traffic
         challenger = False
         if in_canary:
-            challenger = self._uniform(
-                analysis_unit_id=analysis_unit_id,
-                namespace="arm",
-            ) < self.plan.challenger_probability
+            challenger = (
+                self._uniform(analysis_unit_id, "arm")
+                < self.plan.challenger_probability
+            )
         return CanaryRoute(
             analysis_unit_id=analysis_unit_id,
             in_canary=in_canary,
@@ -280,7 +262,7 @@ class CanaryRouter:
 
 @dataclass(frozen=True, slots=True)
 class CanaryObservation:
-    """One matured outcome for one unique randomized analysis unit."""
+    """One matured bounded outcome for one unique randomized analysis unit."""
 
     analysis_unit_id: str
     assigned_to_challenger: bool
@@ -305,20 +287,16 @@ class CanaryObservation:
 
 
 class HoeffdingMixtureEProcess:
-    """Anytime-valid bounded-mean e-process using a fixed betting mixture.
+    """Anytime-valid bounded-mean e-process with a pre-registered bet mixture.
 
-    For observations X_t in [a_t, b_t], under the one-sided null
-    E[X_t | F_(t-1)] <= mu_t, Hoeffding's lemma gives the component process
+    For X_t in [a_t, b_t], under H0: E[X_t | F_(t-1)] <= mu_t,
+    Hoeffding's lemma makes each fixed positive betting component
 
-        exp(sum eta * (X_t - mu_t)/(b_t-a_t) - eta^2/8).
+        exp(sum eta*(X_t-mu_t)/(b_t-a_t) - eta^2/8)
 
-    Each component is a non-negative supermartingale for a pre-registered
-    positive ``eta``. A convex mixture remains an e-process. This permits
-    continuous monitoring without the repeated-peeking failure of fixed-horizon
-    z/t tests. The implementation intentionally uses only bounded outcomes and
-    does not pretend to solve repeated-user or delayed-outcome dependence; those
-    must be handled upstream by defining one valid analysis unit and matured
-    bounded outcome per observation.
+    a non-negative supermartingale. A convex mixture remains an e-process, so a
+    threshold may be monitored continuously without the repeated-peeking failure
+    of a fixed-horizon z/t test.
     """
 
     def __init__(self, bets: Sequence[float]) -> None:
@@ -327,10 +305,10 @@ class HoeffdingMixtureEProcess:
         self._bets = tuple(float(value) for value in bets)
         if any(not isfinite(value) or value <= 0 for value in self._bets):
             raise ValueError("e-process bets must be positive and finite")
-        self._log_components = [0.0 for _ in self._bets]
+        self._logs = [0.0 for _ in self._bets]
         self._log_weight = -log(len(self._bets))
         self._observations = 0
-        self._max_e_value = 1.0
+        self._max_e = 1.0
 
     @staticmethod
     def _logsumexp(values: Sequence[float]) -> float:
@@ -340,10 +318,8 @@ class HoeffdingMixtureEProcess:
         return maximum + log(sum(exp(value - maximum) for value in values))
 
     @staticmethod
-    def _exp_clamped(value: float) -> float:
-        if value >= 709.0:
-            return float("inf")
-        return exp(value)
+    def _exp(value: float) -> float:
+        return float("inf") if value >= 709.0 else exp(value)
 
     def update_upper_null(
         self,
@@ -353,27 +329,24 @@ class HoeffdingMixtureEProcess:
         lower: float,
         upper: float,
     ) -> float:
-        """Update evidence against H0: conditional mean <= ``null_upper``."""
-
-        for name, item in (
+        for field_name, item in (
             ("value", value),
             ("null_upper", null_upper),
             ("lower", lower),
             ("upper", upper),
         ):
             if not isfinite(item):
-                raise ValueError(f"{name} must be finite")
+                raise ValueError(f"{field_name} must be finite")
         if upper <= lower:
             raise ValueError("upper must exceed lower")
         if value < lower - 1e-12 or value > upper + 1e-12:
             raise ValueError("value lies outside its pre-registered bounds")
-        width = upper - lower
-        standardized = (value - null_upper) / width
+        standardized = (value - null_upper) / (upper - lower)
         for index, eta in enumerate(self._bets):
-            self._log_components[index] += eta * standardized - (eta * eta) / 8.0
+            self._logs[index] += eta * standardized - eta * eta / 8.0
         self._observations += 1
         current = self.e_value
-        self._max_e_value = max(self._max_e_value, current)
+        self._max_e = max(self._max_e, current)
         return current
 
     def update_lower_null(
@@ -384,8 +357,6 @@ class HoeffdingMixtureEProcess:
         lower: float,
         upper: float,
     ) -> float:
-        """Update evidence against H0: conditional mean >= ``null_lower``."""
-
         return self.update_upper_null(
             -value,
             null_upper=-null_lower,
@@ -395,12 +366,12 @@ class HoeffdingMixtureEProcess:
 
     @property
     def e_value(self) -> float:
-        logs = [self._log_weight + value for value in self._log_components]
-        return self._exp_clamped(self._logsumexp(logs))
+        logs = [self._log_weight + value for value in self._logs]
+        return self._exp(self._logsumexp(logs))
 
     @property
     def max_e_value(self) -> float:
-        return self._max_e_value
+        return self._max_e
 
     @property
     def observations(self) -> int:
@@ -414,24 +385,18 @@ def _oriented_ht_contribution(
     challenger_probability: float,
     spec: CanaryMetricSpec,
 ) -> tuple[float, float, float]:
-    """Return oriented Horvitz-Thompson difference and its deterministic bounds."""
-
     if value < spec.outcome_min - 1e-12 or value > spec.outcome_max + 1e-12:
         raise ValueError(f"metric {spec.name!r} is outside pre-registered outcome bounds")
     p = challenger_probability
-    if assigned_to_challenger:
-        raw = value / p
-    else:
-        raw = -value / (1.0 - p)
-
-    candidates = (
+    raw = value / p if assigned_to_challenger else -value / (1.0 - p)
+    bound_candidates = (
         spec.outcome_min / p,
         spec.outcome_max / p,
         -spec.outcome_min / (1.0 - p),
         -spec.outcome_max / (1.0 - p),
     )
-    raw_lower = min(candidates)
-    raw_upper = max(candidates)
+    raw_lower = min(bound_candidates)
+    raw_upper = max(bound_candidates)
     if spec.higher_is_better:
         return raw, raw_lower, raw_upper
     return -raw, -raw_upper, -raw_lower
@@ -604,7 +569,7 @@ class OnlineCanaryMonitor:
         self.status = CanaryStatus.REGISTERED
         self.stage_index = 0
         self._stage_start_observations = 0
-        self._seen_units: set[str] = set()
+        self._seen_unit_tokens: set[bytes] = set()
         self._total_observations = 0
         self._challenger_observations = 0
         self._cumulative_challenger_cost = 0.0
@@ -623,6 +588,10 @@ class OnlineCanaryMonitor:
     def traffic_fraction(self) -> float:
         return self.plan.stages[self.stage_index]
 
+    def _unit_token(self, analysis_unit_id: str) -> bytes:
+        material = f"{self.plan.experiment_id}|{analysis_unit_id}".encode("utf-8")
+        return blake2b(material, digest_size=16).digest()
+
     def _harm_test_count(self) -> int:
         count = len(self.plan.metrics)
         for spec in self.plan.metrics:
@@ -631,8 +600,7 @@ class OnlineCanaryMonitor:
         return count
 
     def _rollback_reasons(self) -> list[str]:
-        count = self._harm_test_count()
-        threshold = count / self.plan.rollback_family_alpha
+        threshold = self._harm_test_count() / self.plan.rollback_family_alpha
         reasons: list[str] = []
         for spec in self.plan.metrics:
             evidence = self._monitors[spec.name].evidence()
@@ -691,7 +659,8 @@ class OnlineCanaryMonitor:
     def observe(self, observation: CanaryObservation) -> CanarySnapshot:
         if self.status is not CanaryStatus.RUNNING:
             raise RuntimeError("canary observations require RUNNING status")
-        if observation.analysis_unit_id in self._seen_units:
+        unit_token = self._unit_token(observation.analysis_unit_id)
+        if unit_token in self._seen_unit_tokens:
             raise ValueError("analysis_unit_id has already been observed")
         if abs(observation.assignment_probability - self.plan.challenger_probability) > 1e-12:
             raise ValueError("observation assignment probability differs from canary plan")
@@ -705,7 +674,7 @@ class OnlineCanaryMonitor:
                 f"observation metrics do not match plan; missing={missing}, unexpected={unexpected}"
             )
 
-        self._seen_units.add(observation.analysis_unit_id)
+        self._seen_unit_tokens.add(unit_token)
         self._total_observations += 1
         if observation.assigned_to_challenger:
             self._challenger_observations += 1
@@ -759,9 +728,7 @@ class OnlineCanaryMonitor:
             stage_index=self.stage_index,
             traffic_fraction=self.traffic_fraction,
             total_observations=self._total_observations,
-            stage_observations=(
-                self._total_observations - self._stage_start_observations
-            ),
+            stage_observations=self._total_observations - self._stage_start_observations,
             challenger_observations=self._challenger_observations,
             cumulative_challenger_cost=self._cumulative_challenger_cost,
             metric_evidence=tuple(
@@ -782,7 +749,7 @@ class PromotionAuditEvent:
 
 
 class OnlinePromotionController:
-    """Champion-challenger registry plus privacy-minimal canary audit chain."""
+    """Champion-challenger controller with verified routing and hashed audit state."""
 
     def __init__(
         self,
@@ -818,9 +785,7 @@ class OnlinePromotionController:
                 "source_evidence_manifest_fingerprint": (
                     candidate.source_evidence_manifest_fingerprint
                 ),
-                "promotion_artifact_fingerprint": (
-                    candidate.promotion_artifact_fingerprint
-                ),
+                "promotion_artifact_fingerprint": candidate.promotion_artifact_fingerprint,
                 "canary_plan_fingerprint": plan.fingerprint,
             },
         )
@@ -889,6 +854,24 @@ class OnlinePromotionController:
         )
 
     def observe(self, observation: CanaryObservation) -> CanarySnapshot:
+        if self.monitor.status is not CanaryStatus.RUNNING:
+            raise RuntimeError("canary observations require RUNNING status")
+        expected_route = self.router.route(
+            observation.analysis_unit_id,
+            stage_index=self.monitor.stage_index,
+        )
+        if not expected_route.in_canary:
+            raise ValueError("analysis unit was not admitted by the active canary stage")
+        if observation.assigned_to_challenger != expected_route.assigned_to_challenger:
+            raise ValueError("observed arm does not match the pre-registered stable router")
+        if abs(observation.traffic_fraction - expected_route.traffic_fraction) > 1e-12:
+            raise ValueError("observation traffic fraction differs from stable router")
+        if (
+            abs(observation.assignment_probability - expected_route.challenger_probability)
+            > 1e-12
+        ):
+            raise ValueError("observation propensity differs from stable router")
+
         snapshot = self.monitor.observe(observation)
         if snapshot.decision in {
             CanaryDecision.ADVANCE,
@@ -911,9 +894,7 @@ class OnlinePromotionController:
     def verify_audit_chain(self) -> bool:
         previous_hash = "0" * 64
         for expected_sequence, event in enumerate(self._events):
-            if event.sequence != expected_sequence:
-                return False
-            if event.previous_hash != previous_hash:
+            if event.sequence != expected_sequence or event.previous_hash != previous_hash:
                 return False
             if (
                 self._digest(
