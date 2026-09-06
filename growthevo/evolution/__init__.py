@@ -1,3 +1,11 @@
+from .cluster_outcome import (
+    ClusterAggregationMode,
+    ClusterAssignmentTicket,
+    ClusterEstimand,
+    ClusterOutcomeAccumulator,
+    ClusterOutcomeResult,
+    ClusterOutcomeSpec,
+)
 from .failure_miner import FailureMiner, FailureTrace
 from .online_promotion import (
     CanaryCandidate,
@@ -41,6 +49,12 @@ __all__ = [
     "CanaryRouter",
     "CanarySnapshot",
     "CanaryStatus",
+    "ClusterAggregationMode",
+    "ClusterAssignmentTicket",
+    "ClusterEstimand",
+    "ClusterOutcomeAccumulator",
+    "ClusterOutcomeResult",
+    "ClusterOutcomeSpec",
     "FailureMiner",
     "FailureTrace",
     "FrozenCUPEDSpec",
