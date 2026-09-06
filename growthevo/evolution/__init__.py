@@ -1,10 +1,40 @@
 from .failure_miner import FailureMiner, FailureTrace
+from .online_promotion import (
+    CanaryCandidate,
+    CanaryDecision,
+    CanaryMetricSpec,
+    CanaryObservation,
+    CanaryPlan,
+    CanaryRoute,
+    CanaryRouter,
+    CanarySnapshot,
+    CanaryStatus,
+    HoeffdingMixtureEProcess,
+    MetricSequentialEvidence,
+    OnlineCanaryMonitor,
+    OnlinePromotionController,
+    PromotionAuditEvent,
+)
 from .optimizer import EVOLVABLE_COORDINATES, FROZEN_COORDINATES, HarnessEvolver
 
 __all__ = [
     "EVOLVABLE_COORDINATES",
     "FROZEN_COORDINATES",
+    "CanaryCandidate",
+    "CanaryDecision",
+    "CanaryMetricSpec",
+    "CanaryObservation",
+    "CanaryPlan",
+    "CanaryRoute",
+    "CanaryRouter",
+    "CanarySnapshot",
+    "CanaryStatus",
     "FailureMiner",
     "FailureTrace",
     "HarnessEvolver",
+    "HoeffdingMixtureEProcess",
+    "MetricSequentialEvidence",
+    "OnlineCanaryMonitor",
+    "OnlinePromotionController",
+    "PromotionAuditEvent",
 ]
