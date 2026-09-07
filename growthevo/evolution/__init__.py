@@ -16,6 +16,16 @@ from .online_promotion import (
     PromotionAuditEvent,
 )
 from .optimizer import EVOLVABLE_COORDINATES, FROZEN_COORDINATES, HarnessEvolver
+from .robust_sequential import (
+    CatoniConfidenceInterval,
+    CatoniMixtureConfidenceSequence,
+    CatoniMixtureSpec,
+    RobustEffectDecision,
+    RobustEffectSnapshot,
+    RobustRandomizedEffectMonitor,
+    RobustRandomizedEffectSpec,
+    catoni_influence,
+)
 from .sequential_causal import (
     FrozenCUPEDSpec,
     GroupSequentialEvidence,
@@ -41,6 +51,9 @@ __all__ = [
     "CanaryRouter",
     "CanarySnapshot",
     "CanaryStatus",
+    "CatoniConfidenceInterval",
+    "CatoniMixtureConfidenceSequence",
+    "CatoniMixtureSpec",
     "FailureMiner",
     "FailureTrace",
     "FrozenCUPEDSpec",
@@ -59,4 +72,9 @@ __all__ = [
     "OnlineCanaryMonitor",
     "OnlinePromotionController",
     "PromotionAuditEvent",
+    "RobustEffectDecision",
+    "RobustEffectSnapshot",
+    "RobustRandomizedEffectMonitor",
+    "RobustRandomizedEffectSpec",
+    "catoni_influence",
 ]
