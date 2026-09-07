@@ -4,8 +4,12 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from hashlib import blake2b
 import json
-from math import exp, inf, isfinite, log, sqrt
+from math import exp, inf, isfinite, log, log1p, sqrt
 from typing import Mapping, Sequence
+
+
+_FLOAT_MAX = 1.7976931348623157e308
+_LOG_DIRECT_CATONI_LIMIT = log(1e150)
 
 
 class RobustEffectDecision(str, Enum):
@@ -34,33 +38,72 @@ def _logmeanexp(values: Sequence[float]) -> float:
 
 
 def _log_one_plus_t_plus_half_t2(t: float) -> float:
-    """Stable log(1 + t + t^2/2) for t >= 0."""
+    """Stable log(1 + t + t^2/2) for finite t >= 0."""
 
     if t < 0 or not isfinite(t):
         raise ValueError("t must be finite and non-negative")
     if t < 1e150:
         return log(1.0 + t + 0.5 * t * t)
-    # Avoid squaring very large finite values. For large t,
-    # 1 + t + t^2/2 = t^2 * (1/t^2 + 1/t + 1/2).
     inverse = 1.0 / t
     return 2.0 * log(t) + log(0.5 + inverse + inverse * inverse)
 
 
+def _log_abs_difference(left: float, right: float) -> float:
+    """Return log(abs(left-right)) without overflowing opposite-sign subtraction."""
+
+    if left == right:
+        return -inf
+    opposite_sign = (left >= 0.0 > right) or (right >= 0.0 > left)
+    if opposite_sign:
+        left_abs = abs(left)
+        right_abs = abs(right)
+        maximum = max(left_abs, right_abs)
+        minimum = min(left_abs, right_abs)
+        if maximum == 0.0:
+            return -inf
+        return log(maximum) + log1p(minimum / maximum)
+    difference = abs(left - right)
+    if difference == 0.0:
+        return -inf
+    return log(difference)
+
+
+def _catoni_from_log_magnitude(log_magnitude: float, *, sign: float) -> float:
+    if log_magnitude == -inf:
+        return 0.0
+    if log_magnitude < _LOG_DIRECT_CATONI_LIMIT:
+        magnitude = exp(log_magnitude)
+        transformed = _log_one_plus_t_plus_half_t2(magnitude)
+    else:
+        inverse = exp(-log_magnitude) if log_magnitude < 745.0 else 0.0
+        transformed = 2.0 * log_magnitude + log(
+            0.5 + inverse + inverse * inverse
+        )
+    return transformed if sign > 0 else -transformed
+
+
 def catoni_influence(value: float) -> float:
-    """Odd Catoni influence satisfying the standard exponential envelope.
-
-    phi(x) = log(1 + x + x^2/2) for x >= 0 and
-             -log(1 - x + x^2/2) for x < 0.
-
-    The implementation remains finite for every finite IEEE-754 input.
-    """
+    """Odd Catoni influence satisfying the standard exponential envelope."""
 
     value = float(value)
     if not isfinite(value):
         raise ValueError("Catoni influence requires a finite value")
-    if value >= 0:
-        return _log_one_plus_t_plus_half_t2(value)
-    return -_log_one_plus_t_plus_half_t2(-value)
+    if value == 0.0:
+        return 0.0
+    return _catoni_from_log_magnitude(log(abs(value)), sign=1.0 if value > 0 else -1.0)
+
+
+def _catoni_centered_influence(lam: float, value: float, mean: float) -> float:
+    """Compute phi(lam * (value-mean)) without overflowing the centered product."""
+
+    if value == mean:
+        return 0.0
+    log_difference = _log_abs_difference(value, mean)
+    log_magnitude = log(lam) + log_difference
+    return _catoni_from_log_magnitude(
+        log_magnitude,
+        sign=1.0 if value > mean else -1.0,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,8 +125,7 @@ class CatoniMixtureSpec:
 
     `variance_bound` is an upper bound on the conditional central variance of the
     scalar sequence being monitored. The conditional mean is assumed constant.
-    Positive lambda values are expressed as dimensionless scales divided by the
-    standard-deviation bound so the protocol identity is stable across units.
+    Lambda values are dimensionless scales divided by the standard-deviation bound.
     """
 
     variance_bound: float
@@ -104,6 +146,9 @@ class CatoniMixtureSpec:
             raise ValueError("lambda scales must be positive and finite")
         if len(set(float(item) for item in self.lambda_scales)) != len(self.lambda_scales):
             raise ValueError("lambda scales must be unique")
+        sigma = sqrt(self.variance_bound)
+        if any(not isfinite(float(item) / sigma) for item in self.lambda_scales):
+            raise ValueError("variance bound makes the lambda grid numerically invalid")
         if (
             not isfinite(float(self.root_abs_tolerance))
             or self.root_abs_tolerance <= 0
@@ -122,9 +167,13 @@ class CatoniMixtureSpec:
             raise ValueError("root_max_iterations must be an integer >= 32")
 
     @property
-    def lambdas(self) -> tuple[float, ...]:
+    def lambda_components(self) -> tuple[tuple[float, float], ...]:
         sigma = sqrt(self.variance_bound)
-        return tuple(float(scale) / sigma for scale in self.lambda_scales)
+        return tuple((float(scale) / sigma, float(scale)) for scale in self.lambda_scales)
+
+    @property
+    def lambdas(self) -> tuple[float, ...]:
+        return tuple(item[0] for item in self.lambda_components)
 
     @property
     def side_alpha(self) -> float:
@@ -157,8 +206,8 @@ class CatoniMixtureConfidenceSequence:
     mixture tests with alpha/2 yields a two-sided confidence sequence.
 
     This reference implementation intentionally stores the scalar monitored
-    sequence to make inversion auditable. It does not claim the approximate
-    sufficient-statistic optimizations used by more specialized robust-CS systems.
+    sequence to make inversion auditable. It does not claim approximate
+    sufficient-statistic optimizations used by specialized robust-CS systems.
     """
 
     def __init__(self, spec: CatoniMixtureSpec) -> None:
@@ -175,12 +224,21 @@ class CatoniMixtureConfidenceSequence:
             raise ValueError("robust confidence sequence requires finite observations")
         self._observations.append(value)
 
-    def _component_log_e(self, mean: float, lam: float, *, lower: bool) -> float:
+    def _component_log_e(
+        self,
+        mean: float,
+        lam: float,
+        scale: float,
+        *,
+        lower: bool,
+    ) -> float:
         total = 0.0
         for value in self._observations:
-            influenced = catoni_influence(lam * (value - mean))
+            influenced = _catoni_centered_influence(lam, value, mean)
             total += influenced if lower else -influenced
-        total -= 0.5 * lam * lam * self.spec.variance_bound * self.observations
+        # lam^2 * variance_bound == scale^2 algebraically; using the scale avoids
+        # intermediate overflow when a very small variance bound implies huge lambda.
+        total -= 0.5 * scale * scale * self.observations
         return total
 
     def log_e_value(self, mean: float, *, lower: bool) -> float:
@@ -190,14 +248,21 @@ class CatoniMixtureConfidenceSequence:
         if not self._observations:
             return 0.0
         logs = [
-            self._component_log_e(mean, lam, lower=lower)
-            for lam in self.spec.lambdas
+            self._component_log_e(mean, lam, scale, lower=lower)
+            for lam, scale in self.spec.lambda_components
         ]
         return _logmeanexp(logs)
 
     def e_value(self, mean: float, *, lower: bool) -> float:
         log_value = self.log_e_value(mean, lower=lower)
         return inf if log_value >= 709.0 else exp(log_value)
+
+    @staticmethod
+    def _offset(center: float, scale: float, direction: float) -> float:
+        candidate = center + direction * scale
+        if isfinite(candidate):
+            return candidate
+        return _FLOAT_MAX if direction > 0 else -_FLOAT_MAX
 
     def _root(self, *, lower: bool) -> float:
         if not self._observations:
@@ -212,56 +277,45 @@ class CatoniMixtureConfidenceSequence:
         sigma = sqrt(self.spec.variance_bound)
         scale = max(sigma, 1.0, abs(center) * 1e-12)
 
-        left = center - scale
-        right = center + scale
+        left = self._offset(center, scale, -1.0)
+        right = self._offset(center, scale, 1.0)
         left_value = objective(left)
         right_value = objective(right)
 
-        # For the lower e-process the objective decreases with candidate mean;
-        # for the upper e-process it increases. Expand until the crossing is
-        # bracketed. All observations are finite, and Catoni's logarithmic tails
-        # keep the objective numerically stable for very large magnitudes.
         for _ in range(self.spec.root_max_iterations):
             if lower:
                 if left_value >= 0.0 and right_value <= 0.0:
                     break
                 if left_value < 0.0:
-                    scale *= 2.0
-                    left = center - scale
-                    if not isfinite(left):
-                        left = -1.7976931348623157e308
+                    scale = min(_FLOAT_MAX, scale * 2.0)
+                    left = self._offset(center, scale, -1.0)
                     left_value = objective(left)
                 if right_value > 0.0:
-                    scale *= 2.0
-                    right = center + scale
-                    if not isfinite(right):
-                        right = 1.7976931348623157e308
+                    scale = min(_FLOAT_MAX, scale * 2.0)
+                    right = self._offset(center, scale, 1.0)
                     right_value = objective(right)
             else:
                 if left_value <= 0.0 and right_value >= 0.0:
                     break
                 if left_value > 0.0:
-                    scale *= 2.0
-                    left = center - scale
-                    if not isfinite(left):
-                        left = -1.7976931348623157e308
+                    scale = min(_FLOAT_MAX, scale * 2.0)
+                    left = self._offset(center, scale, -1.0)
                     left_value = objective(left)
                 if right_value < 0.0:
-                    scale *= 2.0
-                    right = center + scale
-                    if not isfinite(right):
-                        right = 1.7976931348623157e308
+                    scale = min(_FLOAT_MAX, scale * 2.0)
+                    right = self._offset(center, scale, 1.0)
                     right_value = objective(right)
         else:
             raise ArithmeticError("failed to bracket Catoni confidence-sequence root")
 
         for _ in range(self.spec.root_max_iterations):
-            midpoint = left + (right - left) / 2.0
+            midpoint = left / 2.0 + right / 2.0
             midpoint_value = objective(midpoint)
             tolerance = self.spec.root_abs_tolerance + self.spec.root_rel_tolerance * max(
                 1.0, abs(midpoint)
             )
-            if right - left <= tolerance:
+            width = right - left
+            if isfinite(width) and width <= tolerance:
                 return midpoint
             if lower:
                 if midpoint_value >= 0.0:
@@ -273,7 +327,7 @@ class CatoniMixtureConfidenceSequence:
                     left = midpoint
                 else:
                     right = midpoint
-        return left + (right - left) / 2.0
+        return left / 2.0 + right / 2.0
 
     def interval(self) -> CatoniConfidenceInterval:
         if not self._observations:
@@ -416,7 +470,6 @@ class RobustRandomizedEffectMonitor:
         if not isfinite(contribution):
             raise ValueError("Horvitz-Thompson contribution overflowed")
 
-        # Atomicity: mutate dedupe/evidence only after every numeric check passes.
         self.cs.update(contribution)
         self._unit_tokens.add(token)
         return self.snapshot()
