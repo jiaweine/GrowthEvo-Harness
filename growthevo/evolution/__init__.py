@@ -57,6 +57,11 @@ from .signed_attestation import (
     dsse_pae,
     verify_authority_attestation,
 )
+from .sigstore_attestation import (
+    SIGSTORE_BUNDLE_V03_MEDIA_TYPE,
+    SigstoreBundleVerifier,
+    SigstoreBundleVerifierSpec,
+)
 
 __all__ = [
     "EVOLVABLE_COORDINATES",
@@ -64,6 +69,7 @@ __all__ = [
     "GROWTHEVO_AUTHORITY_PREDICATE_V1",
     "IN_TOTO_DSSE_PAYLOAD_TYPE",
     "IN_TOTO_STATEMENT_V1",
+    "SIGSTORE_BUNDLE_V03_MEDIA_TYPE",
     "AttestationVerifier",
     "AuthorityAttestationClaims",
     "AuthorityEvidence",
@@ -109,6 +115,8 @@ __all__ = [
     "PromotionTransition",
     "SignatureVerificationResult",
     "SignedAttestationPolicy",
+    "SigstoreBundleVerifier",
+    "SigstoreBundleVerifierSpec",
     "TransitionPolicy",
     "VerifiedAuthorityAttestation",
     "dsse_pae",
