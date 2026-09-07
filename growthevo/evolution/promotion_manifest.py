@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from hashlib import blake2b, sha256
 import json
-from typing import Iterable, Mapping, Sequence
+from typing import Mapping
 
 
 class PromotionTransition(str, Enum):
@@ -30,7 +30,9 @@ class ManifestReason(str, Enum):
     UNAPPROVED_PRODUCER = "unapproved_producer"
     MANIFEST_POLICY_MISMATCH = "manifest_policy_mismatch"
     MANIFEST_SUBJECT_MISMATCH = "manifest_subject_mismatch"
+    MANIFEST_EVIDENCE_MISMATCH = "manifest_evidence_mismatch"
     LEDGER_HEAD_MISMATCH = "ledger_head_mismatch"
+    LEDGER_CHAIN_INVALID = "ledger_chain_invalid"
 
 
 def _canonical_json(payload: Mapping[str, object]) -> bytes:
@@ -90,8 +92,8 @@ class AuthorityEvidence:
 
     `evidence_epoch` is monotone within one authority for one subject. It is a
     logical freshness coordinate, not wall-clock time. `authorized_transitions`
-    describes the strongest transition(s) this exact artifact was designed to
-    authorize; an earlier-stage proof cannot be replayed for final promotion.
+    describes the transition(s) this exact artifact was designed to authorize; an
+    earlier-stage proof cannot be replayed for final promotion.
     """
 
     authority_id: str
@@ -152,7 +154,7 @@ class AuthorityEvidence:
 
 @dataclass(frozen=True, slots=True)
 class AuthorityRequirement:
-    """Exact allowlist for one authority at one promotion transition."""
+    """Exact type/protocol/producer allowlist for one required authority."""
 
     authority_id: str
     allowed_evidence_types: tuple[str, ...]
@@ -198,11 +200,13 @@ class TransitionPolicy:
 class PromotionEvidencePolicy:
     """Policy-as-code for promotion authority composition.
 
-    `veto_authorities` are checked even when they are not listed as positive
-    requirements for a transition. `sticky_block_authorities` are stronger: once a
-    BLOCKED statement has ever appeared for the current subject, a later SATISFIED
-    statement cannot clear it under this policy. Recovery requires a new subject
-    identity (for example a new experiment/plan/artifact) or a different policy.
+    `veto_authorities` are checked even when they are not positive requirements for
+    a transition. Production policies should also list veto authorities as normal
+    requirements whenever producer/protocol allowlisting is required for that
+    transition. `sticky_block_authorities` are stronger: once a BLOCKED statement
+    has ever appeared for the current subject, a later SATISFIED statement cannot
+    clear it under this policy. Recovery then requires a new subject identity or a
+    different explicitly fingerprinted policy.
     """
 
     policy_id: str
@@ -304,7 +308,7 @@ class PromotionEvidenceLedger:
 
     The ledger stores only fingerprints/aggregate authority statements. It is not a
     cryptographic signer. Authenticity of an upstream artifact remains the
-    responsibility of the producer/verification boundary named by the policy.
+    responsibility of the trusted producer/verification boundary named by policy.
     """
 
     _GENESIS = "0" * 64
@@ -331,7 +335,6 @@ class PromotionEvidenceLedger:
                 raise ValueError("stale authority evidence cannot be appended")
             if evidence.evidence_epoch == latest.evidence_epoch:
                 if evidence.fingerprint == latest.fingerprint:
-                    # Exact replay is idempotent and does not extend the audit chain.
                     for event in reversed(self._events):
                         if event.evidence.fingerprint == evidence.fingerprint:
                             return event
@@ -383,10 +386,7 @@ class PromotionEvidenceLedger:
         return True
 
     def latest_evidence(self) -> tuple[AuthorityEvidence, ...]:
-        return tuple(
-            self._latest[key]
-            for key in sorted(self._latest)
-        )
+        return tuple(self._latest[key] for key in sorted(self._latest))
 
     def build_manifest(
         self,
@@ -422,6 +422,8 @@ class PromotionEvidenceLedger:
         policy: PromotionEvidencePolicy,
     ) -> ManifestEvaluation:
         reasons: list[str] = []
+        if not self.verify_chain():
+            reasons.append(ManifestReason.LEDGER_CHAIN_INVALID.value)
         if manifest.policy_fingerprint != policy.fingerprint:
             reasons.append(ManifestReason.MANIFEST_POLICY_MISMATCH.value)
         if manifest.subject.fingerprint != self.subject.fingerprint:
@@ -431,18 +433,19 @@ class PromotionEvidenceLedger:
             or manifest.ledger_event_count != len(self._events)
         ):
             reasons.append(ManifestReason.LEDGER_HEAD_MISMATCH.value)
+        canonical_latest = self.latest_evidence()
+        if tuple(item.fingerprint for item in manifest.latest_evidence) != tuple(
+            item.fingerprint for item in canonical_latest
+        ):
+            reasons.append(ManifestReason.MANIFEST_EVIDENCE_MISMATCH.value)
         if manifest.transition not in [item.transition for item in policy.transitions]:
             raise ValueError("manifest transition is not configured by the policy")
 
-        # The evaluator never trusts a caller-provided evidence subset. It rebuilds
-        # the latest view from the verified ledger and only uses the manifest as a
-        # provenance snapshot whose head/policy/subject must match.
         latest = dict(self._latest)
         transition_policy = policy.transition_policy(manifest.transition)
 
         for authority_id in policy.sticky_block_authorities:
-            blocked = self._sticky_blocked(authority_id)
-            if blocked is not None:
+            if self._sticky_blocked(authority_id) is not None:
                 reasons.append(f"{ManifestReason.STICKY_BLOCK.value}:{authority_id}")
 
         for authority_id in policy.veto_authorities:
@@ -483,17 +486,17 @@ class PromotionEvidenceLedger:
                     f"{ManifestReason.UNAPPROVED_PRODUCER.value}:{requirement.authority_id}"
                 )
 
-        authorized = not reasons
+        unique_reasons = tuple(dict.fromkeys(reasons))
+        authorized = not unique_reasons
         if authorized:
-            reasons.append(ManifestReason.AUTHORIZED.value)
+            unique_reasons = (ManifestReason.AUTHORIZED.value,)
         selected = tuple(
-            evidence.fingerprint
-            for _, evidence in sorted(latest.items())
+            evidence.fingerprint for _, evidence in sorted(latest.items())
         )
         return ManifestEvaluation(
             authorized=authorized,
             transition=manifest.transition,
-            reasons=tuple(reasons),
+            reasons=unique_reasons,
             manifest_fingerprint=manifest.fingerprint,
             subject_fingerprint=self.subject.fingerprint,
             ledger_head_hash=self.head_hash,
