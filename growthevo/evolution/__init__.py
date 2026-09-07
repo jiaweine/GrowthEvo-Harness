@@ -30,6 +30,14 @@ from .promotion_manifest import (
     PromotionTransition,
     TransitionPolicy,
 )
+from .pypi_provenance import (
+    GITHUB_OIDC_ISSUER,
+    PYPI_ATTESTATIONS_VERSION,
+    PYPI_PUBLISH_PREDICATE_V1,
+    PyPIPublishProvenanceSpec,
+    PyPIPublishProvenanceVerifier,
+    VerifiedPyPIProvenance,
+)
 from .sequential_causal import (
     FrozenCUPEDSpec,
     GroupSequentialEvidence,
@@ -66,9 +74,12 @@ from .sigstore_attestation import (
 __all__ = [
     "EVOLVABLE_COORDINATES",
     "FROZEN_COORDINATES",
+    "GITHUB_OIDC_ISSUER",
     "GROWTHEVO_AUTHORITY_PREDICATE_V1",
     "IN_TOTO_DSSE_PAYLOAD_TYPE",
     "IN_TOTO_STATEMENT_V1",
+    "PYPI_ATTESTATIONS_VERSION",
+    "PYPI_PUBLISH_PREDICATE_V1",
     "SIGSTORE_BUNDLE_V03_MEDIA_TYPE",
     "AttestationVerifier",
     "AuthorityAttestationClaims",
@@ -113,12 +124,15 @@ __all__ = [
     "PromotionEvidencePolicy",
     "PromotionSubject",
     "PromotionTransition",
+    "PyPIPublishProvenanceSpec",
+    "PyPIPublishProvenanceVerifier",
     "SignatureVerificationResult",
     "SignedAttestationPolicy",
     "SigstoreBundleVerifier",
     "SigstoreBundleVerifierSpec",
     "TransitionPolicy",
     "VerifiedAuthorityAttestation",
+    "VerifiedPyPIProvenance",
     "dsse_pae",
     "verify_authority_attestation",
 ]
