@@ -114,7 +114,6 @@ def test_off_policy_monitor_allows_unbounded_importance_weight() -> None:
             value_floor=0.2,
         ),
     )
-    # Importance-weighted rewards are unbounded even though reward itself is bounded.
     monitor.update(observation_id="rare", importance_weight=100.0, reward=1.0)
     snapshot = monitor.snapshot()
     assert isfinite(snapshot.lower)
@@ -145,7 +144,10 @@ def test_off_policy_duplicate_is_rejected() -> None:
 def test_off_policy_numeric_overflow_is_atomic() -> None:
     monitor = ChangingMeanOffPolicyValueMonitor(
         experiment_id="ope-overflow",
-        spec=ChangingMeanOffPolicySpec(confidence_sequence=_spec()),
+        spec=ChangingMeanOffPolicySpec(
+            confidence_sequence=_spec(mean_upper=2.0),
+            reward_upper=2.0,
+        ),
     )
     with pytest.raises(ValueError, match="overflowed"):
         monitor.update(
