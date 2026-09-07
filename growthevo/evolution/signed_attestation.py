@@ -42,6 +42,12 @@ def _nonempty(value: str, name: str) -> str:
     return value
 
 
+def _require_string(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    return value
+
+
 def dsse_pae(payload_type: str, payload: bytes) -> bytes:
     """DSSE Pre-Authentication Encoding.
 
@@ -406,6 +412,18 @@ def _parse_statement(
     if predicate["subject_fingerprint"] != expected_subject.fingerprint:
         raise ValueError("predicate subject fingerprint does not match promotion subject")
 
+    string_claims = {
+        name: _require_string(predicate[name], f"predicate.{name}")
+        for name in (
+            "authority_id",
+            "evidence_type",
+            "subject_fingerprint",
+            "protocol_fingerprint",
+            "artifact_fingerprint",
+            "source_chain_head",
+            "details_fingerprint",
+        )
+    }
     transitions_raw = predicate["authorized_transitions"]
     if not isinstance(transitions_raw, list) or not transitions_raw:
         raise ValueError("authorized_transitions must be a non-empty array")
@@ -416,15 +434,15 @@ def _parse_statement(
         raise ValueError("attestation contains an invalid enum value") from exc
 
     return AuthorityAttestationClaims(
-        authority_id=str(predicate["authority_id"]),
-        evidence_type=str(predicate["evidence_type"]),
-        protocol_fingerprint=str(predicate["protocol_fingerprint"]),
-        artifact_fingerprint=str(predicate["artifact_fingerprint"]),
+        authority_id=string_claims["authority_id"],
+        evidence_type=string_claims["evidence_type"],
+        protocol_fingerprint=string_claims["protocol_fingerprint"],
+        artifact_fingerprint=string_claims["artifact_fingerprint"],
         verdict=verdict,
         authorized_transitions=transitions,
         evidence_epoch=predicate["evidence_epoch"],  # type: ignore[arg-type]
-        source_chain_head=str(predicate["source_chain_head"]),
-        details_fingerprint=str(predicate["details_fingerprint"]),
+        source_chain_head=string_claims["source_chain_head"],
+        details_fingerprint=string_claims["details_fingerprint"],
     )
 
 
