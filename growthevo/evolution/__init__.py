@@ -70,10 +70,20 @@ from .sigstore_attestation import (
     SigstoreBundleVerifier,
     SigstoreBundleVerifierSpec,
 )
+from .slsa_build_provenance import (
+    GITHUB_ACTIONS_WORKFLOW_BUILD_TYPE_V1,
+    SLSA_PROVENANCE_V1,
+    SLSABuilderTrust,
+    SLSABuildExpectationSpec,
+    SLSABuildProvenanceVerifier,
+    VerifiedSLSABuildProvenance,
+    canonical_external_parameters,
+)
 
 __all__ = [
     "EVOLVABLE_COORDINATES",
     "FROZEN_COORDINATES",
+    "GITHUB_ACTIONS_WORKFLOW_BUILD_TYPE_V1",
     "GITHUB_OIDC_ISSUER",
     "GROWTHEVO_AUTHORITY_PREDICATE_V1",
     "IN_TOTO_DSSE_PAYLOAD_TYPE",
@@ -81,6 +91,7 @@ __all__ = [
     "PYPI_ATTESTATIONS_VERSION",
     "PYPI_PUBLISH_PREDICATE_V1",
     "SIGSTORE_BUNDLE_V03_MEDIA_TYPE",
+    "SLSA_PROVENANCE_V1",
     "AttestationVerifier",
     "AuthorityAttestationClaims",
     "AuthorityEvidence",
@@ -126,6 +137,9 @@ __all__ = [
     "PromotionTransition",
     "PyPIPublishProvenanceSpec",
     "PyPIPublishProvenanceVerifier",
+    "SLSABuilderTrust",
+    "SLSABuildExpectationSpec",
+    "SLSABuildProvenanceVerifier",
     "SignatureVerificationResult",
     "SignedAttestationPolicy",
     "SigstoreBundleVerifier",
@@ -133,6 +147,8 @@ __all__ = [
     "TransitionPolicy",
     "VerifiedAuthorityAttestation",
     "VerifiedPyPIProvenance",
+    "VerifiedSLSABuildProvenance",
+    "canonical_external_parameters",
     "dsse_pae",
     "verify_authority_attestation",
 ]
