@@ -1,4 +1,15 @@
 from .failure_miner import FailureMiner, FailureTrace
+from .nonstationary_heavy_tail import (
+    ChangingMeanDecision,
+    ChangingMeanLowerConfidenceSequence,
+    ChangingMeanLowerCSSpec,
+    ChangingMeanLowerSnapshot,
+    ChangingMeanOffPolicySpec,
+    ChangingMeanOffPolicyValueMonitor,
+    NonstationaryFloorSnapshot,
+    NonstationaryFloorSpec,
+    NonstationaryPositiveMetricMonitor,
+)
 from .online_promotion import (
     CanaryCandidate,
     CanaryDecision,
@@ -41,6 +52,12 @@ __all__ = [
     "CanaryRouter",
     "CanarySnapshot",
     "CanaryStatus",
+    "ChangingMeanDecision",
+    "ChangingMeanLowerConfidenceSequence",
+    "ChangingMeanLowerCSSpec",
+    "ChangingMeanLowerSnapshot",
+    "ChangingMeanOffPolicySpec",
+    "ChangingMeanOffPolicyValueMonitor",
     "FailureMiner",
     "FailureTrace",
     "FrozenCUPEDSpec",
@@ -56,6 +73,9 @@ __all__ = [
     "HighPowerOnlinePromotionController",
     "HoeffdingMixtureEProcess",
     "MetricSequentialEvidence",
+    "NonstationaryFloorSnapshot",
+    "NonstationaryFloorSpec",
+    "NonstationaryPositiveMetricMonitor",
     "OnlineCanaryMonitor",
     "OnlinePromotionController",
     "PromotionAuditEvent",
