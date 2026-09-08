@@ -1,0 +1,44 @@
+name: SLSA Build Provenance
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  real-slsa-build-provenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned SLSA verification stack
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev,attestation-pypi]'
+          python - <<'PY'
+          import pypi_attestations
+          import sigstore
+
+          assert pypi_attestations.__version__ == "0.0.30"
+          assert sigstore.__version__ == "4.5.0"
+          PY
+
+      - name: Verify pinned public SLSA build provenance end to end
+        run: python -m pytest tests/test_slsa_build_provenance_real_fixture.py -q

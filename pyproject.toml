@@ -66,6 +66,13 @@ llm = [
   "anthropic>=0.60",
   "google-genai>=2.22.0",
 ]
+attestation-sigstore = [
+  "sigstore==4.5.0",
+]
+attestation-pypi = [
+  "pypi-attestations==0.0.30",
+  "sigstore==4.5.0",
+]
 
 [tool.setuptools.dynamic]
 version = {attr = "growthevo._version.__version__"}
