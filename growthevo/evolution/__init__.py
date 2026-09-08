@@ -16,6 +16,12 @@ from .online_promotion import (
     PromotionAuditEvent,
 )
 from .optimizer import EVOLVABLE_COORDINATES, FROZEN_COORDINATES, HarnessEvolver
+from .promotion_governance import (
+    GovernanceAuthorizationRecord,
+    GovernedHighPowerOnlineCanaryMonitor,
+    GovernedHighPowerOnlinePromotionController,
+    PromotionManifestGate,
+)
 from .promotion_manifest import (
     AuthorityEvidence,
     AuthorityRequirement,
@@ -132,6 +138,9 @@ __all__ = [
     "FailureMiner",
     "FailureTrace",
     "FrozenCUPEDSpec",
+    "GovernanceAuthorizationRecord",
+    "GovernedHighPowerOnlineCanaryMonitor",
+    "GovernedHighPowerOnlinePromotionController",
     "GroupSequentialEvidence",
     "GroupSequentialLook",
     "GroupSequentialPrimaryMonitor",
@@ -153,6 +162,7 @@ __all__ = [
     "PromotionEvidenceLedger",
     "PromotionEvidenceManifest",
     "PromotionEvidencePolicy",
+    "PromotionManifestGate",
     "PromotionSubject",
     "PromotionTransition",
     "PyPIPublishProvenanceSpec",
