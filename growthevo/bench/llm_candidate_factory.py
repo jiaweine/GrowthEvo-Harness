@@ -88,6 +88,17 @@ class BuiltShadowCandidate:
     entry: ShadowPlannerEntry
 
 
+class _ContractOnlyClient:
+    """Provider-shaped identity stub used only for offline preregistration."""
+
+    def __init__(self, endpoint: LLMEndpointSpec) -> None:
+        self.provider_name = endpoint.provider
+        self.model = endpoint.model
+
+    def generate(self, **_: Any) -> Any:  # pragma: no cover - defensive only
+        raise RuntimeError("contract-only client cannot make model requests")
+
+
 def _build_client(endpoint: LLMEndpointSpec, client_override: Any | None) -> Any:
     if endpoint.provider == "openai":
         return OpenAIResponsesClient(
@@ -130,6 +141,51 @@ def _candidate_contract_fingerprint(
     )
 
 
+def _candidate_from_planner(
+    *,
+    spec: ShadowCandidateSpec,
+    planner: GuardedLLMGrowthPlanner,
+) -> LLMPolicyCandidate:
+    contract_fingerprint = _candidate_contract_fingerprint(spec=spec, planner=planner)
+    return LLMPolicyCandidate(
+        name=spec.name,
+        provider=spec.endpoint.provider,
+        model=spec.endpoint.model,
+        contract_fingerprint=contract_fingerprint,
+        critic_provider=(
+            spec.critic_endpoint.provider if spec.critic_endpoint is not None else None
+        ),
+        critic_model=(
+            spec.critic_endpoint.model if spec.critic_endpoint is not None else None
+        ),
+    )
+
+
+def shadow_candidate_metadata(
+    spec: ShadowCandidateSpec,
+    *,
+    fallback: GrowthHypothesisPlanner | None = None,
+) -> LLMPolicyCandidate:
+    """Compute exact candidate identity without importing SDKs or reading credentials.
+
+    This is the preregistration path used by production operator manifests. It
+    instantiates only the guarded planner contract with non-callable identity
+    stubs; no provider client is created and no network call can occur.
+    """
+
+    contract_planner = GuardedLLMGrowthPlanner(
+        _ContractOnlyClient(spec.endpoint),
+        fallback=fallback,
+        critic=(
+            _ContractOnlyClient(spec.critic_endpoint)
+            if spec.critic_endpoint is not None
+            else None
+        ),
+        config=spec.planner_config,
+    )
+    return _candidate_from_planner(spec=spec, planner=contract_planner)
+
+
 def build_shadow_candidate(
     spec: ShadowCandidateSpec,
     *,
@@ -151,19 +207,10 @@ def build_shadow_candidate(
         critic=critic,
         config=spec.planner_config,
     )
-    contract_fingerprint = _candidate_contract_fingerprint(spec=spec, planner=planner)
-    candidate = LLMPolicyCandidate(
-        name=spec.name,
-        provider=spec.endpoint.provider,
-        model=spec.endpoint.model,
-        contract_fingerprint=contract_fingerprint,
-        critic_provider=(
-            spec.critic_endpoint.provider if spec.critic_endpoint is not None else None
-        ),
-        critic_model=(
-            spec.critic_endpoint.model if spec.critic_endpoint is not None else None
-        ),
-    )
+    candidate = _candidate_from_planner(spec=spec, planner=planner)
+    preregistered = shadow_candidate_metadata(spec, fallback=fallback)
+    if candidate != preregistered:  # pragma: no cover - invariant tripwire
+        raise RuntimeError("runtime candidate identity differs from offline contract identity")
     entry = ShadowPlannerEntry(candidate=candidate, planner=planner)
     return BuiltShadowCandidate(
         spec=spec,
