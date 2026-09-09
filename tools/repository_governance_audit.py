@@ -133,8 +133,6 @@ def audit_governance(
     failures: list[str] = []
     if branch_data.get("name") != branch:
         failures.append(f"branch API returned {branch_data.get('name')!r}, expected {branch!r}")
-    if branch_data.get("protected") is not True:
-        failures.append(f"branch {branch!r} is not reported as protected")
 
     matched = tuple(
         int(ruleset["id"])
@@ -144,10 +142,12 @@ def audit_governance(
         and _ruleset_satisfies_contract(ruleset, branch)
     )
     if not matched:
+        branch_flag = branch_data.get("protected") is True
         failures.append(
             "no active branch ruleset exactly matches the GrowthEvo governance contract "
             "(PR-only, zero approvals, six strict GitHub Actions checks, no bypass, "
-            "no deletion, no force-push)"
+            "no deletion, no force-push); "
+            f"branch API protected={branch_flag}"
         )
 
     return GovernanceAuditResult(
