@@ -59,13 +59,22 @@ def test_good_ruleset_passes() -> None:
     assert result.matched_ruleset_ids == (123,)
 
 
-def test_unprotected_branch_fails_even_with_good_ruleset() -> None:
+def test_effective_ruleset_is_sufficient_even_if_branch_flag_is_false() -> None:
     result = MODULE.audit_governance(
         branch_data={"name": "main", "protected": False},
         rulesets=[_good_ruleset()],
     )
+    assert result.ok is True
+    assert result.failures == ()
+
+
+def test_missing_ruleset_fails_even_if_branch_flag_is_true() -> None:
+    result = MODULE.audit_governance(
+        branch_data={"name": "main", "protected": True},
+        rulesets=[],
+    )
     assert result.ok is False
-    assert any("not reported as protected" in failure for failure in result.failures)
+    assert any("no active branch ruleset" in failure for failure in result.failures)
 
 
 def test_missing_check_fails_closed() -> None:
