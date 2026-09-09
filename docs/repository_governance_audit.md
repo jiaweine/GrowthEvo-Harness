@@ -34,7 +34,9 @@ python tools/repository_governance_audit.py \
   --branch main
 ```
 
-The checker calls the public GitHub branch and repository-ruleset APIs and exits nonzero unless the full contract is satisfied. It fails closed on API/schema errors.
+The checker calls the public GitHub branch and repository-ruleset APIs and exits nonzero unless an active ruleset matches the full contract. It fails closed on API/schema errors.
+
+The branch API's `protected` flag is retained as diagnostic context, but the audit does not require that legacy flag to be `true` when a matching active ruleset is present. GitHub rulesets and traditional branch-protection rules are separate protection mechanisms. Conversely, traditional branch protection alone does not satisfy issue #63 because the repository's target governance contract explicitly requires an active ruleset.
 
 For machine-readable output:
 
@@ -46,15 +48,15 @@ python tools/repository_governance_audit.py --json
 
 `.github/workflows/repository-governance-audit.yml` runs the same live audit every day and through `workflow_dispatch`.
 
-This workflow is a **detector**, not a replacement for the ruleset. Before #63 is actually completed, a manual/scheduled run is expected to fail because GitHub currently reports `main` as unprotected and the repository rulesets list is empty.
+This workflow is a **detector**, not a replacement for the ruleset. Before #63 is actually completed, a manual/scheduled run is expected to fail because the repository rulesets list is currently empty.
 
 Once an administrator creates the ruleset described in #63, the workflow should become green without any code changes. If the ruleset is later weakened or deleted, the audit should fail again.
 
 ## Verification sequence for closing #63
 
 1. Create the active `main` ruleset using an administration-capable GitHub account/token.
-2. Confirm `GET /repos/jiaweine/GrowthEvo-Harness/branches/main` reports `protected: true`.
-3. Confirm the rulesets API returns an active ruleset matching the contract above.
+2. Confirm the rulesets API returns an active ruleset matching the contract above and targeting `main` / `~DEFAULT_BRANCH`.
+3. Treat `GET /repos/jiaweine/GrowthEvo-Harness/branches/main` reporting `protected: true` as additional confirmation when available, not as a substitute for the required ruleset.
 4. Trigger `Repository Governance Audit` and require a green result.
 5. Open a normal code PR and confirm the six checks are required.
 6. Confirm direct push, branch deletion, and force-push attempts are rejected for non-bypass actors.
