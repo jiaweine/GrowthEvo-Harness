@@ -138,7 +138,8 @@ def _doctor(args: argparse.Namespace) -> int:
     payload = {
         **_manifest_summary(manifest),
         "doctor": {
-            "network_calls_made": False,
+            "model_requests_made": False,
+            "pure_offline_preflight": not bool(args.instantiate),
             "credential_values_logged": False,
             "instantiate_requested": bool(args.instantiate),
             "healthy": healthy,
@@ -262,7 +263,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "also instantiate provider clients using their normal environment or "
-            "workload identity; no model request is sent"
+            "workload identity; no model request is sent, but SDK initialization "
+            "may perform provider-specific credential or metadata discovery"
         ),
     )
     doctor.set_defaults(func=_doctor)
