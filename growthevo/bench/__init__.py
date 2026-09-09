@@ -18,6 +18,7 @@ from .llm_candidate_factory import (
     LLMEndpointSpec,
     ShadowCandidateSpec,
     build_shadow_candidate,
+    shadow_candidate_metadata,
 )
 from .llm_evaluation import (
     CausalOptionEvidence,
@@ -172,6 +173,7 @@ __all__ = [
     "preregistered_ope_estimate",
     "randomized_targeting_estimate",
     "run_locked_shadow_benchmark",
+    "shadow_candidate_metadata",
     "targeting_evidence_fingerprint",
     "treatment_records_fingerprint",
 ]

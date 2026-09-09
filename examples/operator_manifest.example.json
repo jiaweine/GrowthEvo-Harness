@@ -1,0 +1,59 @@
+{
+  "schema_version": "growthevo.production-operator-manifest.v1",
+  "benchmark": "replace-with-locked-semantic-benchmark",
+  "dataset": "replace-with-locked-case-set",
+  "dataset_source": "replace-with-versioned-source-id",
+  "evidence_producer": {
+    "name": "replace-with-causal-evidence-producer",
+    "version": "v1"
+  },
+  "trials_per_case": 1,
+  "z_value": 1.96,
+  "min_decision_coverage": 1.0,
+  "max_invalid_rate": 0.0,
+  "max_evidence_violation_rate": 0.0,
+  "max_hard_stop_violation_rate": 0.0,
+  "max_fallback_rate": 0.25,
+  "min_support_coverage": 0.95,
+  "min_effective_sample_ratio": 0.05,
+  "require_promotion_evidence": true,
+  "evidence_contract": "tiered-causal-option-evidence-v1",
+  "candidates": [
+    {
+      "name": "openai-pinned-shadow",
+      "endpoint": {
+        "provider": "openai",
+        "model": "REPLACE_WITH_PINNED_OPENAI_MODEL",
+        "reasoning_effort": "medium",
+        "store": false
+      },
+      "planner_config": {
+        "shadow_mode": true,
+        "min_confidence": 0.7
+      }
+    },
+    {
+      "name": "anthropic-pinned-shadow",
+      "endpoint": {
+        "provider": "anthropic",
+        "model": "REPLACE_WITH_PINNED_ANTHROPIC_MODEL",
+        "max_tokens": 900
+      },
+      "planner_config": {
+        "shadow_mode": true,
+        "min_confidence": 0.7
+      }
+    },
+    {
+      "name": "google-pinned-shadow",
+      "endpoint": {
+        "provider": "google",
+        "model": "REPLACE_WITH_PINNED_GEMINI_MODEL"
+      },
+      "planner_config": {
+        "shadow_mode": true,
+        "min_confidence": 0.7
+      }
+    }
+  ]
+}

@@ -1,8 +1,6 @@
 # GrowthEvo-Harness project completion status
 
-This document defines the engineering completion boundary of the guarded LLM + causal decision + production promotion architecture.
-
-It distinguishes **implemented and validated framework capabilities** from **deployment facts that must come from a real product environment**.
+This document defines the engineering completion boundary of the guarded LLM + causal decision + production promotion architecture. It distinguishes **implemented and validated framework capabilities** from **deployment facts and repository-administration controls that must come from an external environment**.
 
 ## Completed architecture
 
@@ -42,6 +40,24 @@ Implemented:
 - Tier A randomized and Tier B pre-registered OPE evidence;
 - diagnostic-only lower evidence tiers;
 - strict separation of LLM behavioral evaluation from causal promotion evidence.
+
+### Production operator surface
+
+Implemented:
+
+- `growthevo-operator` CLI over the existing typed benchmark contracts;
+- strict non-secret operator manifest;
+- SDK/credential-free candidate preregistration and model+harness fingerprints;
+- physically separate planner-visible context files and evaluator-only evidence files;
+- exact context fingerprints;
+- validation/holdout split identity checks;
+- deferred holdout evidence loading until after validation winner freeze;
+- runtime candidate identity re-verification;
+- provider SDK readiness doctor with no model request;
+- deterministic offline operator smoke demo with fake transports;
+- strict file-schema documentation and tests.
+
+This layer does not duplicate promotion logic and cannot turn a diagnostic run into promotion evidence. The existing locked protocol remains authoritative.
 
 ### Real causal benchmark integration
 
@@ -194,7 +210,7 @@ Implemented:
 
 ## Production path
 
-The closed engineering path is:
+The closed in-code path is:
 
 ```text
 untrusted product context
@@ -272,19 +288,30 @@ Before a real deployment, operators must freeze:
 
 Those settings are deliberately deployment-owned and fingerprinted; they should not be universal defaults hidden in the framework.
 
+## Repository-governance blocker
+
+The codebase can be engineering-complete while the GitHub repository still has an external administrative control missing.
+
+Issue **#63 — Protect main with the CI evidence gates** is the canonical remaining repository-governance blocker. Completion of that issue requires a real server-side GitHub branch ruleset targeting `main`, with the required GrowthEvo CI contexts and force-push/deletion protection defined in the issue.
+
+Until GitHub itself reports an effective active rule, do **not** describe `main` as protected merely because CI runs after a push. Post-push detection is not equivalent to preventing an invalid direct push from landing.
+
+This control cannot be implemented from code inside the repository and must be applied through an administration-capable GitHub settings/API path.
+
 ## Definition of engineering complete
 
-For this repository, the project is engineering-complete when the final stacked head passes:
+For this repository, the codebase is engineering-complete when the exact candidate head passes:
 
 1. full Python 3.11-3.14 tests;
 2. runtime and training smoke tests;
-3. optional model-provider SDK contract checks;
-4. Sigstore SDK contract checks;
-5. package build and clean-wheel install;
-6. accepted evidence-seal validation;
-7. full pinned small-OBD locked-OPE integration;
-8. live public PyPI PEP-740 verification;
-9. live public SLSA Build Provenance verification;
-10. strict production-authority lifecycle tests.
+3. production-operator manifest/deferred-evidence/CLI tests and offline smoke test;
+4. optional model-provider SDK contract checks;
+5. Sigstore SDK contract checks;
+6. package build and clean-wheel install, including installed operator CLI;
+7. accepted evidence-seal validation;
+8. full pinned small-OBD locked-OPE integration;
+9. live public PyPI PEP-740 verification;
+10. live public SLSA Build Provenance verification;
+11. strict production-authority lifecycle tests.
 
-No merge or deployment is part of this definition. Merge remains an explicit human action after review.
+Merge is a separate human-authorized repository action. Deployment and real-model promotion remain deployment-owned evidence decisions. Server-side branch protection is tracked independently by #63 and must not be falsely conflated with in-repository engineering completion.

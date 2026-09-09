@@ -26,3 +26,11 @@ def locked_targeting_main() -> int:
     from .bench.locked_targeting_cli import main
 
     return main()
+
+
+def operator_main() -> int:
+    if _print_version_if_requested("growthevo-operator"):
+        return 0
+    from .operator_cli import main
+
+    return main()

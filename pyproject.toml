@@ -37,6 +37,7 @@ Changelog = "https://github.com/jiaweine/GrowthEvo-Harness/blob/main/CHANGELOG.m
 [project.scripts]
 growthevo-locked-ope = "growthevo.cli:locked_ope_main"
 growthevo-locked-targeting = "growthevo.cli:locked_targeting_main"
+growthevo-operator = "growthevo.cli:operator_main"
 
 [project.optional-dependencies]
 dev = [

@@ -68,6 +68,7 @@ GrowthEvo 将因果估计、策略改进、OPE、实验锁定、长期风险和�
 | **Long-horizon planning** | Stochastic rollout、downside CVaR、constraint-aware model-based planning |
 | **Trajectory learning** | Potential shaping、GAE、dynamics-aware bootstrap boundaries |
 | **Optional LLM proposals** | GPT / Claude / Gemini adapters、shadow evaluation、model+harness identity、typed causal evidence |
+| **Production operator** | Non-secret preregistration、provider doctor、deferred holdout labels、locked shadow-run CLI |
 | **Online promotion** | Randomized canary、continuous safety、frozen CUPED、planned sequential looks、promotion / rollback |
 
 ### Research principles
@@ -322,13 +323,21 @@ pip install -e '.[obd]'
 ```bash
 growthevo-locked-ope --help
 growthevo-locked-targeting --help
+growthevo-operator --help
 ```
 
 ### Optional guarded LLM workflow
 
 通过 [`GuardedLLMGrowthPlanner`](docs/llm_proposal_plane.md) 显式启用高层增长目标建议；默认 `GrowthEvoRuntime()` 继续使用确定性 planner。可按需要安装 `.[llm-openai]`、`.[llm-anthropic]`、`.[llm-gemini]`，或通过 `.[llm]` 安装全部 provider SDK。
 
-完整流程包括 [shadow 与锁定候选选择](docs/llm_benchmark.md)、[带来源的因果证据](docs/causal_option_evidence.md)、[随机 canary](docs/online_canary_promotion.md) 和 [序贯晋升](docs/high_power_sequential_causal.md)。在线结果绑定首次曝光阶段；持续监测安全，只在预注册检验点晋升，到最终样本上限仍未通过全部门槛则回滚。
+完整流程包括 [shadow 与锁定候选选择](docs/llm_benchmark.md)、[带来源的因果证据](docs/causal_option_evidence.md)、[生产 operator](docs/production_operator.md)、[随机 canary](docs/online_canary_promotion.md) 和 [序贯晋升](docs/high_power_sequential_causal.md)。在线结果绑定首次曝光阶段；持续监测安全，只在预注册检验点晋升，到最终样本上限仍未通过全部门槛则回滚。
+
+在接入真实 provider 前，可以先纯离线冻结候选合同：
+
+```bash
+growthevo-operator validate --manifest examples/operator_manifest.example.json
+python examples/production_operator_demo.py
+```
 
 这些是经过合成契约测试的可选组件。真实模型获得线上晋升资格需要独立的 Tier-A/B 因果证据和预注册在线实验；现有 Criteo / OBD 结果不构成 LLM 策略的晋升证据。
 
@@ -381,6 +390,7 @@ GrowthEvo 的实现按 causal estimation、policy learning、evaluation、benchm
 | **Evidence gates** | `growthevo/bench/ope_evidence_gate.py` | Support and evidence eligibility |
 | **Experiment plans** | `growthevo/bench/*experiment_plan.py` | Pre-registration schemas and fingerprints |
 | **Locked CLIs** | `growthevo/bench/locked_*_cli.py` | Validation selection and final holdout execution |
+| **LLM operator** | `growthevo/operator_*.py` | Non-secret preregistration, provider preflight and deferred locked shadow execution |
 | **Benchmark runners** | `scripts/run_*_full_locked.py` | Full-data research benchmark entry points |
 
 ### Repository layout
@@ -441,8 +451,11 @@ benchmarks/ope/results/
 | Guarded LLM proposal plane | [`docs/llm_proposal_plane.md`](docs/llm_proposal_plane.md) |
 | Locked LLM benchmark | [`docs/llm_benchmark.md`](docs/llm_benchmark.md) |
 | Causal option evidence | [`docs/causal_option_evidence.md`](docs/causal_option_evidence.md) |
+| Production operator | [`docs/production_operator.md`](docs/production_operator.md) |
+| Operator file schemas | [`docs/operator_file_schemas.md`](docs/operator_file_schemas.md) |
 | Randomized online canary | [`docs/online_canary_promotion.md`](docs/online_canary_promotion.md) |
 | High-power sequential promotion | [`docs/high_power_sequential_causal.md`](docs/high_power_sequential_causal.md) |
+| Project completion boundary | [`docs/PROJECT_COMPLETION.md`](docs/PROJECT_COMPLETION.md) |
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
 | Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Security | [`SECURITY.md`](SECURITY.md) |

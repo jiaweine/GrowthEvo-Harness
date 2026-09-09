@@ -4,6 +4,16 @@ Notable GrowthEvo-Harness changes are recorded here. The current development lin
 
 ## Unreleased
 
+### Production operator surface
+
+- Added `growthevo-operator` as a thin executable layer over the existing guarded LLM and locked causal benchmark contracts.
+- Added strict, non-secret operator manifests with fully offline candidate preregistration and stable model+harness fingerprints; provider SDKs and credentials are not required to validate a plan.
+- Added physically separate planner-context and evaluator-evidence file contracts plus deferred holdout loading, preserving validation-winner freeze before final causal labels are opened.
+- Added provider readiness diagnostics that make no model request and never log credential values.
+- Added an offline end-to-end operator smoke demo with fake transports; it validates orchestration only and does not claim a real provider winner.
+- Added operator-schema and deferred-evidence tests across the normal Python matrix.
+- Repository administration remains a separate control plane: issue #63 is still the canonical blocker until `main` has a real GitHub ruleset requiring the GrowthEvo CI gates and blocking force-push/deletion.
+
 ### Causal and policy-learning stack
 
 - Added group-aware cross-fitted Doubly Robust CATE with pluggable nuisance/effect learners, explicit positivity/overlap semantics, and distributional-support diagnostics.
