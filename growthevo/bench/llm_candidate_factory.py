@@ -42,6 +42,8 @@ class LLMEndpointSpec:
             raise ValueError("reasoning_effort is currently supported only for OpenAI")
         if self.provider != "openai" and self.store:
             raise ValueError("store is currently an OpenAI-only endpoint setting")
+        if self.provider != "anthropic" and self.max_tokens != 900:
+            raise ValueError("max_tokens is currently configurable only for Anthropic")
 
     def behavior_payload(self) -> dict[str, Any]:
         base: dict[str, Any] = {
