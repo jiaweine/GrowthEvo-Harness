@@ -3,10 +3,10 @@ from __future__ import annotations
 from base64 import b64decode, b64encode
 from binascii import Error as Base64Error
 from dataclasses import asdict, dataclass
-from hashlib import blake2b
 import json
 from typing import Mapping, Protocol, Sequence
 
+from ._integrity import _canonical_json, _fingerprint, _nonempty
 from .promotion_manifest import (
     AuthorityEvidence,
     AuthorityVerdict,
@@ -21,25 +21,6 @@ GROWTHEVO_AUTHORITY_PREDICATE_V1 = (
     "https://github.com/jiaweine/GrowthEvo-Harness/attestation/promotion-authority/v1"
 )
 _SUBJECT_NAME = "growthevo-promotion-subject"
-
-
-def _canonical_json(payload: Mapping[str, object]) -> bytes:
-    return json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
-
-
-def _fingerprint(payload: Mapping[str, object], *, digest_size: int = 20) -> str:
-    return blake2b(_canonical_json(payload), digest_size=digest_size).hexdigest()
-
-
-def _nonempty(value: str, name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} cannot be empty")
-    return value
 
 
 def _require_string(value: object, name: str) -> str:

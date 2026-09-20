@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
-from hashlib import blake2b
-import json
 
+from ._integrity import _fingerprint
 from .online_promotion import (
     CanaryCandidate,
     CanaryDecision,
@@ -22,16 +21,6 @@ from .sequential_causal import (
     HighPowerOnlineCanaryMonitor,
     HighPowerOnlinePromotionController,
 )
-
-
-def _fingerprint(payload: object, *, digest_size: int = 20) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
-    return blake2b(encoded, digest_size=digest_size).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)

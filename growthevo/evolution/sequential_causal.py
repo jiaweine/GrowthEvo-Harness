@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
-from hashlib import blake2b
-import json
 from math import ceil, erfc, inf, isfinite, sqrt
 from statistics import NormalDist
 from typing import Literal, Mapping
 
+from ._integrity import _fingerprint
 from .online_promotion import (
     CanaryCandidate,
     CanaryDecision,
@@ -71,13 +70,9 @@ class FrozenCUPEDSpec:
 
     @property
     def fingerprint(self) -> str:
-        encoded = json.dumps(
-            {"schema": "growthevo.frozen-cuped.v1", **asdict(self)},
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
-        return blake2b(encoded, digest_size=20).hexdigest()
+        return _fingerprint(
+            {"schema": "growthevo.frozen-cuped.v1", **asdict(self)}
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,13 +179,7 @@ class HighPowerCanaryPlan:
             "cuped_fingerprint": self.cuped.fingerprint if self.cuped is not None else None,
             "analysis_unit_name": self.analysis_unit_name,
         }
-        encoded = json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
-        return blake2b(encoded, digest_size=20).hexdigest()
+        return _fingerprint(payload)
 
 
 @dataclass(frozen=True, slots=True)

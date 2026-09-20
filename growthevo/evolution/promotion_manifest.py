@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from enum import Enum
-from hashlib import blake2b, sha256
-import json
+from hashlib import sha256
 from typing import Mapping
+
+from ._integrity import _canonical_json, _fingerprint, _nonempty
 
 
 class PromotionTransition(str, Enum):
@@ -33,25 +34,6 @@ class ManifestReason(str, Enum):
     MANIFEST_EVIDENCE_MISMATCH = "manifest_evidence_mismatch"
     LEDGER_HEAD_MISMATCH = "ledger_head_mismatch"
     LEDGER_CHAIN_INVALID = "ledger_chain_invalid"
-
-
-def _canonical_json(payload: Mapping[str, object]) -> bytes:
-    return json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
-
-
-def _fingerprint(payload: Mapping[str, object], *, digest_size: int = 20) -> str:
-    return blake2b(_canonical_json(payload), digest_size=digest_size).hexdigest()
-
-
-def _nonempty(value: str, name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} cannot be empty")
-    return value
 
 
 @dataclass(frozen=True, slots=True)

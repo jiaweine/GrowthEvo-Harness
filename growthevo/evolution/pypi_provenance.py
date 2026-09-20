@@ -1,21 +1,28 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from hashlib import blake2b, sha256
+from hashlib import sha256
 import json
 from typing import Mapping, Sequence
 
+from ._integrity import (
+    _canonical_json,
+    _commit_sha,
+    _fingerprint,
+    _nonempty,
+    _sha256_hex,
+)
 from .promotion_manifest import (
     AuthorityEvidence,
     AuthorityVerdict,
     PromotionSubject,
     PromotionTransition,
 )
+from .signed_attestation import IN_TOTO_STATEMENT_V1
 
 
 PYPI_ATTESTATIONS_VERSION = "0.0.30"
 PYPI_PUBLISH_PREDICATE_V1 = "https://docs.pypi.org/attestations/publish/v1"
-IN_TOTO_STATEMENT_V1 = "https://in-toto.io/Statement/v1"
 GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 
 # Fulcio certificate claims documented by Sigstore and consumed by
@@ -23,43 +30,6 @@ GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 SOURCE_REPOSITORY_URI_OID = "1.3.6.1.4.1.57264.1.12"
 SOURCE_REPOSITORY_DIGEST_OID = "1.3.6.1.4.1.57264.1.13"
 BUILD_CONFIG_URI_OID = "1.3.6.1.4.1.57264.1.18"
-
-
-def _canonical_json(payload: Mapping[str, object]) -> bytes:
-    return json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
-
-
-def _fingerprint(payload: Mapping[str, object], *, digest_size: int = 20) -> str:
-    return blake2b(_canonical_json(payload), digest_size=digest_size).hexdigest()
-
-
-def _nonempty(value: str, name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} cannot be empty")
-    return value
-
-
-def _sha256_hex(value: str, name: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"{name} must be a SHA-256 hex string")
-    normalized = value.lower()
-    if len(normalized) != 64 or any(ch not in "0123456789abcdef" for ch in normalized):
-        raise ValueError(f"{name} must be a SHA-256 hex string")
-    return normalized
-
-
-def _commit_sha(value: str, name: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"{name} must be a hexadecimal commit SHA")
-    normalized = value.lower()
-    if len(normalized) < 7 or any(ch not in "0123456789abcdef" for ch in normalized):
-        raise ValueError(f"{name} must be a hexadecimal commit SHA")
-    return normalized
 
 
 def _reject_duplicate_keys(raw: bytes) -> object:
