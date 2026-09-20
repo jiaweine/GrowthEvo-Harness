@@ -9,6 +9,8 @@ from typing import Any, Mapping, Sequence
 
 from growthevo.bench.llm_evaluation import LockedLLMBenchmarkArtifact
 
+from ._integrity import _fingerprint
+
 
 class CanaryStatus(str, Enum):
     REGISTERED = "registered"
@@ -205,14 +207,9 @@ class CanaryPlan:
 
     @property
     def fingerprint(self) -> str:
-        payload = {"schema": "growthevo.online-canary-plan.v1", **asdict(self)}
-        encoded = json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
-        return blake2b(encoded, digest_size=20).hexdigest()
+        return _fingerprint(
+            {"schema": "growthevo.online-canary-plan.v1", **asdict(self)}
+        )
 
 
 @dataclass(frozen=True, slots=True)

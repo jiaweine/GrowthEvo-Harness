@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from hashlib import blake2b
-import json
 from math import isfinite
 from typing import Sequence
 
+from ._integrity import _fingerprint, _nonempty
 from .online_promotion import CanaryStatus
 from .promotion_governance import GovernanceAuthorizationRecord
 from .promotion_manifest import (
@@ -18,25 +17,6 @@ from .promotion_manifest import (
     PromotionTransition,
 )
 from .sequential_causal import HighPowerCanaryPlan, HighPowerOnlineCanaryMonitor
-
-
-def _canonical_json(payload: object) -> bytes:
-    return json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
-
-
-def _fingerprint(payload: object, *, digest_size: int = 20) -> str:
-    return blake2b(_canonical_json(payload), digest_size=digest_size).hexdigest()
-
-
-def _nonempty(value: str, name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} cannot be empty")
-    return value
 
 
 @dataclass(frozen=True, slots=True)
