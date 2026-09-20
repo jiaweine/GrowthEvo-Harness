@@ -40,6 +40,12 @@ def test_installed_cli_entrypoints_use_version_aware_wrappers() -> None:
     scripts = _project()["scripts"]
     assert scripts["growthevo-locked-ope"] == "growthevo.cli:locked_ope_main"
     assert scripts["growthevo-locked-targeting"] == "growthevo.cli:locked_targeting_main"
+    assert scripts["growthevo-operator"] == "growthevo.cli:operator_main"
+
+
+def test_readme_version_badge_matches_source_version() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert f"version-{source_version}-" in readme
 
 
 def test_locked_ope_cli_reports_version_without_loading_benchmark_args(
@@ -56,3 +62,11 @@ def test_locked_targeting_cli_reports_version_without_loading_benchmark_args(
     monkeypatch.setattr(sys, "argv", ["growthevo-locked-targeting", "--version"])
     assert cli.locked_targeting_main() == 0
     assert capsys.readouterr().out == f"growthevo-locked-targeting {source_version}\n"
+
+
+def test_operator_cli_reports_version_without_loading_operator_args(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["growthevo-operator", "--version"])
+    assert cli.operator_main() == 0
+    assert capsys.readouterr().out == f"growthevo-operator {source_version}\n"
