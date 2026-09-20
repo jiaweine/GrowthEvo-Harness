@@ -89,6 +89,7 @@ jobs:
           /tmp/growthevo-wheel/bin/python -c "import growthevo; print(growthevo.__file__)"
           /tmp/growthevo-wheel/bin/growthevo-locked-ope --help
           /tmp/growthevo-wheel/bin/growthevo-locked-targeting --help
+          /tmp/growthevo-wheel/bin/growthevo-operator --help
 
   obd-integration:
     runs-on: ubuntu-24.04
