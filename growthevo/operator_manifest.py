@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from json import load
-from math import isfinite
 from pathlib import Path
 from typing import Any
 
 from growthevo.bench._serialization import fingerprint_json
 from growthevo.bench.llm_candidate_factory import (
+    LLM_PROVIDER_NAMES,
     LLMEndpointSpec,
     ShadowCandidateSpec,
     shadow_candidate_metadata,
@@ -17,62 +17,18 @@ from growthevo.bench.llm_evaluation import LLMExperimentPlan
 from growthevo.bench.llm_shadow_runner import ShadowBenchmarkPlan
 from growthevo.llm.planner import LLMPlannerConfig
 
+from ._operator_json import (
+    _bool,
+    _int,
+    _mapping,
+    _number,
+    _optional_string,
+    _strict_keys,
+    _string,
+)
+
 
 _SCHEMA_VERSION = "growthevo.production-operator-manifest.v1"
-
-
-def _mapping(value: Any, *, context: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{context} must be a JSON object")
-    return value
-
-
-def _strict_keys(
-    payload: Mapping[str, Any],
-    *,
-    allowed: set[str],
-    required: set[str],
-    context: str,
-) -> None:
-    missing = sorted(required.difference(payload))
-    unexpected = sorted(set(payload).difference(allowed))
-    if missing:
-        raise ValueError(f"{context} is missing required keys: {missing}")
-    if unexpected:
-        raise ValueError(f"{context} contains unexpected keys: {unexpected}")
-
-
-def _string(value: Any, *, context: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{context} must be a non-empty string")
-    return value
-
-
-def _optional_string(value: Any, *, context: str) -> str | None:
-    if value is None:
-        return None
-    return _string(value, context=context)
-
-
-def _bool(value: Any, *, context: str) -> bool:
-    if not isinstance(value, bool):
-        raise ValueError(f"{context} must be a boolean")
-    return value
-
-
-def _int(value: Any, *, context: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{context} must be an integer")
-    return value
-
-
-def _number(value: Any, *, context: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{context} must be a number")
-    converted = float(value)
-    if not isfinite(converted):
-        raise ValueError(f"{context} must be finite")
-    return converted
 
 
 def _endpoint(payload: Any, *, context: str) -> LLMEndpointSpec:
@@ -84,7 +40,7 @@ def _endpoint(payload: Any, *, context: str) -> LLMEndpointSpec:
         context=context,
     )
     provider = _string(item["provider"], context=f"{context}.provider")
-    if provider not in {"openai", "anthropic", "google"}:
+    if provider not in LLM_PROVIDER_NAMES:
         raise ValueError(f"{context}.provider is unsupported: {provider!r}")
     return LLMEndpointSpec(
         provider=provider,  # type: ignore[arg-type]

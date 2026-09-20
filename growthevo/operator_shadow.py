@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from json import load
-from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -22,57 +21,11 @@ from growthevo.models import (
     UserObservation,
 )
 
+from ._operator_json import _bool, _int, _mapping, _number, _strict_keys, _string
+
 
 _CONTEXT_SCHEMA = "growthevo.operator-contexts.v1"
 _EVIDENCE_SCHEMA = "growthevo.operator-causal-evidence.v1"
-
-
-def _mapping(value: Any, *, context: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{context} must be a JSON object")
-    return value
-
-
-def _strict_keys(
-    payload: Mapping[str, Any],
-    *,
-    allowed: set[str],
-    required: set[str],
-    context: str,
-) -> None:
-    missing = sorted(required.difference(payload))
-    unexpected = sorted(set(payload).difference(allowed))
-    if missing:
-        raise ValueError(f"{context} is missing required keys: {missing}")
-    if unexpected:
-        raise ValueError(f"{context} contains unexpected keys: {unexpected}")
-
-
-def _string(value: Any, *, context: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{context} must be a non-empty string")
-    return value
-
-
-def _bool(value: Any, *, context: str) -> bool:
-    if not isinstance(value, bool):
-        raise ValueError(f"{context} must be a boolean")
-    return value
-
-
-def _int(value: Any, *, context: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{context} must be an integer")
-    return value
-
-
-def _number(value: Any, *, context: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{context} must be a number")
-    converted = float(value)
-    if not isfinite(converted):
-        raise ValueError(f"{context} must be finite")
-    return converted
 
 
 def _channel(value: Any, *, context: str) -> Channel:
