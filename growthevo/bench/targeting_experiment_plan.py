@@ -10,6 +10,7 @@ from growthevo.models import Channel
 from ._serialization import (
     fingerprint_json,
     load_json_object,
+    manifest_field_mismatches,
     required_int,
     required_number,
     required_string,
@@ -211,22 +212,11 @@ class TargetingExperimentPlan:
                     ),
                 ]
             )
-        mismatches: list[str] = []
-        for key, planned in expected:
-            if key not in manifest:
-                mismatches.append(f"missing:{key}")
-                continue
-            observed = manifest[key]
-            if isinstance(planned, float):
-                if isinstance(observed, bool) or not isinstance(observed, (int, float)):
-                    mismatches.append(key)
-                elif not isfinite(float(observed)) or float(observed) != planned:
-                    mismatches.append(key)
-            elif isinstance(planned, int):
-                if isinstance(observed, bool) or not isinstance(observed, int) or observed != planned:
-                    mismatches.append(key)
-            elif observed != planned:
-                mismatches.append(key)
+        mismatches = manifest_field_mismatches(
+            manifest,
+            expected,
+            strict_ints=True,
+        )
         raw_names = manifest.get("candidate_names")
         if not isinstance(raw_names, list) or any(
             not isinstance(name, str) or not name for name in raw_names

@@ -6,7 +6,7 @@ from hashlib import blake2b
 from json import dumps, loads
 from math import isfinite
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any, Iterator, Mapping, Sequence
 
 
 def canonical_json_bytes(payload: Any) -> bytes:
@@ -19,6 +19,43 @@ def fingerprint_json(payload: Any) -> str:
     """Return the 160-bit BLAKE2b fingerprint used by benchmark protocols."""
 
     return blake2b(canonical_json_bytes(payload), digest_size=20).hexdigest()
+
+
+def manifest_field_mismatches(
+    manifest: Mapping[str, Any],
+    expected: Sequence[tuple[str, Any]],
+    *,
+    strict_ints: bool = False,
+) -> list[str]:
+    """Return manifest fields that are missing, non-finite, or contract-mismatched."""
+
+    mismatches: list[str] = []
+    for key, planned in expected:
+        if key not in manifest:
+            mismatches.append(f"missing:{key}")
+            continue
+        observed = manifest[key]
+        if isinstance(planned, float):
+            if isinstance(observed, bool) or not isinstance(observed, (int, float)):
+                mismatches.append(key)
+                continue
+            observed_float = float(observed)
+            if not isfinite(observed_float) or observed_float != planned:
+                mismatches.append(key)
+        elif (
+            strict_ints
+            and isinstance(planned, int)
+            and not isinstance(planned, bool)
+        ):
+            if (
+                isinstance(observed, bool)
+                or not isinstance(observed, int)
+                or observed != planned
+            ):
+                mismatches.append(key)
+        elif observed != planned:
+            mismatches.append(key)
+    return mismatches
 
 
 def load_json_object(path: str | Path, *, label: str) -> dict[str, Any]:

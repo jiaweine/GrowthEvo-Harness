@@ -10,21 +10,9 @@ from typing import Any, Sequence
 from growthevo.rl.ope import LoggedBanditRecord
 
 from ._serialization import fingerprint_json, iter_jsonl_objects, load_json_object
-from .locked_evaluation import OPECandidate
+from .locked_evaluation import OPE_ESTIMATOR_NAMES, OPECandidate
 from .ope_evidence_gate import EvidenceGatedOPEProtocol, OPEEvidenceGate
 from .ope_experiment_plan import OPEExperimentPlan, load_ope_experiment_plan
-
-
-_ALLOWED_ESTIMATORS = {
-    "direct_method",
-    "ips",
-    "self_normalized_ips",
-    "doubly_robust",
-    "switch_dr",
-    "dr_os",
-    "beta_ips",
-    "meta_blue",
-}
 
 
 def _json_cluster_identity(value: Any) -> Any:
@@ -79,7 +67,7 @@ def _load_candidates(path: str | Path) -> tuple[OPECandidate, ...]:
         if not isinstance(item, dict):
             raise ValueError(f"candidate {index} must be a JSON object")
         estimator = item.get("estimator")
-        if estimator not in _ALLOWED_ESTIMATORS:
+        if estimator not in OPE_ESTIMATOR_NAMES:
             raise ValueError(f"candidate {index} has unsupported estimator: {estimator!r}")
         try:
             raw_name = item["name"]

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from json import dumps
 from math import isfinite
-from typing import Iterable, Literal, Mapping, Sequence
+from typing import Iterable, Literal, Mapping, Sequence, get_args
 
 from growthevo.causal.dr_learner import LoggedTreatmentRecord
 from growthevo.models import Channel
@@ -30,6 +30,7 @@ OPEEstimatorName = Literal[
     "beta_ips",
     "meta_blue",
 ]
+OPE_ESTIMATOR_NAMES = frozenset(get_args(OPEEstimatorName))
 
 
 @dataclass(frozen=True, slots=True)

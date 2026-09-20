@@ -8,12 +8,13 @@ from typing import Any, Mapping, Sequence
 from ._serialization import (
     fingerprint_json,
     load_json_object,
+    manifest_field_mismatches,
     optional_number,
     required_int,
     required_number,
     required_string,
 )
-from .locked_evaluation import OPECandidate
+from .locked_evaluation import OPE_ESTIMATOR_NAMES, OPECandidate
 from .ope_evidence_gate import OPEEvidenceGate
 
 
@@ -21,16 +22,6 @@ _SCHEMA_VERSION = "growthevo.ope-experiment-plan.v1"
 _SUPPORTED_EXPORT_MANIFEST_SCHEMAS = {
     "growthevo.obd-export.v2",
     "growthevo.obd-export.v3",
-}
-_ALLOWED_ESTIMATORS = {
-    "direct_method",
-    "ips",
-    "self_normalized_ips",
-    "doubly_robust",
-    "switch_dr",
-    "dr_os",
-    "beta_ips",
-    "meta_blue",
 }
 _CANDIDATE_FIELDS = {
     "name",
@@ -192,21 +183,7 @@ class OPEExperimentPlan:
             ("n_sim", self.n_sim),
             ("random_state", self.random_state),
         )
-        mismatches: list[str] = []
-        for key, planned in required_matches:
-            if key not in manifest:
-                mismatches.append(f"missing:{key}")
-                continue
-            observed = manifest[key]
-            if isinstance(planned, float):
-                if isinstance(observed, bool) or not isinstance(observed, (int, float)):
-                    mismatches.append(key)
-                    continue
-                observed_float = float(observed)
-                if not isfinite(observed_float) or observed_float != planned:
-                    mismatches.append(key)
-            elif observed != planned:
-                mismatches.append(key)
+        mismatches = manifest_field_mismatches(manifest, required_matches)
         if mismatches:
             raise ValueError(
                 "export manifest does not match pre-registered plan: "
@@ -227,7 +204,7 @@ def _candidate_from_payload(payload: Mapping[str, Any], index: int) -> OPECandid
         raise ValueError(f"experiment plan candidate {index} is missing {exc.args[0]!r}") from exc
     if not isinstance(raw_name, str) or not raw_name:
         raise ValueError(f"experiment plan candidate {index} name must be a non-empty string")
-    if not isinstance(estimator, str) or estimator not in _ALLOWED_ESTIMATORS:
+    if not isinstance(estimator, str) or estimator not in OPE_ESTIMATOR_NAMES:
         raise ValueError(f"experiment plan candidate {index} has unsupported estimator")
     raw_beta_folds = payload.get("beta_folds", 5)
     if isinstance(raw_beta_folds, bool) or not isinstance(raw_beta_folds, int):
