@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from growthevo.llm.contracts import planner_contract_fingerprint
 from growthevo.llm.planner import GuardedLLMGrowthPlanner, LLMPlannerConfig
@@ -14,6 +14,7 @@ from .llm_shadow_runner import ShadowPlannerEntry
 
 
 ProviderName = Literal["openai", "anthropic", "google"]
+LLM_PROVIDER_NAMES = frozenset(get_args(ProviderName))
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +35,7 @@ class LLMEndpointSpec:
     def __post_init__(self) -> None:
         if not self.model.strip():
             raise ValueError("model cannot be empty")
-        if self.provider not in {"openai", "anthropic", "google"}:
+        if self.provider not in LLM_PROVIDER_NAMES:
             raise ValueError(f"unsupported LLM provider: {self.provider}")
         if self.max_tokens <= 0:
             raise ValueError("max_tokens must be positive")
