@@ -456,6 +456,8 @@ benchmarks/ope/results/
 | Randomized online canary | [`docs/online_canary_promotion.md`](docs/online_canary_promotion.md) |
 | High-power sequential promotion | [`docs/high_power_sequential_causal.md`](docs/high_power_sequential_causal.md) |
 | Project completion boundary | [`docs/PROJECT_COMPLETION.md`](docs/PROJECT_COMPLETION.md) |
+| Repository governance audit | [`docs/repository_governance_audit.md`](docs/repository_governance_audit.md) |
+| Release readiness checklist | [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) |
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
 | Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Security | [`SECURITY.md`](SECURITY.md) |

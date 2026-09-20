@@ -40,16 +40,23 @@ Until that choice is made, release tooling should not pretend that reuse rights 
 
 ### 2. Protect `main`
 
-At the latest release-readiness audit, `main` was not protected. The available repository connector in this maintenance session can read rules/protection state but cannot write branch-protection/ruleset configuration, so this is intentionally left as an explicit owner/admin action rather than being falsely marked complete.
+Repository-governance detection is now implemented on `main` through `.github/workflows/repository-governance-audit.yml` and `tools/repository_governance_audit.py`, but the server-side ruleset is still an explicit owner/admin action tracked by issue #63.
 
-Recommended minimum policy before a public release:
+Issue #63 contains the exact ruleset contract plus a ready-to-run `gh api` Administration command. The required policy is:
 
 - require pull requests before merging to `main`;
-- require the GrowthEvo CI checks to pass;
+- require zero approving reviews for the current single-maintainer model;
+- require exactly the six GrowthEvo CI job contexts with strict/up-to-date checks;
+- bind those checks to GitHub Actions where supported;
 - prevent force pushes and branch deletion;
-- require branches to be up to date before merge when practical;
-- require external Actions to be pinned to full-length commit SHAs if the repository setting is available;
-- preserve manual-only full-data research workflows rather than making final holdouts required PR checks.
+- keep full-data Criteo/OBD research workflows manual-only rather than making final holdouts normal PR gates.
+
+The audit is intentionally split into two modes:
+
+- manual `workflow_dispatch` is always strict and must fail until the ruleset exists;
+- scheduled runs may report `PENDING` only while #63 is open and no active ruleset targets `main`, avoiding guaranteed bootstrap noise without accepting a partial/incorrect ruleset.
+
+Do not mark this checklist item complete until the strict manual audit passes against the real active ruleset.
 
 ### 3. Verify repository security features
 
