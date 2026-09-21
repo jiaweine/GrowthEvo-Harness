@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import tomllib
 
 from growthevo.evolution.pypi_provenance import PYPI_ATTESTATIONS_VERSION
@@ -42,3 +43,35 @@ def test_attestation_extras_match_runtime_verifier_versions() -> None:
         pypi_requirement,
         sigstore_requirement,
     }
+
+
+
+def test_external_github_actions_are_pinned_to_full_commit_shas() -> None:
+    workflow_dir = ROOT / ".github" / "workflows"
+    failures: list[str] = []
+    checked = 0
+
+    for path in sorted(workflow_dir.glob("*.yml")):
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(),
+            start=1,
+        ):
+            match = re.match(r"\s*uses:\s*([^\s#]+)", line)
+            if match is None:
+                continue
+            action = match.group(1)
+            if action.startswith("./") or action.startswith("docker://"):
+                continue
+
+            checked += 1
+            if "@" not in action:
+                failures.append(f"{path.name}:{line_number}: missing action revision")
+                continue
+            revision = action.rsplit("@", 1)[1]
+            if re.fullmatch(r"[0-9a-fA-F]{40}", revision) is None:
+                failures.append(
+                    f"{path.name}:{line_number}: action is not pinned to a full commit SHA: {action}"
+                )
+
+    assert checked > 0
+    assert failures == []
