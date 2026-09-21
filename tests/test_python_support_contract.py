@@ -31,3 +31,6 @@ def test_research_extras_do_not_overstate_frozen_environment_support() -> None:
     assert "Python 3.11–3.14" in policy
     assert "Python 3.12" in policy
     assert "accepted locked evidence" in policy
+    assert "all three installed command-line entry points" in policy
+    assert "`growthevo-operator`" in policy
+    assert "all three public CLI entry points" in policy

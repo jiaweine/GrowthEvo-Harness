@@ -73,13 +73,13 @@ Do not add a second advanced CodeQL workflow merely to satisfy this checklist if
 
 ## Version and tag decision
 
-`pyproject.toml` currently uses version `0.1.0`, and this maintenance work does not create a GitHub release or tag automatically.
+`growthevo/_version.py` currently defines version `0.1.0`, and `pyproject.toml` reads that value dynamically. This maintenance work does not create a GitHub release or tag automatically.
 
 When the owner chooses the first/next public version:
 
 1. decide the semantic version intentionally;
 2. move the relevant `CHANGELOG.md` **Unreleased** entries into a dated version section;
-3. update `project.version` in `pyproject.toml`;
+3. update the single source `growthevo/_version.py`; `pyproject.toml` must remain dynamically wired to it;
 4. run the complete CI/package matrix on that exact release commit;
 5. verify accepted real-world evidence directories are unchanged unless the release intentionally includes a separately preregistered new experiment;
 6. tag the exact verified commit;
