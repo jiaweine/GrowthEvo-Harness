@@ -48,10 +48,30 @@ jobs:
       - name: Verify optional provider SDK floor contracts without network calls
         if: matrix.python-version == '3.12'
         run: |
-          python -m pip install \
-            'openai==2.0.0' \
-            'anthropic==0.60.0' \
-            'google-genai==2.22.0'
+          python - <<'PY' > /tmp/growthevo-llm-sdk-floors.txt
+          import re
+          import tomllib
+          from pathlib import Path
+
+          optional = tomllib.loads(
+              Path("pyproject.toml").read_text(encoding="utf-8")
+          )["project"]["optional-dependencies"]
+          for extra in ("llm-openai", "llm-anthropic", "llm-gemini"):
+              requirements = optional[extra]
+              if len(requirements) != 1:
+                  raise SystemExit(f"{extra} must declare exactly one SDK floor")
+              match = re.fullmatch(
+                  r"([A-Za-z0-9_.-]+)>=(\d+(?:\.\d+)*)",
+                  requirements[0],
+              )
+              if match is None:
+                  raise SystemExit(
+                      f"{extra} must be a single plain >= SDK floor: {requirements[0]!r}"
+                  )
+              print(f"{match.group(1)}=={match.group(2)}")
+          PY
+          cat /tmp/growthevo-llm-sdk-floors.txt
+          python -m pip install -r /tmp/growthevo-llm-sdk-floors.txt
           python -m pytest tests/test_llm_provider_sdk_contracts.py
 
       - name: Verify real Sigstore 4.5 DSSE SDK contract offline
