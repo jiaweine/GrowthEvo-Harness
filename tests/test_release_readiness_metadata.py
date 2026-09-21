@@ -34,5 +34,7 @@ def test_release_process_files_are_present_and_evidence_aware() -> None:
     assert "new experiment identity" in contributing
     assert "Choose and add a LICENSE" in checklist
     assert "Protect `main`" in checklist
+    assert "single source `growthevo/_version.py`" in checklist
+    assert "update `project.version`" not in checklist
     assert "workflow_dispatch" not in template  # contributor checklist stays implementation-agnostic
     assert "Only the frozen winner reaches final holdout." in template

@@ -13,7 +13,7 @@ The dependency-light core is continuously tested on the current supported stable
 
 The project metadata therefore declares `requires-python = ">=3.11"` and classifiers for Python 3.11–3.14. CI runs the full dependency-light pytest suite and runtime/training demos on all four versions.
 
-The distribution job builds the sdist and universal wheel on Python 3.14, validates both with `twine check`, installs the wheel into a clean environment outside the repository, imports `growthevo`, and executes the installed locked-OPE and locked-targeting command-line entry points.
+The distribution job builds the sdist and universal wheel on Python 3.14, validates both with `twine check`, installs the wheel into a clean environment outside the repository, imports `growthevo`, and executes all three installed command-line entry points: `growthevo-locked-ope`, `growthevo-locked-targeting`, and `growthevo-operator`.
 
 Passing the core matrix means the GrowthEvo Python package/runtime is tested on those stable interpreters. It does **not** retroactively change the interpreter or dependency versions used by accepted benchmark evidence.
 
@@ -43,7 +43,7 @@ A new stable Python minor version is added to the supported matrix only after:
 
 1. `actions/setup-python` can provision the stable release;
 2. the full core test and demo suite passes;
-3. a built wheel installs and both public CLI entry points execute in a clean environment;
+3. a built wheel installs and all three public CLI entry points execute in a clean environment;
 4. project metadata and the CI contract test are updated together.
 
 Pre-release interpreters may be evaluated separately, but an alpha/beta/RC is not listed as formally supported merely because it is newer.
