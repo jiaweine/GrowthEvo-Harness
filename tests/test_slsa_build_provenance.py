@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from growthevo.evolution.promotion_manifest import PromotionSubject, PromotionTransition
+from growthevo.evolution.pypi_provenance import PYPI_ATTESTATIONS_VERSION
 from growthevo.evolution.slsa_build_provenance import (
     GITHUB_ACTIONS_WORKFLOW_BUILD_TYPE_V1,
     IN_TOTO_STATEMENT_V1,
@@ -170,7 +171,7 @@ def _bundle(attestations: list[FakeAttestation] | None = None, *, repository: st
 def _install(monkeypatch: pytest.MonkeyPatch, bundles: list[object]) -> None:
     FakeProvenance.current = SimpleNamespace(attestation_bundles=bundles)
     module = SimpleNamespace(
-        __version__="0.0.30",
+        __version__=PYPI_ATTESTATIONS_VERSION,
         Provenance=FakeProvenance,
         Distribution=FakeDistribution,
         GitHubPublisher=FakePublisher,

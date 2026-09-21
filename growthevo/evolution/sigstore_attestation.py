@@ -14,6 +14,7 @@ from .signed_attestation import (
 
 
 SIGSTORE_BUNDLE_V03_MEDIA_TYPE = "application/vnd.dev.sigstore.bundle.v0.3+json"
+SIGSTORE_SDK_VERSION = "4.5.0"
 _SIGSTORE_ADAPTER_SCHEMA = "growthevo.sigstore-python-dsse-verifier.v1"
 
 
@@ -72,7 +73,7 @@ class SigstoreBundleVerifierSpec:
 
     expected_signer_identity: str
     expected_issuer: str
-    sigstore_sdk_version: str = "4.5.0"
+    sigstore_sdk_version: str = SIGSTORE_SDK_VERSION
     offline: bool = True
     allowed_bundle_media_types: tuple[str, ...] = (SIGSTORE_BUNDLE_V03_MEDIA_TYPE,)
     require_transparency_log: bool = True
