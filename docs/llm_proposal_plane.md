@@ -120,7 +120,7 @@ pip install -e '.[llm-gemini]'
 pip install -e '.[llm]'
 ```
 
-The declared SDK floors are `openai>=2.0`, `anthropic>=0.60`, and `google-genai>=2.22.0`. CI installs those exact minimum versions and validates both proposal and critic request shapes against the real provider SDK types without credentials or network calls. The Gemini adapter uses `response_mime_type="application/json"` plus `response_json_schema`; the OpenAI adapter uses Responses `text.format` strict JSON Schema; and the Anthropic adapter forces the declared schema tool through `tool_choice`.
+The provider-specific optional dependencies in `pyproject.toml` are the single source for SDK minimum versions. CI derives exact floor pins from those declarations and validates both proposal and critic request shapes against the real provider SDK types without credentials or network calls. The Gemini adapter uses `response_mime_type="application/json"` plus `response_json_schema`; the OpenAI adapter uses Responses `text.format` strict JSON Schema; and the Anthropic adapter forces the declared schema tool through `tool_choice`.
 
 ## OpenAI example
 

@@ -34,7 +34,22 @@ def test_release_process_files_are_present_and_evidence_aware() -> None:
     assert "new experiment identity" in contributing
     assert "Choose and add a LICENSE" in checklist
     assert "Protect `main`" in checklist
-    assert "single source `growthevo/_version.py`" in checklist
+    assert "single package-version source" in checklist
+    assert "`0.1.0`" not in checklist
     assert "update `project.version`" not in checklist
     assert "workflow_dispatch" not in template  # contributor checklist stays implementation-agnostic
     assert "Only the frozen winner reaches final holdout." in template
+
+
+
+def test_llm_aggregate_extra_matches_provider_specific_extras() -> None:
+    optional = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["optional-dependencies"]
+
+    provider_requirements = {
+        requirement
+        for extra in ("llm-openai", "llm-anthropic", "llm-gemini")
+        for requirement in optional[extra]
+    }
+    assert set(optional["llm"]) == provider_requirements
