@@ -120,7 +120,7 @@ pip install -e '.[llm-gemini]'
 pip install -e '.[llm]'
 ```
 
-The Gemini extra requires `google-genai>=2.22.0`, the validated SDK floor for this adapter. Its `models.generate_content` request uses `response_mime_type="application/json"` and `response_json_schema`; `response_format` belongs to a different request surface. CI validates both proposal and critic requests with the real SDK's `GenerateContentConfig`, using a fake transport and no credentials or API calls.
+The declared SDK floors are `openai>=2.0`, `anthropic>=0.60`, and `google-genai>=2.22.0`. CI installs those exact minimum versions and validates both proposal and critic request shapes against the real provider SDK types without credentials or network calls. The Gemini adapter uses `response_mime_type="application/json"` plus `response_json_schema`; the OpenAI adapter uses Responses `text.format` strict JSON Schema; and the Anthropic adapter forces the declared schema tool through `tool_choice`.
 
 ## OpenAI example
 
