@@ -12,7 +12,7 @@ Before a release candidate is tagged, mainline should have all of the following 
 - [x] wheel + sdist build;
 - [x] `twine check` on built distributions;
 - [x] clean-wheel installation outside the source tree on Python 3.14;
-- [x] installed `growthevo-locked-ope --help`, `growthevo-locked-targeting --help`, and `growthevo-operator --help`;
+- [x] installed `growthevo-locked-ope`, `growthevo-locked-targeting`, and `growthevo-operator` help/version contracts from the clean wheel;
 - [x] pinned real small-OBD integration with compact-Q equivalence and locked selection;
 - [x] persisted full Criteo/OBD evidence integrity tests;
 - [x] README math rendering regression tests;
