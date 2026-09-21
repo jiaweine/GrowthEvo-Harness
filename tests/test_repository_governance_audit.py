@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -176,3 +177,25 @@ def test_inactive_or_wrong_branch_rulesets_fail() -> None:
         rulesets=[inactive, wrong_branch],
     )
     assert result.ok is False
+
+
+
+def test_required_checks_track_ci_matrix_and_documented_contract() -> None:
+    root = Path(__file__).resolve().parents[1]
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    matrix = re.search(r'python-version:\s*\[([^\]]+)\]', ci)
+    assert matrix is not None
+    versions = tuple(re.findall(r'"(\d+\.\d+)"', matrix.group(1)))
+    assert versions
+
+    expected = tuple(f"test ({version})" for version in versions) + (
+        "package",
+        "obd-integration",
+    )
+    assert MODULE.REQUIRED_CHECKS == expected
+
+    governance_doc = (root / "docs" / "repository_governance_audit.md").read_text(
+        encoding="utf-8"
+    )
+    for check in expected:
+        assert f"`{check}`" in governance_doc
