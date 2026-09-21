@@ -199,3 +199,36 @@ def test_required_checks_track_ci_matrix_and_documented_contract() -> None:
     )
     for check in expected:
         assert f"`{check}`" in governance_doc
+
+
+
+def test_governance_workflow_keeps_schedule_bootstrap_and_manual_strict() -> None:
+    root = Path(__file__).resolve().parents[1]
+    workflow = (
+        root / ".github" / "workflows" / "repository-governance-audit.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in workflow
+    assert "schedule:" in workflow
+    assert "issues: read" in workflow
+
+    conditional = re.search(
+        r'if \[\[ "\$\{GITHUB_EVENT_NAME\}" == "schedule" \]\]; then'
+        r"(?P<scheduled>.*?)"
+        r"\n\s*else"
+        r"(?P<manual>.*?)"
+        r"\n\s*fi",
+        workflow,
+        flags=re.DOTALL,
+    )
+    assert conditional is not None
+
+    scheduled = conditional.group("scheduled")
+    manual = conditional.group("manual")
+    bootstrap_flag = "--allow-unconfigured-while-issue-open 63"
+
+    assert bootstrap_flag in scheduled
+    assert bootstrap_flag not in manual
+    assert workflow.count(bootstrap_flag) == 1
+    assert "--branch main" in scheduled
+    assert "--branch main" in manual
