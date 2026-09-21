@@ -73,7 +73,7 @@ Do not add a second advanced CodeQL workflow merely to satisfy this checklist if
 
 ## Version and tag decision
 
-`growthevo/_version.py` currently defines version `0.1.0`, and `pyproject.toml` reads that value dynamically. This maintenance work does not create a GitHub release or tag automatically.
+`growthevo/_version.py` is the single package-version source, and `pyproject.toml` reads that value dynamically. This maintenance work does not create a GitHub release or tag automatically.
 
 When the owner chooses the first/next public version:
 
