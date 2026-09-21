@@ -5,12 +5,14 @@ from inspect import signature
 
 import pytest
 
+from growthevo.evolution.sigstore_attestation import SIGSTORE_SDK_VERSION
+
 
 sigstore = pytest.importorskip("sigstore")
 
 
 def test_sigstore_sdk_version_is_exactly_pinned() -> None:
-    assert version("sigstore") == "4.5.0"
+    assert version("sigstore") == SIGSTORE_SDK_VERSION
 
 
 def test_public_dsse_verification_api_contract_exists() -> None:

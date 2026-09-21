@@ -11,6 +11,7 @@ from growthevo.evolution.pypi_provenance import (
     BUILD_CONFIG_URI_OID,
     GITHUB_OIDC_ISSUER,
     IN_TOTO_STATEMENT_V1,
+    PYPI_ATTESTATIONS_VERSION,
     PYPI_PUBLISH_PREDICATE_V1,
     SOURCE_REPOSITORY_DIGEST_OID,
     SOURCE_REPOSITORY_URI_OID,
@@ -112,7 +113,7 @@ class FakeProvenance:
 def _install_fake_api(monkeypatch: pytest.MonkeyPatch, bundles: list[object]) -> None:
     FakeProvenance.current = SimpleNamespace(attestation_bundles=bundles)
     module = SimpleNamespace(
-        __version__="0.0.30",
+        __version__=PYPI_ATTESTATIONS_VERSION,
         Provenance=FakeProvenance,
         Distribution=FakeDistribution,
         GitHubPublisher=FakePublisher,
@@ -240,7 +241,7 @@ def test_transparency_entry_cardinality_is_strict(monkeypatch: pytest.MonkeyPatc
 def test_sdk_version_mismatch_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_api(monkeypatch, [_bundle()])
     module = __import__("sys").modules["pypi_attestations"]
-    module.__version__ = "0.0.29"
+    module.__version__ = f"{PYPI_ATTESTATIONS_VERSION}.mismatch"
     with pytest.raises(RuntimeError, match="version"):
         PyPIPublishProvenanceVerifier(provenance_json=_raw(), spec=_spec()).verify()
 

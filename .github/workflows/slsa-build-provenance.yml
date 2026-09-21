@@ -36,8 +36,11 @@ jobs:
           import pypi_attestations
           import sigstore
 
-          assert pypi_attestations.__version__ == "0.0.30"
-          assert sigstore.__version__ == "4.5.0"
+          from growthevo.evolution.pypi_provenance import PYPI_ATTESTATIONS_VERSION
+          from growthevo.evolution.sigstore_attestation import SIGSTORE_SDK_VERSION
+
+          assert pypi_attestations.__version__ == PYPI_ATTESTATIONS_VERSION
+          assert sigstore.__version__ == SIGSTORE_SDK_VERSION
           PY
 
       - name: Verify pinned public SLSA build provenance end to end

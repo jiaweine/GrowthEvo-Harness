@@ -4,7 +4,7 @@ from pathlib import Path
 import tomllib
 
 from growthevo.evolution.pypi_provenance import PYPI_ATTESTATIONS_VERSION
-from growthevo.evolution.sigstore_attestation import SigstoreBundleVerifierSpec
+from growthevo.evolution.sigstore_attestation import SIGSTORE_SDK_VERSION
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,11 +34,7 @@ def test_attestation_extras_match_runtime_verifier_versions() -> None:
         (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )["project"]["optional-dependencies"]
 
-    sigstore_version = SigstoreBundleVerifierSpec(
-        expected_signer_identity="fixture@example.invalid",
-        expected_issuer="https://issuer.example.invalid",
-    ).sigstore_sdk_version
-    sigstore_requirement = f"sigstore=={sigstore_version}"
+    sigstore_requirement = f"sigstore=={SIGSTORE_SDK_VERSION}"
     pypi_requirement = f"pypi-attestations=={PYPI_ATTESTATIONS_VERSION}"
 
     assert optional["attestation-sigstore"] == [sigstore_requirement]
