@@ -326,6 +326,17 @@ growthevo-locked-targeting --help
 growthevo-operator --help
 ```
 
+### Web dashboard
+
+GrowthEvo now includes an optional local web product surface backed by FastAPI and a bundled responsive UI:
+
+```bash
+pip install -e '.[web]'
+growthevo-web
+```
+
+Then open `http://127.0.0.1:8765`. The dashboard exposes project health, the capability map, architecture layers, and the two locked real-world evidence bundles. JSON endpoints are available under `/api/*`, with interactive API documentation at `/api/docs`.
+
 ### Optional guarded LLM workflow
 
 通过 [`GuardedLLMGrowthPlanner`](docs/llm_proposal_plane.md) 显式启用高层增长目标建议；默认 `GrowthEvoRuntime()` 继续使用确定性 planner。可按需要安装 `.[llm-openai]`、`.[llm-anthropic]`、`.[llm-gemini]`，或通过 `.[llm]` 安装全部 provider SDK。
@@ -391,6 +402,7 @@ GrowthEvo 的实现按 causal estimation、policy learning、evaluation、benchm
 | **Experiment plans** | `growthevo/bench/*experiment_plan.py` | Pre-registration schemas and fingerprints |
 | **Locked CLIs** | `growthevo/bench/locked_*_cli.py` | Validation selection and final holdout execution |
 | **LLM operator** | `growthevo/operator_*.py` | Non-secret preregistration, provider preflight and deferred locked shadow execution |
+| **Web product surface** | `growthevo/web/` | FastAPI JSON API and bundled responsive evidence dashboard |
 | **Benchmark runners** | `scripts/run_*_full_locked.py` | Full-data research benchmark entry points |
 
 ### Repository layout
@@ -401,7 +413,8 @@ GrowthEvo-Harness/
 │   ├── causal/
 │   ├── rl/
 │   ├── bench/
-│   └── training/
+│   ├── training/
+│   └── web/
 ├── benchmarks/
 │   ├── targeting/
 │   └── ope/

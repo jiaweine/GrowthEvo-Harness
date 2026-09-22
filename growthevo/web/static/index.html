@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="GrowthEvo evidence and capability dashboard">
+  <title>GrowthEvo · Evidence Console</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="GrowthEvo home">
+      <span class="brand-mark">G</span>
+      <span>GrowthEvo</span>
+    </a>
+    <nav>
+      <a href="#evidence">Evidence</a>
+      <a href="#capabilities">Capabilities</a>
+      <a href="#architecture">Architecture</a>
+      <a class="api-link" href="/api/docs">API docs</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="eyebrow"><span class="pulse"></span> Evidence console · local product surface</div>
+      <h1>Make incremental decisions<br><span>with evidence attached.</span></h1>
+      <p id="tagline">Loading the GrowthEvo decision stack…</p>
+      <div class="hero-actions">
+        <a class="primary" href="#evidence">Explore locked evidence</a>
+        <a class="secondary" href="/api/dashboard">View JSON</a>
+      </div>
+      <div class="status-row">
+        <div><span class="label">Service</span><strong id="service-status">Connecting</strong></div>
+        <div><span class="label">Version</span><strong id="version">—</strong></div>
+        <div><span class="label">API</span><strong id="api-version">—</strong></div>
+      </div>
+    </section>
+
+    <section class="section" id="evidence">
+      <div class="section-heading">
+        <div>
+          <span class="kicker">Locked real-world evidence</span>
+          <h2>Results that carry provenance.</h2>
+        </div>
+        <p>Validation selection is frozen before final holdout. The UI surfaces the accepted headline evidence without changing the underlying research protocol.</p>
+      </div>
+      <div class="evidence-grid" id="evidence-grid" aria-live="polite"></div>
+    </section>
+
+    <section class="section" id="capabilities">
+      <div class="section-heading">
+        <div>
+          <span class="kicker">Decision stack</span>
+          <h2>From causal effects to governed action.</h2>
+        </div>
+        <p>Each capability maps back to an existing GrowthEvo module, keeping the product layer thin and auditable.</p>
+      </div>
+      <div class="capability-grid" id="capability-grid"></div>
+    </section>
+
+    <section class="section" id="architecture">
+      <div class="section-heading">
+        <div>
+          <span class="kicker">Architecture</span>
+          <h2>A product shell around the research core.</h2>
+        </div>
+      </div>
+      <div class="architecture" id="architecture-stack"></div>
+    </section>
+  </main>
+
+  <footer>
+    <span>GrowthEvo-Harness</span>
+    <span>FastAPI · bundled UI · read-only evidence surface</span>
+  </footer>
+
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
