@@ -4,42 +4,85 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#111827" />
-  <meta name="description" content="GrowthEvo — 因果驱动的 AI 原生增长操作系统" />
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/assets/styles.css" />
-  <title>GrowthEvo · Growth OS</title>
+  <meta name="description" content="GrowthEvo — AI 原生因果增长执行平台" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="stylesheet" href="./assets/styles.css" />
+  <title>GrowthEvo · 因果增长操作系统</title>
 </head>
 <body>
   <div id="app" class="app-shell">
-    <aside class="sidebar" aria-label="主导航">
-      <div class="brand"><div class="brand-mark">GE</div><div><strong>GrowthEvo</strong><span>因果驱动的增长操作系统</span></div></div>
+    <aside class="sidebar" id="sidebar" aria-label="主导航">
+      <div class="brand-block">
+        <div class="brand-name">GrowthEvo</div>
+        <div class="brand-subtitle">因果驱动的增长操作系统</div>
+      </div>
       <nav id="main-nav" class="nav-list"></nav>
-      <div class="workspace-card"><div class="workspace-dot">A</div><div><strong>Acme 电商</strong><span>Enterprise Plan</span></div><span>⌄</span></div>
+      <div class="sidebar-bottom">
+        <div class="workspace-card">
+          <div class="avatar avatar-blue">✦</div>
+          <div class="workspace-copy"><strong>Acme 电商</strong><span>Enterprise Plan</span></div>
+          <span class="chev">⌄</span>
+        </div>
+        <div class="user-card">
+          <div class="avatar avatar-photo">李</div>
+          <div class="workspace-copy"><strong>李明</strong><span>增长负责人</span></div>
+        </div>
+        <button class="collapse-btn"><span>‹</span> 收起</button>
+      </div>
     </aside>
 
     <main class="main-column">
       <header class="topbar">
         <button class="mobile-menu" id="mobile-menu" aria-label="打开导航">☰</button>
-        <div class="command-search" id="command-open"><span>⌕</span><span>搜索用户、活动、实验、创意或向 AI 提问…</span><kbd>⌘K</kbd></div>
-        <div class="top-actions"><button class="ghost">本月</button><button class="ghost">全部渠道⌄</button><button class="icon-button" aria-label="通知">●</button><div class="avatar">L</div></div>
+        <button class="command-search" id="command-open" aria-label="打开命令面板">
+          <span class="search-icon" id="search-icon"></span>
+          <span class="search-placeholder">搜索用户、活动、实验、创意或向 AI 提问...</span>
+          <kbd>⌘ K</kbd>
+        </button>
+        <div class="top-actions">
+          <button class="top-filter">2024-12-01 → 2024-12-31</button>
+          <button class="top-filter">全部渠道 <span class="down">⌄</span></button>
+          <button class="bell" aria-label="通知"><span id="bell-icon"></span><i></i></button>
+          <div class="top-avatar">L</div>
+        </div>
       </header>
+
       <section class="content" id="view"></section>
-      <footer class="statusbar"><span>GrowthEvo · From Insight to Impact.</span><div><span class="status-dot"></span>系统运行正常 · 决策延迟 48 ms · 数据更新 5 分钟前</div></footer>
+      <footer class="statusbar">
+        <div><span class="brand-foot">GrowthEvo</span><span class="divider-v"></span><span>From Insight to Impact.</span></div>
+        <div class="status-right"><span><i class="dot green"></i>系统运行正常</span><span>▣ 决策延迟 48 ms</span><span><i class="dot gray"></i>数据更新 5 分钟前</span><span>v1.0.0</span></div>
+      </footer>
     </main>
 
     <aside class="agent-sidecar" id="agent-sidecar" aria-label="Growth Agent">
-      <div class="agent-head"><div><span class="agent-glyph">◎</span><strong>Growth Agent</strong><span class="online">在线</span></div><button class="icon-button" id="close-agent">×</button></div>
+      <div class="agent-head">
+        <div class="agent-title"><span class="agent-logo">✦</span><strong>Growth Agent</strong><span class="online-dot"></span><span class="online-text">在线</span></div>
+        <button class="mode-btn">切换模式⌄</button>
+      </div>
       <div class="agent-body" id="agent-body"></div>
-      <form class="agent-composer" id="agent-form"><textarea id="agent-input" rows="2" placeholder="继续提问，或输入指令…"></textarea><button type="submit" aria-label="发送">↑</button></form>
+      <form class="agent-composer" id="agent-form">
+        <textarea id="agent-input" rows="2" placeholder="继续提问，或输入指令..."></textarea>
+        <div class="composer-tools"><button type="button" aria-label="附件">⌕</button><button type="button" aria-label="语音">♩</button><button class="send" type="submit" aria-label="发送">➤</button></div>
+      </form>
+      <div class="agent-achievement" id="agent-achievement"></div>
+      <div class="agent-banner">
+        <div class="banner-overlay"></div>
+        <div class="banner-copy"><strong>让每一次触达，<br/>都创造真实的增长</strong><span>数据 × 因果 × AI × 执行</span></div>
+        <button class="video-btn"><span>▶</span> 观看产品介绍 · 2 分钟</button>
+      </div>
     </aside>
+
     <nav class="mobile-tabs" id="mobile-tabs"></nav>
   </div>
 
   <div class="command-modal" id="command-modal" hidden>
-    <div class="command-panel"><div class="command-input"><span>⌕</span><input id="command-input" placeholder="搜索，或输入自然语言指令" /><kbd>Esc</kbd></div><div class="command-results" id="command-results"></div></div>
+    <div class="command-panel">
+      <div class="command-input"><span id="command-search-icon"></span><input id="command-input" placeholder="搜索，或输入自然语言指令"/><kbd>Esc</kbd></div>
+      <div class="command-results" id="command-results"></div>
+    </div>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/assets/app.js" defer></script>
+  <script src="./assets/config.js"></script>
+  <script src="./assets/app.js" defer></script>
 </body>
 </html>
