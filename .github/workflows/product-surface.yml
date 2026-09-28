@@ -5,19 +5,23 @@ on:
     paths:
       - "growthevo/web/**"
       - "apps/mobile/**"
+      - "scripts/build_pages.py"
       - "tests/test_web_dashboard.py"
       - "tests/test_product_*.py"
       - "pyproject.toml"
       - ".github/workflows/product-surface.yml"
+      - ".github/workflows/deploy-pages.yml"
   push:
     branches: [main]
     paths:
       - "growthevo/web/**"
       - "apps/mobile/**"
+      - "scripts/build_pages.py"
       - "tests/test_web_dashboard.py"
       - "tests/test_product_*.py"
       - "pyproject.toml"
       - ".github/workflows/product-surface.yml"
+      - ".github/workflows/deploy-pages.yml"
 
 permissions:
   contents: read
@@ -36,7 +40,13 @@ jobs:
       - name: Run web product tests
         run: pytest tests/test_web_dashboard.py tests/test_product_surface.py tests/test_product_api.py
       - name: Check browser JavaScript syntax
-        run: node --check growthevo/web/static/app.js
+        run: |
+          for file in growthevo/web/static/*.js; do node --check "$file"; done
+      - name: Build GitHub Pages artifact
+        run: python scripts/build_pages.py --output _site
+      - name: Check Pages artifact JavaScript
+        run: |
+          for file in _site/assets/*.js; do node --check "$file"; done
 
   mobile:
     runs-on: ubuntu-latest
