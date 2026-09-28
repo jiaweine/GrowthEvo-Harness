@@ -1,0 +1,56 @@
+name: Product Surface CI
+
+on:
+  pull_request:
+    paths:
+      - "growthevo/web/**"
+      - "apps/mobile/**"
+      - "tests/test_web_dashboard.py"
+      - "tests/test_product_*.py"
+      - "pyproject.toml"
+      - ".github/workflows/product-surface.yml"
+  push:
+    branches: [main]
+    paths:
+      - "growthevo/web/**"
+      - "apps/mobile/**"
+      - "tests/test_web_dashboard.py"
+      - "tests/test_product_*.py"
+      - "pyproject.toml"
+      - ".github/workflows/product-surface.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  web-product:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install web product dependencies
+        run: python -m pip install -e '.[web,dev]'
+      - name: Run web product tests
+        run: pytest tests/test_web_dashboard.py tests/test_product_surface.py tests/test_product_api.py
+      - name: Check browser JavaScript syntax
+        run: node --check growthevo/web/static/app.js
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.13"
+          cache: npm
+          cache-dependency-path: apps/mobile/package.json
+      - name: Install mobile dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
