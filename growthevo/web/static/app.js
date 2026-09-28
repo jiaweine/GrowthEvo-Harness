@@ -5,10 +5,11 @@ function init(){ $('#search-icon').innerHTML=icon('search');$('#command-search-i
  $('#agent-form').onsubmit=e=>{e.preventDefault();const t=$('#agent-input');if(!t.value.trim())return;toast('Agent 已接收指令（Demo 模式）');t.value=''};
  renderAgent();renderAchievement();active();render();
 }
-function active(){$$('[data-route]').forEach(b=>b.classList.toggle('active',b.dataset.route===state.route))}
-function go(route){if(route==='agent'){openAgent();return}state.route=route;location.hash=route;active();render();$('#sidebar').classList.remove('open')}
+function parentRoute(route){return (typeof ROUTE_PARENT!=='undefined'&&ROUTE_PARENT[route])||route}
+function active(){const parent=parentRoute(state.route);$$('[data-route]').forEach(b=>b.classList.toggle('active',b.dataset.route===parent))}
+function go(route){if(route==='agent'){openAgent();return}state.route=route;location.hash=route;active();render();$('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'instant'})}
 window.addEventListener('hashchange',()=>{state.route=(location.hash||'#dashboard').slice(1);active();render()});
 function openAgent(){$('#agent-sidecar').classList.add('open')}
-function openCommand(){$('#command-modal').hidden=false;$('#command-input').focus();$('#command-results').innerHTML=['创建一个新活动','分析新用户增长机会','查看待审批事项','打开 Agent Harness'].map(x=>`<div class="command-result">${x}</div>`).join('')}
+function openCommand(){const items=[['campaignStudio','创建一个新活动','Goal → Audience → Evidence → Execution'],['opportunities','分析新用户增长机会','Opportunity Map · causal incrementality'],['experiments','打开实验中心','Assignment / Holdout / Guardrails'],['realtime','查看实时决策','Decision API / propensity / policy'],['approvals','查看待审批事项','Risk / evidence / versions'],['harness','打开 Agent Harness','Trace / tools / guardrails'],['evolution','打开 Evolution Lab','Replay → Shadow → Canary']];$('#command-modal').hidden=false;$('#command-input').focus();$('#command-results').innerHTML=items.map(x=>`<div class="command-result" data-command-route="${x[0]}"><strong>${x[1]}</strong><div style="font-size:8px;color:#8b95a5;margin-top:2px">${x[2]}</div></div>`).join('');$$('[data-command-route]').forEach(x=>x.onclick=()=>{$('#command-modal').hidden=true;go(x.dataset.commandRoute)})}
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));}
 document.addEventListener('DOMContentLoaded',init);
