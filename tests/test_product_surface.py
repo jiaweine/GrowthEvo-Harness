@@ -38,9 +38,42 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     pages = (STATIC / "pages.js").read_text(encoding="utf-8")
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    index = (STATIC / "index.html").read_text(encoding="utf-8")
     assert "DOMContentLoaded" not in pages
     assert "document.addEventListener('DOMContentLoaded',init)" in app
     assert "fidelity.css" in styles
+    assert "product-pages.css" in styles
+    assert "product-data.js" in index
+    assert index.index("product-data.js") < index.index("pages.js") < index.index("app.js")
+
+
+def test_core_product_workbenches_are_real_routes() -> None:
+    pages = (STATIC / "pages.js").read_text(encoding="utf-8")
+    product_data = (STATIC / "product-data.js").read_text(encoding="utf-8")
+    required_functions = (
+        "function opportunities()",
+        "function campaignStudio()",
+        "function experiments()",
+        "function execution()",
+        "function realtime()",
+        "function approvals()",
+        "function evolution()",
+    )
+    for marker in required_functions:
+        assert marker in pages
+    for route in ("opportunities", "campaignStudio", "experiments", "realtime", "approvals", "evolution"):
+        assert route in product_data or route in pages
+    assert "NO_TREATMENT" in pages
+    assert "propensity" in pages
+    assert "Replay" in pages and "Shadow" in pages and "Canary" in pages
+
+
+def test_pages_builder_packages_all_product_assets() -> None:
+    build_script = (ROOT / "scripts" / "build_pages.py").read_text(encoding="utf-8")
+    service_worker = (STATIC / "service-worker.js").read_text(encoding="utf-8")
+    for asset in ("product-pages.css", "product-data.js"):
+        assert asset in build_script
+        assert asset in service_worker
 
 
 def test_optional_decision_engine_contract() -> None:
