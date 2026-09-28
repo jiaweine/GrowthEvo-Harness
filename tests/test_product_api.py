@@ -21,27 +21,45 @@ def test_product_api_health_dashboard_and_opportunities() -> None:
     assert opportunities.json()[0]["evidence_tier"] in {"A", "B", "C", "D"}
 
 
+def _decision_request() -> dict[str, object]:
+    return {
+        "entity_id": "user-api-1",
+        "placement": "checkout_banner",
+        "context": {"cart_value": 198, "session_intent": "high", "new_user": True},
+        "candidate_action_ids": ["NO_TREATMENT", "free_shipping_v3"],
+        "consent_state": True,
+        "frequency_remaining": 2,
+        "budget_remaining": 50,
+        "context_freshness_seconds": 10,
+    }
+
+
 def test_product_api_decision_contract() -> None:
     client = TestClient(create_app())
     response = client.post(
         "/api/v1/decide",
         headers={"Idempotency-Key": "api-test-1"},
-        json={
-            "entity_id": "user-api-1",
-            "placement": "checkout_banner",
-            "context": {"cart_value": 198, "session_intent": "high", "new_user": True},
-            "candidate_action_ids": ["NO_TREATMENT", "free_shipping_v3"],
-            "consent_state": True,
-            "frequency_remaining": 2,
-            "budget_remaining": 50,
-            "context_freshness_seconds": 10,
-        },
+        json=_decision_request(),
     )
     assert response.status_code == 200
     payload = response.json()
     assert payload["decision_id"].startswith("dec_")
     assert 0 < payload["propensity"] <= 1
     assert payload["policy_version"]
+    assert payload["engine_mode"] == "reference-contract"
+
+
+def test_realtime_console_alias_uses_same_decision_contract() -> None:
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/realtime/decision",
+        headers={"Idempotency-Key": "api-test-realtime-1"},
+        json=_decision_request(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["decision_id"].startswith("dec_")
+    assert payload["action_id"] in {"NO_TREATMENT", "free_shipping_v3"}
     assert payload["engine_mode"] == "reference-contract"
 
 
