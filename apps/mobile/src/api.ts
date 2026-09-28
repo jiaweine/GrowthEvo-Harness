@@ -4,6 +4,8 @@ export type Dashboard = {
   campaigns: { id: string; name: string; status: string; goal: string; expected_lift: string }[];
 };
 
+declare const process: { env: Record<string, string | undefined> };
+
 const base = process.env.EXPO_PUBLIC_GROWTHEVO_API ?? "http://127.0.0.1:8765";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
