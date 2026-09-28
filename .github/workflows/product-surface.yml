@@ -30,8 +30,8 @@ jobs:
   web-product:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -47,6 +47,30 @@ jobs:
       - name: Check Pages artifact JavaScript
         run: |
           for file in _site/assets/*.js; do node --check "$file"; done
+      - name: Capture real rendered UI screenshots
+        run: |
+          mkdir -p ui-screenshots
+          python -m http.server 4173 --directory _site >/tmp/growthevo-pages.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME_BIN"
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --window-size=1536,1024 --screenshot=ui-screenshots/growthevo-desktop.png http://127.0.0.1:4173/
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --window-size=430,932 --screenshot=ui-screenshots/growthevo-mobile-web.png http://127.0.0.1:4173/
+          test -s ui-screenshots/growthevo-desktop.png
+          test -s ui-screenshots/growthevo-mobile-web.png
+      - name: Upload rendered UI screenshots
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: growthevo-ui-screenshots
+          path: ui-screenshots/*.png
+          if-no-files-found: error
 
   mobile:
     runs-on: ubuntu-latest
@@ -54,8 +78,8 @@ jobs:
       run:
         working-directory: apps/mobile
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22.13"
           cache: npm
