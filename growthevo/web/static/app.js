@@ -11,3 +11,4 @@ window.addEventListener('hashchange',()=>{state.route=(location.hash||'#dashboar
 function openAgent(){$('#agent-sidecar').classList.add('open')}
 function openCommand(){$('#command-modal').hidden=false;$('#command-input').focus();$('#command-results').innerHTML=['创建一个新活动','分析新用户增长机会','查看待审批事项','打开 Agent Harness'].map(x=>`<div class="command-result">${x}</div>`).join('')}
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));}
+document.addEventListener('DOMContentLoaded',init);
