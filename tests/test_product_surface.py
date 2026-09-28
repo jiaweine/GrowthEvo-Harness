@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from growthevo.web.product_data import agent_plan, dashboard_payload, opportunities
+
+
+ROOT = Path(__file__).resolve().parents[1]
+STATIC = ROOT / "growthevo" / "web" / "static"
 
 
 def test_growth_os_dashboard_exposes_incremental_kpis() -> None:
@@ -26,6 +32,15 @@ def test_agent_plan_separates_claim_types_and_artifacts() -> None:
     assert {"FACT", "ESTIMATE", "HYPOTHESIS", "IDEA"} <= claim_types
     assert {"StrategyProposal", "ExperimentDraft", "CampaignDraft", "ApprovalRequest"} <= artifact_types
     assert result["next_gate"] == "Shadow preflight"
+
+
+def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
+    pages = (STATIC / "pages.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    assert "DOMContentLoaded" not in pages
+    assert "document.addEventListener('DOMContentLoaded',init)" in app
+    assert "fidelity.css" in styles
 
 
 def test_optional_decision_engine_contract() -> None:
