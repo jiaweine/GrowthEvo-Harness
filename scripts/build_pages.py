@@ -24,6 +24,7 @@ def build(output: Path, source: Path) -> None:
         "responsive.css",
         "fidelity.css",
         "data.js",
+        "product-data.js",
         "views.js",
         "dashboard-page.js",
         "pages.js",
