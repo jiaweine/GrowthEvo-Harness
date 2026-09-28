@@ -45,12 +45,21 @@ Durable side effects should run in a workflow engine rather than inside a long m
 
 ## 2025–2026 research reviewed
 
-The product does not assume one universal memory substrate. Context and persistent memory are separated; memory requires provenance/scope/freshness/TTL; long-context remains a valid baseline.
+The product does not assume one universal memory substrate. Context and persistent memory are separated; memory requires provenance/scope/freshness/TTL; long-context remains a valid baseline. Agent quality is evaluated at both final-outcome and trajectory/tool-use levels, while policy evaluation keeps behavior propensities and support explicit.
+
+Peer-reviewed conference work used as design input:
+
+- *MemBench: Towards More Comprehensive Evaluation on the Memory of LLM-based Agents* — Findings of ACL 2025. It motivates evaluating memory by effectiveness, efficiency and capacity rather than treating memory as a binary feature.
+- *Improved Offline Contextual Bandits with Second-Order Bounds: Betting and Freezing* — COLT 2025. It reinforces variance-aware off-policy selection instead of relying on a single point estimate.
+- *Log-Sum-Exponential Estimator for Off-Policy Evaluation and Learning* — ICML 2025. It motivates explicit robustness work for poor propensities and heavy-tailed rewards.
+- *Causal Eligibility Traces for Confounding Robust Off-Policy Evaluation* — UAI 2025. It highlights the need to surface no-overlap/confounding limitations instead of hiding them behind a policy score.
+- *Evaluating Memory in LLM Agents via Incremental Multi-Turn Interactions (MemoryAgentBench)* — ICLR 2026. It decomposes agent memory into retrieval, test-time learning, long-range understanding and selective forgetting.
+
+Additional 2026 work reviewed for the evolution architecture:
 
 - *EvoMemBench: Benchmarking Agent Memory from a Self-Evolving Perspective* (2026), arXiv:2605.18421.
 - *Memory for Autonomous LLM Agents: Mechanisms, Evaluation, and Emerging Frontiers* (2026), arXiv:2603.07670.
 - *Harness the Memory: A Holistic Evaluation of Memory Substrates in Memory Agents* (2026), arXiv:2608.15008.
-- *MemBench: Towards More Comprehensive Evaluation on the Memory of LLM-based Agents* (2025), arXiv:2506.21605.
 
 The resulting evolution policy is controlled: memory/prompt/skill/tool-routing candidates pass replay, harness evaluation, shadow and canary before promotion.
 
