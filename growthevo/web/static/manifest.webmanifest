@@ -1,0 +1,10 @@
+{
+  "name": "GrowthEvo Growth OS",
+  "short_name": "GrowthEvo",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7fb",
+  "theme_color": "#111827",
+  "description": "Agentic causal growth platform",
+  "icons": [{"src":"/assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
