@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from growthevo.web.decisioning import ACTION_REGISTRY, ReferenceDecisionEngine
+import pytest
+
 from growthevo.web.product_data import agent_plan, dashboard_payload, opportunities
-from growthevo.web.schemas import DecisionRequest
 
 
 def test_growth_os_dashboard_exposes_incremental_kpis() -> None:
@@ -28,17 +28,18 @@ def test_agent_plan_separates_claim_types_and_artifacts() -> None:
     assert result["next_gate"] == "Shadow preflight"
 
 
-def test_decision_engine_enforces_no_treatment_without_consent() -> None:
+def test_optional_decision_engine_contract() -> None:
+    pytest.importorskip("pydantic")
+    from growthevo.web.decisioning import ACTION_REGISTRY, ReferenceDecisionEngine
+    from growthevo.web.schemas import DecisionRequest
+
     engine = ReferenceDecisionEngine()
-    result = engine.decide(
+    no_consent = engine.decide(
         DecisionRequest(entity_id="u-1", placement="checkout", consent_state=False)
     )
-    assert result["action_id"] == "NO_TREATMENT"
-    assert result["propensity"] == 1.0
+    assert no_consent["action_id"] == "NO_TREATMENT"
+    assert no_consent["propensity"] == 1.0
 
-
-def test_decision_engine_logs_propensity_and_idempotency() -> None:
-    engine = ReferenceDecisionEngine()
     request = DecisionRequest(
         entity_id="u-2",
         placement="checkout",
@@ -54,9 +55,5 @@ def test_decision_engine_logs_propensity_and_idempotency() -> None:
     assert first["decision_id"] == second["decision_id"]
     assert "NO_TREATMENT" in first["action_distribution"]
     assert 0 < first["propensity"] <= 1
-
-
-def test_action_registry_has_zero_cost_no_treatment() -> None:
-    action = ACTION_REGISTRY["NO_TREATMENT"]
-    assert action.cost == 0
-    assert action.risk_level == "L0"
+    assert ACTION_REGISTRY["NO_TREATMENT"].cost == 0
+    assert ACTION_REGISTRY["NO_TREATMENT"].risk_level == "L0"
