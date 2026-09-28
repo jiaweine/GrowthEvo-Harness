@@ -100,6 +100,7 @@ def create_app() -> Any:
     def actions() -> list[dict[str, Any]]:
         return action_registry_payload()
 
+    @app.post("/api/v1/realtime/decision", tags=["decisioning"], include_in_schema=False)
     @app.post("/api/v1/decide", tags=["decisioning"])
     def decide(request: DecisionRequest, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
         return _engine.decide(request, idempotency_key=idempotency_key)
