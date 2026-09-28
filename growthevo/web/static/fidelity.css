@@ -3,22 +3,21 @@
 .panel-link:hover{color:#344054!important}
 
 @media(min-width:1260px){
-  .nav-item{padding:11px 11px;font-size:12px}
+  .nav-item{padding:13px 11px;font-size:12px}
   .sidebar-bottom{min-height:205px;padding-top:15px}
   .workspace-card,.user-card{padding:9px 0}
   .collapse-btn{height:34px;margin-top:12px;padding-top:11px}
 
-  .agent-body{gap:12px;padding-top:12px}
+  .agent-body{gap:12px;padding-top:14px}
   .chat-time{margin-top:2px}
-  .bubble{padding:12px 13px;font-size:10.5px;line-height:1.65}
-  .thinking{min-height:246px;padding:12px 12px 10px}
+  .bubble{max-width:280px;min-height:78px;padding:12px 13px;font-size:10.5px;line-height:1.65}
+  .thinking{min-height:270px;padding:12px 12px 10px}
   .thinking-head{margin-bottom:11px}
   .agent-steps{gap:9px}
   .agent-step{font-size:9.3px;line-height:1.28}
 }
 
 @media(max-width:760px){
-  .command-search .search-placeholder{display:block;max-width:150px;font-size:10px}
-  .command-search .search-placeholder{font-size:0}
+  .command-search .search-placeholder{display:block;max-width:150px;font-size:0}
   .command-search .search-placeholder:after{content:'搜索或问 Agent…';font-size:10px}
 }
