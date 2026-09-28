@@ -65,9 +65,21 @@ jobs:
           done
           CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME_BIN"
-          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=1536,1024 --screenshot=ui-screenshots/growthevo-desktop.png http://127.0.0.1:4173/
+          chrome_shot() {
+            name="$1"
+            route="$2"
+            "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=1536,1024 --screenshot="ui-screenshots/${name}.png" "http://127.0.0.1:4173/#${route}"
+            test -s "ui-screenshots/${name}.png"
+          }
+          chrome_shot growthevo-desktop dashboard
+          chrome_shot growthevo-opportunities opportunities
+          chrome_shot growthevo-campaign-studio campaignStudio
+          chrome_shot growthevo-experiments experiments
+          chrome_shot growthevo-realtime realtime
+          chrome_shot growthevo-approvals approvals
+          chrome_shot growthevo-agent-harness harness
+          chrome_shot growthevo-evolution evolution
           "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=430,932 --screenshot=ui-screenshots/growthevo-mobile-web.png http://127.0.0.1:4173/
-          test -s ui-screenshots/growthevo-desktop.png
           test -s ui-screenshots/growthevo-mobile-web.png
       - name: Upload rendered UI screenshots
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
