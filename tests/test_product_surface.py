@@ -49,8 +49,10 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     assert "product-advanced-data.js" in index
     assert index.index("data.js") < index.index("runtime-ui.js") < index.index("product-data.js")
     assert index.index("product-data.js") < index.index("product-advanced-data.js") < index.index("pages.js") < index.index("app.js")
-    assert "will not substitute synthetic data" in runtime_ui
+    assert "不会把 synthetic demo 数据伪装成真实生产数据" in runtime_ui
     assert "Demo Workspace · Synthetic Data" in runtime_ui
+    assert "using demo mode because MODE=auto" not in runtime_ui
+    assert "/api/ready" in runtime_ui
 
 
 def test_core_product_workbenches_are_real_routes() -> None:
@@ -83,6 +85,28 @@ def test_pages_builder_packages_all_product_assets() -> None:
     for asset in ("product-pages.css", "runtime-ui.js", "product-data.js", "product-advanced-data.js"):
         assert asset in build_script
         assert asset in service_worker
+    assert "isApi(url)" in service_worker
+    assert "url.origin!==SCOPE.origin||isApi(url)" in service_worker
+    assert "hit||caches.match" not in service_worker
+
+
+def test_mutable_dashboard_fields_are_html_escaped() -> None:
+    views = (STATIC / "views.js").read_text(encoding="utf-8")
+    dashboard = (STATIC / "dashboard-page.js").read_text(encoding="utf-8")
+    assert "${esc(c.name)}" in views
+    assert "${esc(c.goal)}" in views
+    assert "${esc(c.type)}" in views
+    assert "c.population==null?'—'" in views
+    assert "${esc(k.label)}" in dashboard
+    assert "safeColor" in dashboard
+    assert "go('campaignStudio')" in dashboard
+
+
+def test_agent_composer_calls_real_api_outside_demo() -> None:
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "/api/v1/agent/plan" in app
+    assert "if(useDemo)" in app
+    assert "renderApiUnavailable(error)" in app
 
 
 def test_optional_decision_engine_contract() -> None:
@@ -96,6 +120,7 @@ def test_optional_decision_engine_contract() -> None:
     )
     assert no_consent["action_id"] == "NO_TREATMENT"
     assert no_consent["propensity"] == 1.0
+    assert no_consent["action_distribution"] == {"NO_TREATMENT": 1.0}
 
     request = DecisionRequest(
         entity_id="u-2",
