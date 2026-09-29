@@ -12,7 +12,13 @@ from fastapi.testclient import TestClient
 
 from growthevo.web.app import MAX_API_BODY_BYTES, create_app
 from growthevo.web.cli import _default_port, _port
-from growthevo.web.schemas import DecisionRequest
+from growthevo.web.decisioning import ACTION_REGISTRY
+from growthevo.web.schemas import (
+    ApprovalDecisionRequest,
+    CampaignDraftRequest,
+    DecisionRequest,
+    KNOWN_ACTION_IDS,
+)
 from scripts.build_pages import normalize_api_base
 
 
@@ -67,6 +73,34 @@ def test_decision_request_rejects_non_finite_budget() -> None:
             placement="checkout",
             budget_remaining=float("inf"),
         )
+
+
+def test_schema_action_ids_cannot_drift_from_registry() -> None:
+    assert KNOWN_ACTION_IDS == frozenset(ACTION_REGISTRY)
+    with pytest.raises(pydantic.ValidationError, match="unknown candidate_action_ids"):
+        DecisionRequest(
+            entity_id="u-action-typo",
+            placement="checkout",
+            candidate_action_ids=["free_shiping_v3"],
+        )
+
+
+def test_campaign_draft_always_keeps_no_treatment_control() -> None:
+    request = CampaignDraftRequest(
+        name="safe draft",
+        goal="preserve safe control",
+        audience="new users",
+        budget=1000,
+        candidate_action_ids=["free_shipping_v3", "free_shipping_v3"],
+    )
+    assert request.candidate_action_ids == ["NO_TREATMENT", "free_shipping_v3"]
+
+
+def test_approval_decisions_require_nonempty_audit_note() -> None:
+    with pytest.raises(pydantic.ValidationError):
+        ApprovalDecisionRequest(decision="approve_5", note="   ")
+    valid = ApprovalDecisionRequest(decision="reject", note="  risk exceeds guardrail  ")
+    assert valid.note == "risk exceeds guardrail"
 
 
 def test_not_ready_production_blocks_business_apis(monkeypatch: pytest.MonkeyPatch) -> None:
