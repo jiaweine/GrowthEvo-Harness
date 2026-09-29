@@ -1,8 +1,23 @@
 const runtimeStrictApi = !useDemo;
+const RUNTIME_API_TIMEOUT_MS = 10000;
+const RUNTIME_READY_TIMEOUT_MS = 5000;
+
+async function runtimeFetch(url, options = {}, timeoutMs = RUNTIME_API_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {...options, signal: controller.signal});
+  } catch (error) {
+    if (error && error.name === 'AbortError') throw Error(`API request timed out after ${timeoutMs}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 api = async function runtimeAwareApi(path, options = {}) {
   if (useDemo) return demoApi(path, options);
-  const response = await fetch(`${config.API_BASE || ''}${path}`, {
+  const response = await runtimeFetch(`${config.API_BASE || ''}${path}`, {
     headers: {'Content-Type': 'application/json', ...(options.headers || {})},
     cache: 'no-store',
     ...options,
@@ -53,7 +68,7 @@ async function probeRuntime() {
   if (useDemo) return;
   const started = performance.now();
   try {
-    const response = await fetch(`${config.API_BASE || ''}/api/ready`, {cache: 'no-store'});
+    const response = await runtimeFetch(`${config.API_BASE || ''}/api/ready`, {cache: 'no-store'}, RUNTIME_READY_TIMEOUT_MS);
     const latency = Math.max(0, Math.round(performance.now() - started));
     if (!response.ok) throw Error(`readiness returned HTTP ${response.status}`);
     const payload = await response.json();
