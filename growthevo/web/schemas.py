@@ -12,8 +12,9 @@ GuardrailName = Annotated[str, Field(min_length=1, max_length=128)]
 
 
 class RequestModel(BaseModel):
-    # Safety/governance APIs must fail closed on misspelled contract fields.
-    model_config = ConfigDict(extra="forbid")
+    # Safety/governance APIs must fail closed on misspelled contract fields and
+    # normalize accidental surrounding whitespace before length validation.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
 class AgentPlanRequest(RequestModel):
@@ -25,7 +26,7 @@ class AgentPlanRequest(RequestModel):
 
 class ApprovalDecisionRequest(RequestModel):
     decision: Literal["approve_shadow", "approve_1", "approve_5", "approve_25", "reject", "return"]
-    note: str = Field(default="", max_length=1000)
+    note: str = Field(min_length=1, max_length=1000)
 
 
 class DecisionRequest(RequestModel):
