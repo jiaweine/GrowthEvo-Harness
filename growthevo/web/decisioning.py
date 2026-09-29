@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -13,10 +14,12 @@ from typing import Any
 from .schemas import DecisionRequest
 
 UTC = timezone.utc
+REFERENCE_POLICY_ID = "policy_growth_safe"
+REFERENCE_POLICY_VERSION = "pv_reference_2"
 
 
 class DecisionInputError(ValueError):
-    """Raised when a syntactically valid decision request has unsafe context values."""
+    """Raised when a syntactically valid decision request has unsafe values."""
 
 
 class IdempotencyConflict(ValueError):
@@ -49,9 +52,13 @@ class ReferenceDecisionEngine:
     This reference scorer validates API semantics and guardrails. Production deployments
     should replace ``score_actions`` with the harness' locked CATE/OPE/policy pipeline.
 
-    The in-process idempotency cache is deliberately bounded. It is only a reference
-    contract for a single process; production should persist idempotency/decision logs
-    in durable storage so multiple replicas share the same contract.
+    Eligible actions are assigned with a stable hash draw from the logged softmax
+    distribution. This keeps the reference policy reproducible while ensuring the
+    recorded behavior propensity actually matches the assignment mechanism used to
+    choose the action. It is still a reference contract, not a production causal policy.
+
+    The in-process idempotency cache is deliberately bounded. Production should persist
+    idempotency/decision logs in durable shared storage before using multiple replicas.
     """
 
     def __init__(self, max_log_size: int = 500, max_idempotency_size: int = 5_000) -> None:
@@ -72,18 +79,18 @@ class ReferenceDecisionEngine:
 
     @staticmethod
     def _softmax(scores: dict[str, float]) -> dict[str, float]:
+        if not scores:
+            raise DecisionInputError("no actions are available for scoring")
         peak = max(scores.values())
         exps = {key: math.exp(value - peak) for key, value in scores.items()}
         total = sum(exps.values())
+        if not math.isfinite(total) or total <= 0:
+            raise DecisionInputError("decision distribution could not be normalized")
         return {key: value / total for key, value in exps.items()}
 
     @staticmethod
     def _request_fingerprint(request: DecisionRequest) -> str:
-        candidates = (
-            None
-            if request.candidate_action_ids is None
-            else sorted(set(request.candidate_action_ids))
-        )
+        candidates = None if request.candidate_action_ids is None else sorted(set(request.candidate_action_ids))
         canonical = {
             "entity_id": request.entity_id,
             "placement": request.placement,
@@ -135,9 +142,31 @@ class ReferenceDecisionEngine:
         raw = context.get(key, default)
         if isinstance(raw, bool):
             return raw
-        if raw in {0, 1}:
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw in (0, 1):
             return bool(raw)
         raise DecisionInputError(f"context.{key} must be boolean")
+
+    @staticmethod
+    def _assignment_draw(request: DecisionRequest) -> float:
+        material = (
+            f"{REFERENCE_POLICY_ID}:{REFERENCE_POLICY_VERSION}:"
+            f"{request.entity_id}:{request.placement}"
+        ).encode("utf-8")
+        integer = int.from_bytes(hashlib.sha256(material).digest()[:8], "big")
+        return integer / 2**64
+
+    @staticmethod
+    def _select_action(probabilities: dict[str, float], draw: float) -> str:
+        cumulative = 0.0
+        last: str | None = None
+        for action_id, probability in probabilities.items():
+            last = action_id
+            cumulative += probability
+            if draw < cumulative:
+                return action_id
+        if last is None:  # pragma: no cover - guarded by _softmax
+            raise DecisionInputError("no action could be selected")
+        return last
 
     def _cached(
         self,
@@ -156,7 +185,7 @@ class ReferenceDecisionEngine:
                     "Idempotency-Key was already used for a different decision request"
                 )
             self._idempotency.move_to_end(idempotency_key)
-            return payload
+            return copy.deepcopy(payload)
 
     def _fallback(
         self,
@@ -174,8 +203,9 @@ class ReferenceDecisionEngine:
             "creative_id": None,
             "propensity": 1.0,
             "action_distribution": {"NO_TREATMENT": 1.0},
-            "policy_id": "policy_growth_safe",
-            "policy_version": "pv_reference_1",
+            "policy_id": REFERENCE_POLICY_ID,
+            "policy_version": REFERENCE_POLICY_VERSION,
+            "policy_randomization": "guardrail-deterministic",
             "engine_mode": "reference-contract",
             "evidence_tier": "A",
             "expires_at": (now + timedelta(minutes=10)).isoformat(),
@@ -245,19 +275,23 @@ class ReferenceDecisionEngine:
                 request_fingerprint,
             )
 
-        # ``None`` means the caller did not constrain candidates. An explicitly
-        # empty list means no treatment candidate is allowed, so only the safe
-        # NO_TREATMENT action may be considered.
-        candidate_ids = (
-            list(ACTION_REGISTRY)
-            if request.candidate_action_ids is None
-            else list(dict.fromkeys(request.candidate_action_ids))
-        )
-        if "NO_TREATMENT" not in candidate_ids:
-            candidate_ids = ["NO_TREATMENT", *candidate_ids]
-        actions = [ACTION_REGISTRY[action_id] for action_id in candidate_ids if action_id in ACTION_REGISTRY]
+        if request.candidate_action_ids is None:
+            candidate_ids = list(ACTION_REGISTRY)
+        else:
+            requested = set(request.candidate_action_ids)
+            unknown = sorted(requested.difference(ACTION_REGISTRY))
+            if unknown:
+                raise DecisionInputError(
+                    "unknown candidate_action_ids: " + ", ".join(unknown)
+                )
+            requested.add("NO_TREATMENT")
+            # Registry order is canonical so semantically identical candidate
+            # sets produce the same distribution regardless of caller list order.
+            candidate_ids = [action_id for action_id in ACTION_REGISTRY if action_id in requested]
+
+        actions = [ACTION_REGISTRY[action_id] for action_id in candidate_ids]
         actions = [a for a in actions if a.cost <= request.budget_remaining or a.action_id == "NO_TREATMENT"]
-        if not actions:
+        if not actions:  # pragma: no cover - NO_TREATMENT is always eligible
             return self._fallback(
                 request,
                 ["No eligible action after registry and budget checks."],
@@ -267,7 +301,8 @@ class ReferenceDecisionEngine:
 
         scores = self.score_actions(request, actions)
         probabilities = self._softmax(scores)
-        chosen_id = max(scores, key=scores.get)
+        draw = self._assignment_draw(request)
+        chosen_id = self._select_action(probabilities, draw)
         chosen = ACTION_REGISTRY[chosen_id]
         now = datetime.now(UTC)
         payload = {
@@ -276,10 +311,12 @@ class ReferenceDecisionEngine:
             "placement": request.placement,
             "action_id": chosen.action_id,
             "creative_id": chosen.creative_id,
-            "propensity": round(probabilities[chosen.action_id], 6),
-            "action_distribution": {key: round(value, 6) for key, value in probabilities.items()},
-            "policy_id": "policy_growth_safe",
-            "policy_version": "pv_reference_1",
+            "propensity": probabilities[chosen.action_id],
+            "action_distribution": probabilities,
+            "assignment_draw": draw,
+            "policy_id": REFERENCE_POLICY_ID,
+            "policy_version": REFERENCE_POLICY_VERSION,
+            "policy_randomization": "stable-hash-softmax",
             "engine_mode": "reference-contract",
             "evidence_tier": chosen.evidence_tier,
             "expires_at": (now + timedelta(minutes=10)).isoformat(),
@@ -291,7 +328,8 @@ class ReferenceDecisionEngine:
             },
             "reasons": [
                 "Action is registry-valid and guardrail-feasible.",
-                "Decision distribution is logged for OPE compatibility.",
+                "Selected action was sampled from the logged reference distribution.",
+                "Behavior propensity matches the reference assignment mechanism.",
                 "NO_TREATMENT remained in the candidate set.",
             ],
             "logged_at": now.isoformat(),
@@ -305,9 +343,6 @@ class ReferenceDecisionEngine:
         request_fingerprint: str | None,
     ) -> dict[str, Any]:
         with self._lock:
-            # Double-check inside the write lock. Multiple concurrent first-seen
-            # requests with the same key must all observe one result; a different
-            # request using that key is an explicit conflict rather than a stale hit.
             if idempotency_key:
                 entry = self._idempotency.get(idempotency_key)
                 if entry is not None:
@@ -317,21 +352,22 @@ class ReferenceDecisionEngine:
                             "Idempotency-Key was already used for a different decision request"
                         )
                     self._idempotency.move_to_end(idempotency_key)
-                    return existing
+                    return copy.deepcopy(existing)
 
-            self._recent.appendleft(payload)
+            stored = copy.deepcopy(payload)
+            self._recent.appendleft(stored)
             if idempotency_key:
                 if request_fingerprint is None:  # pragma: no cover - defensive invariant
                     raise RuntimeError("idempotent decisions require a request fingerprint")
-                self._idempotency[idempotency_key] = (request_fingerprint, payload)
+                self._idempotency[idempotency_key] = (request_fingerprint, stored)
                 self._idempotency.move_to_end(idempotency_key)
                 while len(self._idempotency) > self._max_idempotency_size:
                     self._idempotency.popitem(last=False)
-        return payload
+        return copy.deepcopy(stored)
 
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._lock:
-            return list(self._recent)[:limit]
+            return copy.deepcopy(list(self._recent)[:limit])
 
     def stats(self) -> dict[str, int]:
         with self._lock:
