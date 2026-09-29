@@ -15,6 +15,9 @@ def test_product_api_health_dashboard_and_opportunities() -> None:
     health = client.get("/api/health")
     assert health.json()["status"] == "ok"
     assert health.headers["X-GrowthEvo-Mode"]
+    assert health.headers["cache-control"] == "no-store"
+    assert health.headers["x-content-type-options"] == "nosniff"
+    assert health.headers["x-frame-options"] == "DENY"
     dashboard = client.get("/api/v1/dashboard")
     assert dashboard.status_code == 200
     assert dashboard.json()["summary"]["api_version"] == "v1"
@@ -37,6 +40,12 @@ def test_runtime_contract_is_public_safe(monkeypatch: pytest.MonkeyPatch) -> Non
     assert runtime["persistence"]["active"] is False
     assert runtime["persistence"]["backend"] == "reference-memory"
     assert client.get("/api/ready").status_code == 200
+
+
+def test_invalid_runtime_mode_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROWTHEVO_MODE", "prodution")
+    with pytest.raises(ValueError, match="invalid GROWTHEVO_MODE"):
+        create_app()
 
 
 def test_production_readiness_requires_active_durable_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,6 +92,15 @@ def test_pages_origin_can_be_enabled_explicitly(monkeypatch: pytest.MonkeyPatch)
     assert response.headers["access-control-allow-origin"] == origin
 
 
+def test_cors_configuration_rejects_wildcards_and_non_origins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROWTHEVO_CORS_ORIGINS", "*")
+    with pytest.raises(ValueError, match="wildcards"):
+        create_app()
+    monkeypatch.setenv("GROWTHEVO_CORS_ORIGINS", "https://example.com/path")
+    with pytest.raises(ValueError, match="exact http"):
+        create_app()
+
+
 def _decision_request() -> dict[str, object]:
     return {
         "entity_id": "user-api-1",
@@ -109,6 +127,39 @@ def test_product_api_decision_contract() -> None:
     assert 0 < payload["propensity"] <= 1
     assert payload["policy_version"]
     assert payload["engine_mode"] == "reference-contract"
+    assert "NO_TREATMENT" in payload["action_distribution"]
+
+
+def test_explicit_empty_candidate_list_is_conservative() -> None:
+    client = TestClient(create_app())
+    body = _decision_request()
+    body["candidate_action_ids"] = []
+    response = client.post("/api/v1/decide", json=body)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action_id"] == "NO_TREATMENT"
+    assert payload["action_distribution"] == {"NO_TREATMENT": 1.0}
+
+
+def test_idempotency_key_reuse_with_different_request_is_conflict() -> None:
+    client = TestClient(create_app())
+    first = _decision_request()
+    second = _decision_request()
+    second["entity_id"] = "different-user"
+    headers = {"Idempotency-Key": "same-key-different-payload"}
+    assert client.post("/api/v1/decide", headers=headers, json=first).status_code == 200
+    conflict = client.post("/api/v1/decide", headers=headers, json=second)
+    assert conflict.status_code == 409
+    assert "different decision request" in conflict.json()["detail"]
+
+
+def test_invalid_decision_context_returns_422_not_500() -> None:
+    client = TestClient(create_app())
+    body = _decision_request()
+    body["context"] = {"cart_value": "not-a-number", "session_intent": "high"}
+    response = client.post("/api/v1/decide", json=body)
+    assert response.status_code == 422
+    assert "context.cart_value" in response.json()["detail"]
 
 
 def test_realtime_console_alias_uses_same_decision_contract() -> None:
@@ -123,6 +174,46 @@ def test_realtime_console_alias_uses_same_decision_contract() -> None:
     assert payload["decision_id"].startswith("dec_")
     assert payload["action_id"] in {"NO_TREATMENT", "free_shipping_v3"}
     assert payload["engine_mode"] == "reference-contract"
+
+
+def test_app_factory_isolates_mutable_reference_state() -> None:
+    first = TestClient(create_app())
+    second = TestClient(create_app())
+
+    decision = first.post("/api/v1/decide", json=_decision_request())
+    assert decision.status_code == 200
+    assert len(first.get("/api/v1/decisions/recent").json()) == 1
+    assert second.get("/api/v1/decisions/recent").json() == []
+
+    draft = first.post(
+        "/api/v1/campaigns/draft",
+        json={
+            "name": "isolated draft",
+            "goal": "prove app isolation",
+            "audience": "test cohort",
+            "budget": 1000,
+            "candidate_action_ids": ["NO_TREATMENT"],
+        },
+    )
+    assert draft.status_code == 201
+    draft_id = draft.json()["id"]
+    assert any(item["id"] == draft_id for item in first.get("/api/v1/campaigns").json())
+    assert all(item["id"] != draft_id for item in second.get("/api/v1/campaigns").json())
+
+
+def test_unknown_api_route_is_real_404_not_spa_html() -> None:
+    client = TestClient(create_app())
+    response = client.get("/api/v1/definitely-not-a-route")
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["detail"] == "API route not found"
+
+
+def test_service_worker_is_not_long_cached() -> None:
+    client = TestClient(create_app())
+    response = client.get("/service-worker.js")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
 
 
 def test_product_api_agent_and_approval_workflow() -> None:
@@ -141,4 +232,18 @@ def test_product_api_agent_and_approval_workflow() -> None:
         json={"decision": "approve_5", "note": "API test"},
     )
     assert result.status_code == 200
-    assert result.json()["status"] == "approve_5"
+    first_timestamp = result.json()["decided_at"]
+
+    retry = client.post(
+        f"/api/v1/approvals/{approval_id}/decision",
+        json={"decision": "approve_5", "note": "different retry note"},
+    )
+    assert retry.status_code == 200
+    assert retry.json()["decided_at"] == first_timestamp
+    assert retry.json()["decision_note"] == "API test"
+
+    conflict = client.post(
+        f"/api/v1/approvals/{approval_id}/decision",
+        json={"decision": "reject", "note": "late conflict"},
+    )
+    assert conflict.status_code == 409
