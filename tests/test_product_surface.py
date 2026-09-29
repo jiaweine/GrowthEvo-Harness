@@ -53,6 +53,8 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     assert "Demo Workspace · Synthetic Data" in runtime_ui
     assert "using demo mode because MODE=auto" not in runtime_ui
     assert "/api/ready" in runtime_ui
+    assert "typeof options.body === 'string'" in runtime_ui
+    assert "Data: ${dataMode}" in runtime_ui
 
 
 def test_core_product_workbenches_are_real_routes() -> None:
@@ -87,6 +89,8 @@ def test_pages_builder_packages_all_product_assets() -> None:
         assert asset in service_worker
     assert "isApi(url)" in service_worker
     assert "url.origin!==SCOPE.origin||isApi(url)" in service_worker
+    assert "networkFirst(request)" in service_worker
+    assert "caches.match(request)" in service_worker
     assert "hit||caches.match" not in service_worker
 
 
@@ -136,6 +140,14 @@ def test_optional_decision_engine_contract() -> None:
     second = engine.decide(request, idempotency_key="idem-1")
     assert first["decision_id"] == second["decision_id"]
     assert "NO_TREATMENT" in first["action_distribution"]
-    assert 0 < first["propensity"] <= 1
+    assert first["policy_randomization"] == "stable-hash-softmax"
+    assert first["propensity"] == first["action_distribution"][first["action_id"]]
+    assert sum(first["action_distribution"].values()) == pytest.approx(1.0)
+    assert 0 <= first["assignment_draw"] < 1
     assert ACTION_REGISTRY["NO_TREATMENT"].cost == 0
     assert ACTION_REGISTRY["NO_TREATMENT"].risk_level == "L0"
+
+    # Returned payloads must not alias the engine's cached/audit state.
+    first["action_id"] = "tampered"
+    replay = engine.decide(request, idempotency_key="idem-1")
+    assert replay["action_id"] != "tampered"
