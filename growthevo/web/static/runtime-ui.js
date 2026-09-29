@@ -17,10 +17,11 @@ async function runtimeFetch(url, options = {}, timeoutMs = RUNTIME_API_TIMEOUT_M
 
 api = async function runtimeAwareApi(path, options = {}) {
   if (useDemo) return demoApi(path, options);
+  const headers = {'Content-Type': 'application/json', ...(options.headers || {})};
   const response = await runtimeFetch(`${config.API_BASE || ''}${path}`, {
-    headers: {'Content-Type': 'application/json', ...(options.headers || {})},
-    cache: 'no-store',
     ...options,
+    headers,
+    cache: 'no-store',
   });
   if (!response.ok) {
     const detail = await response.text();
