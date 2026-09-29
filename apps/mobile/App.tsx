@@ -16,6 +16,7 @@ import { approve, Dashboard, getDashboard } from "./src/api";
 type Tab = "home" | "campaigns" | "approvals";
 
 const money = (value: number) => `¥${new Intl.NumberFormat("zh-CN").format(value)}`;
+const errorMessage = (error: unknown) => error instanceof Error ? error.message : "GrowthEvo request failed";
 
 function AppBody() {
   const [tab, setTab] = useState<Tab>("home");
@@ -26,15 +27,16 @@ function AppBody() {
 
   const load = async () => {
     try {
+      const next = await getDashboard();
+      setData(next);
       setError(null);
-      setData(await getDashboard());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load GrowthEvo");
+      setError(errorMessage(e));
     }
   };
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   const pending = useMemo(
@@ -44,15 +46,21 @@ function AppBody() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await load();
-    setRefreshing(false);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const decide = async (id: string, decision: "approve_5" | "approve_25" | "reject") => {
     setBusyId(id);
+    setError(null);
     try {
       await approve(id, decision);
       await load();
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setBusyId(null);
     }
@@ -62,6 +70,8 @@ function AppBody() {
     return <View style={styles.center}><ActivityIndicator size="large" /></View>;
   }
 
+  const online = Boolean(data) && !error;
+
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       <StatusBar barStyle="dark-content" />
@@ -70,14 +80,24 @@ function AppBody() {
           <Text style={styles.brand}>GrowthEvo</Text>
           <Text style={styles.subtitle}>Causal Growth Control</Text>
         </View>
-        <View style={styles.live}><View style={styles.liveDot}/><Text style={styles.liveText}>LIVE</Text></View>
+        <View style={[styles.live, !online && styles.liveError]}>
+          <View style={[styles.liveDot, !online && styles.liveDotError]}/>
+          <Text style={[styles.liveText, !online && styles.liveTextError]}>{online ? "LIVE" : "OFFLINE"}</Text>
+        </View>
       </View>
 
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {error ? <View style={styles.error}><Text style={styles.errorText}>{error}</Text></View> : null}
+        {error ? (
+          <View style={styles.error}>
+            <Text style={styles.errorText}>{error}</Text>
+            <Pressable onPress={() => void load()} style={styles.retryButton}>
+              <Text style={styles.retryText}>重新连接</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {tab === "home" && data ? (
           <>
@@ -197,10 +217,10 @@ export default function App() {
 const styles = StyleSheet.create({
   safe:{flex:1,backgroundColor:"#F5F7FB"},center:{flex:1,alignItems:"center",justifyContent:"center",backgroundColor:"#F5F7FB"},
   header:{height:62,paddingHorizontal:18,backgroundColor:"#FFFFFF",borderBottomWidth:1,borderBottomColor:"#E7EAF0",flexDirection:"row",alignItems:"center",justifyContent:"space-between"},
-  brand:{fontSize:20,fontWeight:"800",color:"#111827",letterSpacing:-.6},subtitle:{fontSize:10,color:"#8A92A3",marginTop:2},live:{flexDirection:"row",alignItems:"center",gap:6,paddingHorizontal:9,paddingVertical:5,borderRadius:999,backgroundColor:"#E8F7F0"},liveDot:{width:6,height:6,borderRadius:3,backgroundColor:"#0AA774"},liveText:{fontSize:9,fontWeight:"700",color:"#087B58"},
+  brand:{fontSize:20,fontWeight:"800",color:"#111827",letterSpacing:-.6},subtitle:{fontSize:10,color:"#8A92A3",marginTop:2},live:{flexDirection:"row",alignItems:"center",gap:6,paddingHorizontal:9,paddingVertical:5,borderRadius:999,backgroundColor:"#E8F7F0"},liveError:{backgroundColor:"#FFF0F1"},liveDot:{width:6,height:6,borderRadius:3,backgroundColor:"#0AA774"},liveDotError:{backgroundColor:"#D94B56"},liveText:{fontSize:9,fontWeight:"700",color:"#087B58"},liveTextError:{color:"#B53B45"},
   content:{padding:15,paddingBottom:96},title:{fontSize:27,fontWeight:"800",color:"#111827",letterSpacing:-1},description:{fontSize:12,lineHeight:18,color:"#667085",marginTop:5,marginBottom:14},
   kpiGrid:{flexDirection:"row",flexWrap:"wrap",gap:9},kpi:{width:"48.5%",backgroundColor:"#FFFFFF",borderWidth:1,borderColor:"#E7EAF0",borderRadius:12,padding:13},kpiLabel:{fontSize:10,color:"#667085",fontWeight:"600"},kpiValue:{fontSize:19,color:"#111827",fontWeight:"800",letterSpacing:-.5,marginTop:9,marginBottom:4},positive:{fontSize:11,color:"#0AA774",fontWeight:"700"},negative:{fontSize:11,color:"#D94B56",fontWeight:"700"},
   sectionHead:{marginTop:18,marginBottom:8,flexDirection:"row",alignItems:"center",justifyContent:"space-between"},sectionTitle:{fontSize:15,fontWeight:"700",color:"#202633"},card:{backgroundColor:"#FFFFFF",borderWidth:1,borderColor:"#E7EAF0",borderRadius:12,padding:14,marginBottom:9},cardTitle:{fontSize:13,fontWeight:"700",color:"#202633",flex:1,paddingRight:10},meta:{fontSize:10,color:"#8A92A3",lineHeight:16,marginTop:5},rowBetween:{flexDirection:"row",alignItems:"center",justifyContent:"space-between"},divider:{height:1,backgroundColor:"#EFF1F4",marginVertical:12},badge:{backgroundColor:"#E8F7F0",borderRadius:999,paddingHorizontal:8,paddingVertical:4},badgeText:{fontSize:9,color:"#087B58",fontWeight:"700"},evidence:{width:28,height:28,borderRadius:8,backgroundColor:"#E8F7F0",alignItems:"center",justifyContent:"center"},evidenceText:{fontSize:11,color:"#087B58",fontWeight:"800"},
   actions:{flexDirection:"row",gap:8,marginTop:12},secondaryButton:{height:34,flex:1,borderWidth:1,borderColor:"#E1E5EC",borderRadius:8,alignItems:"center",justifyContent:"center"},secondaryButtonText:{fontSize:10,color:"#475467",fontWeight:"700"},primaryButton:{height:34,flex:1,backgroundColor:"#5B5CEB",borderRadius:8,alignItems:"center",justifyContent:"center"},primaryButtonText:{fontSize:10,color:"#FFFFFF",fontWeight:"800"},
-  tabs:{height:70,backgroundColor:"#FFFFFF",borderTopWidth:1,borderTopColor:"#E7EAF0",flexDirection:"row",paddingBottom:8},tabButton:{flex:1,alignItems:"center",justifyContent:"center",gap:2},tabIcon:{fontSize:18,color:"#8A92A3"},tabText:{fontSize:9,color:"#8A92A3",fontWeight:"600"},tabActive:{color:"#5153DE"},count:{position:"absolute",right:-10,top:-3,minWidth:16,height:16,borderRadius:8,backgroundColor:"#EF4D5A",alignItems:"center",justifyContent:"center",paddingHorizontal:3},countText:{fontSize:8,color:"#FFFFFF",fontWeight:"800"},error:{backgroundColor:"#FFF0F1",borderRadius:10,padding:12,marginBottom:12},errorText:{fontSize:10,color:"#B53B45"},
+  tabs:{height:70,backgroundColor:"#FFFFFF",borderTopWidth:1,borderTopColor:"#E7EAF0",flexDirection:"row",paddingBottom:8},tabButton:{flex:1,alignItems:"center",justifyContent:"center",gap:2},tabIcon:{fontSize:18,color:"#8A92A3"},tabText:{fontSize:9,color:"#8A92A3",fontWeight:"600"},tabActive:{color:"#5153DE"},count:{position:"absolute",right:-10,top:-3,minWidth:16,height:16,borderRadius:8,backgroundColor:"#EF4D5A",alignItems:"center",justifyContent:"center",paddingHorizontal:3},countText:{fontSize:8,color:"#FFFFFF",fontWeight:"800"},error:{backgroundColor:"#FFF0F1",borderRadius:10,padding:12,marginBottom:12},errorText:{fontSize:10,color:"#B53B45",lineHeight:15},retryButton:{alignSelf:"flex-start",marginTop:8,borderWidth:1,borderColor:"#E7A8AD",borderRadius:7,paddingHorizontal:10,paddingVertical:6},retryText:{fontSize:9,color:"#9F2F38",fontWeight:"700"},
 });
