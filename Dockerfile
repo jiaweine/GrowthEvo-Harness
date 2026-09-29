@@ -9,8 +9,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
+COPY constraints/web-container-py313.txt ./constraints/web-container-py313.txt
 COPY growthevo ./growthevo
-RUN python -m pip install --disable-pip-version-check '.[web]'
+RUN python -m pip install --disable-pip-version-check \
+    --constraint constraints/web-container-py313.txt \
+    '.[web]'
 
 RUN useradd --create-home --uid 10001 growthevo && chown -R growthevo:growthevo /app
 USER growthevo
