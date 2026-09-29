@@ -10,6 +10,7 @@ GitHub repository
   ├─ GitHub Actions
   │   ├─ Python 3.11–3.14 core tests
   │   ├─ Product Surface CI
+  │   ├─ Product / Core stress tests
   │   ├─ container smoke test
   │   ├─ real Chrome UI screenshots
   │   ├─ Mobile TypeScript check
@@ -80,7 +81,7 @@ The API runtime has three explicit modes:
 ```text
 demo        -> synthetic/reference product data; credential-free
 api         -> strict API client mode / reference-contract backend
-production  -> production declaration; readiness requires durable persistence configured
+production  -> production declaration; readiness requires an active durable persistence adapter
 ```
 
 The backend exposes:
@@ -92,9 +93,9 @@ GET /api/v1/system/runtime
 GET /api/v1/system/connectors
 ```
 
-`/api/ready` returns HTTP 503 when `GROWTHEVO_MODE=production` but no durable database URL is configured. Runtime responses report only configuration presence and a safe database hostname; credentials are never returned.
+`/api/ready` returns HTTP 503 when `GROWTHEVO_MODE=production` unless durable persistence is **actually active**. A `DATABASE_URL` by itself only means configuration is present; it does not turn the current in-memory product state into PostgreSQL-backed state. Runtime responses expose `configured`, `active`, and `backend` separately and never return database credentials.
 
-The current product APIs still identify themselves as **reference-contract** implementations. Merely setting a database/channel environment variable does not claim that a connector is live; `side_effects_enabled` remains false until real adapters are wired.
+The current product APIs still identify themselves as **reference-contract** implementations. Merely setting a database, object-store, LLM, or channel environment variable does not claim that a connector is live; those connectors report `configured_not_active`, and `side_effects_enabled` remains false until real adapters are wired.
 
 ## Critical anti-fake-data rule
 
@@ -129,7 +130,7 @@ window.GROWTHEVO_CONFIG = {
 
 ## Container run
 
-The repository includes a non-root production-shaped container. Local smoke run:
+The repository includes a non-root production-shaped container. Local/reference smoke run:
 
 ```bash
 docker build -t growthevo-api .
@@ -147,7 +148,7 @@ http://127.0.0.1:8765/api/ready
 http://127.0.0.1:8765/api/docs
 ```
 
-For an eventual hosted production service, use at minimum:
+For an eventual hosted production service, the shape remains:
 
 ```text
 GROWTHEVO_MODE=production
@@ -156,7 +157,7 @@ DATABASE_URL=<managed PostgreSQL URL>
 GROWTHEVO_CORS_ORIGINS=https://jiaweine.github.io
 ```
 
-Provider-specific credentials remain server-side only.
+But this branch intentionally **will not become ready merely from those variables**. The PostgreSQL repository/outbox/decision-log adapter must be implemented and initialized first. Until then, use `demo` for the public Pages experience and `api` for the reference container. Provider-specific credentials remain server-side only.
 
 ## Logical environments
 
@@ -165,7 +166,7 @@ Use three logical environments even if only production is publicly hosted:
 ```text
 local       -> localhost FastAPI + deterministic fixture state
 preview     -> PR CI artifact / optional temporary API
-production  -> GitHub Pages + configured API_BASE
+production  -> GitHub Pages + configured API_BASE + active durable backend
 ```
 
 For a solo project it is reasonable to physically run only `local + public demo` first, then add a managed production database/runtime when real users or private data appear.
@@ -181,6 +182,7 @@ For a solo project it is reasonable to physically run only `local + public demo`
 - Do not put production PII in Pages, Actions artifacts, issues or public benchmark files.
 - Keep exact CORS origins rather than permissive wildcards.
 - Treat `/api/ready` as the deployment readiness probe and `/api/health` as process liveness.
+- Treat “configured” and “active” as different connector states; deployment configuration alone is not proof of a working integration.
 
 ## GitHub Pages setup
 
@@ -198,8 +200,8 @@ No secrets are needed for demo mode.
 GitHub Pages serves static files. It does not run FastAPI, background workers or a database. Therefore GrowthEvo deliberately has:
 
 - a credential-free, fully navigable **demo mode** for Pages;
-- the FastAPI application plus container for real API mode;
+- the FastAPI application plus container for real API/reference mode;
 - a small configuration boundary between them;
-- an explicit readiness contract so `production` cannot pretend to be ready without durable persistence.
+- an explicit readiness contract so `production` cannot pretend to be ready until durable persistence is genuinely wired and active.
 
-This prevents a static portfolio deployment from being misrepresented as a real campaign execution backend while keeping the project inexpensive to operate.
+This prevents a static portfolio deployment or a configured-but-unwired database URL from being misrepresented as a real campaign execution backend while keeping the project inexpensive to operate.
