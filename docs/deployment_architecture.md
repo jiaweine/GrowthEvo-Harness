@@ -11,6 +11,7 @@ GitHub repository
   │   ├─ Python 3.11–3.14 core tests
   │   ├─ Product Surface CI
   │   ├─ Product / Core stress tests
+  │   ├─ CodeQL (Python + JavaScript/TypeScript)
   │   ├─ container smoke + readiness
   │   ├─ real Chrome screenshots
   │   ├─ API-mode browser integration
@@ -214,7 +215,9 @@ Guardrail fallbacks log a one-hot `NO_TREATMENT: 1.0` distribution. This makes t
 
 ## Mobile reproducibility
 
-`apps/mobile/package-lock.json` is committed and CI uses `npm ci`. This prevents the same commit from resolving a different transitive npm dependency graph on a later date. Dependabot covers GitHub Actions, Python dependencies and the mobile npm project weekly.
+`apps/mobile/package-lock.json` is committed and CI uses `npm ci`. This prevents the same commit from resolving a different transitive npm dependency graph on a later date. Dependabot covers GitHub Actions and the mobile npm project weekly.
+
+Python research/evidence dependencies are intentionally **not** managed by Dependabot. Changes to locked scientific/runtime pins stay behind the repository's evidence/provenance review so an automated dependency PR cannot silently change an accepted benchmark identity or research runtime.
 
 For a physical Expo device, explicitly set the API address; `127.0.0.1` points to the device itself:
 
@@ -244,7 +247,8 @@ It is reasonable for a solo maintainer to physically run only `local + public de
 - Use GitHub Environments for production deployment policy.
 - Prefer GitHub Actions OIDC over long-lived cloud deployment credentials.
 - Keep provenance/attestations for released packages and images.
-- Dependabot monitors Actions, Python and mobile npm dependencies.
+- Run CodeQL for Python and JavaScript/TypeScript.
+- Let Dependabot update Actions and mobile npm dependencies; keep Python research pins under evidence-aware review.
 
 ## GitHub Pages setup
 
