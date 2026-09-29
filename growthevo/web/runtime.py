@@ -22,7 +22,6 @@ def _cors_origins(value: str | None) -> tuple[str, ...]:
             raise ValueError("GROWTHEVO_CORS_ORIGINS must use exact origins; wildcards are not allowed")
         try:
             parsed = urlparse(origin)
-            # Accessing .port also validates malformed ports.
             _ = parsed.port
         except ValueError as exc:
             raise ValueError(f"invalid CORS origin: {origin!r}") from exc
@@ -61,23 +60,26 @@ def _safe_host(value: str | None) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeSettings:
-    """Public-safe runtime configuration.
+    """Public-safe runtime configuration and production activation gates.
 
-    Presence of credentials/configuration is deliberately distinct from an
-    active adapter. This prevents a production process from claiming durable
-    persistence merely because ``DATABASE_URL`` exists while product state is
-    still served by the reference in-memory implementation.
+    Credential/configuration presence is deliberately distinct from an active
+    adapter. Production readiness requires both durable persistence and an
+    authentication boundary to be initialized successfully. This prevents a
+    future database adapter from accidentally making a public unauthenticated
+    runtime appear production-ready merely because connection settings exist.
     """
 
     mode: str
     environment: str
     cors_origins: tuple[str, ...]
     database_configured: bool
+    auth_configured: bool
     object_store_configured: bool
     llm_configured: bool
     channel_configured: bool
     database_host: str | None
     persistence_backend: str
+    auth_backend: str
 
     @classmethod
     def from_env(cls) -> "RuntimeSettings":
@@ -91,14 +93,22 @@ class RuntimeSettings:
         database_url = os.getenv("GROWTHEVO_DATABASE_URL") or os.getenv("DATABASE_URL")
         database_url = database_url.strip() if database_url else None
         cors_origins = _cors_origins(os.getenv("GROWTHEVO_CORS_ORIGINS"))
-        # No durable persistence adapter is wired into product_data/decisioning
-        # yet. Keep this explicit rather than inferring activation from a URL.
+
+        # No durable persistence or authentication adapter is wired into this
+        # branch yet. Keep activation explicit instead of inferring it from URLs,
+        # issuer metadata, or public client keys.
         persistence_backend = "reference-memory"
+        auth_backend = "none"
         return cls(
             mode=raw_mode,
             environment=environment,
             cors_origins=cors_origins,
             database_configured=bool(database_url),
+            auth_configured=_configured(
+                "GROWTHEVO_AUTH_ISSUER",
+                "GROWTHEVO_AUTH_JWKS_URL",
+                "SUPABASE_URL",
+            ),
             object_store_configured=_configured(
                 "GROWTHEVO_OBJECT_STORE_URL",
                 "S3_ENDPOINT_URL",
@@ -116,6 +126,7 @@ class RuntimeSettings:
             ),
             database_host=_safe_host(database_url),
             persistence_backend=persistence_backend,
+            auth_backend=auth_backend,
         )
 
     @property
@@ -128,16 +139,17 @@ class RuntimeSettings:
 
     @property
     def persistence_active(self) -> bool:
-        # Future durable adapters should make activation an explicit runtime
-        # capability after successful initialization/migration checks. The
-        # current branch intentionally has no such adapter yet.
         return self.persistence_backend not in {"reference-memory", "none"}
 
     @property
+    def authentication_active(self) -> bool:
+        return self.auth_backend not in {"none", "reference-none"}
+
+    @property
     def ready(self) -> bool:
-        # Demo/reference API mode is credential-free. Production fails closed
-        # until an actual durable adapter is active, not merely configured.
-        return not self.production or self.persistence_active
+        # Credential-free demo/reference API mode remains usable. Real production
+        # fails closed until both durable state and an authentication boundary are active.
+        return not self.production or (self.persistence_active and self.authentication_active)
 
     def connector_states(self) -> list[dict[str, str]]:
         if self.persistence_active:
@@ -148,11 +160,26 @@ class RuntimeSettings:
             persistence_state = "demo"
         else:
             persistence_state = "unconfigured"
+
+        if self.authentication_active:
+            auth_state = "connected"
+        elif self.auth_configured:
+            auth_state = "configured_not_active"
+        elif self.synthetic_data:
+            auth_state = "demo"
+        else:
+            auth_state = "unconfigured"
+
         return [
             {
                 "id": "persistence",
                 "label": "Durable PostgreSQL",
                 "state": persistence_state,
+            },
+            {
+                "id": "authentication",
+                "label": "Authentication / Identity",
+                "state": auth_state,
             },
             {
                 "id": "object_store",
@@ -184,6 +211,11 @@ class RuntimeSettings:
                 "active": self.persistence_active,
                 "backend": self.persistence_backend,
                 "host": self.database_host,
+            },
+            "authentication": {
+                "configured": self.auth_configured,
+                "active": self.authentication_active,
+                "backend": self.auth_backend,
             },
             "connectors": self.connector_states(),
         }
