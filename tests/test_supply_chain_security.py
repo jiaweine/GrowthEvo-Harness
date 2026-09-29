@@ -11,11 +11,15 @@ from growthevo.evolution.sigstore_attestation import SIGSTORE_SDK_VERSION
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_dependabot_tracks_github_actions_without_touching_research_pins() -> None:
+def test_dependabot_tracks_actions_and_mobile_without_touching_research_pins() -> None:
     config = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
     assert 'package-ecosystem: "github-actions"' in config
     assert 'directory: "/"' in config
     assert 'interval: "weekly"' in config
+    assert 'package-ecosystem: "npm"' in config
+    assert 'directory: "/apps/mobile"' in config
+    # Accepted research/evidence identities must not drift through automated
+    # Python dependency PRs. Their updates go through evidence/provenance review.
     assert 'package-ecosystem: "pip"' not in config
 
 
