@@ -31,8 +31,9 @@ def _safe_host(value: str | None) -> str | None:
 class RuntimeSettings:
     """Public-safe runtime configuration.
 
-    Only presence/state is exposed to the product UI. Secret values are never
-    included in the public payload.
+    This contract reports configuration presence, never secret values. The
+    current product API remains a reference implementation until durable
+    persistence and side-effect adapters are wired explicitly.
     """
 
     mode: str
@@ -84,8 +85,8 @@ class RuntimeSettings:
 
     @property
     def ready(self) -> bool:
-        # Demo/reference mode is intentionally credential-free. A process that
-        # explicitly declares itself production must have durable persistence.
+        # Demo/reference API mode is credential-free. Explicit production mode
+        # refuses readiness without durable persistence configured.
         return not self.production or self.database_configured
 
     def connector_states(self) -> list[dict[str, str]]:
@@ -93,22 +94,22 @@ class RuntimeSettings:
             {
                 "id": "persistence",
                 "label": "Durable PostgreSQL",
-                "state": "connected" if self.database_configured else ("demo" if self.synthetic_data else "unconfigured"),
+                "state": "configured" if self.database_configured else ("demo" if self.synthetic_data else "unconfigured"),
             },
             {
                 "id": "object_store",
                 "label": "Object Storage",
-                "state": "connected" if self.object_store_configured else "unconfigured",
+                "state": "configured" if self.object_store_configured else "unconfigured",
             },
             {
                 "id": "llm",
                 "label": "LLM Provider",
-                "state": "connected" if self.llm_configured else "unconfigured",
+                "state": "configured" if self.llm_configured else "unconfigured",
             },
             {
                 "id": "channels",
                 "label": "Execution Channels",
-                "state": "connected" if self.channel_configured else "unconfigured",
+                "state": "configured" if self.channel_configured else "unconfigured",
             },
         ]
 
@@ -116,9 +117,10 @@ class RuntimeSettings:
         return {
             "mode": self.mode,
             "environment": self.environment,
-            "data_mode": "synthetic" if self.synthetic_data else "api",
+            "data_mode": "synthetic" if self.synthetic_data else "reference-contract",
             "ready": self.ready,
-            "side_effects_enabled": self.production and self.channel_configured,
+            "side_effects_enabled": False,
+            "execution_mode": "reference-only",
             "persistence": {
                 "configured": self.database_configured,
                 "host": self.database_host,
