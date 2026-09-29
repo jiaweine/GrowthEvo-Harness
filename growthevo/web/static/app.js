@@ -1,4 +1,4 @@
-const REFERENCE_FIXTURE_ROUTES=new Set(['campaigns','campaignStudio','experiments','execution','evidence','opportunities','realtime','harness','approvals','evolution','data','integrations','settings']);
+const REFERENCE_FIXTURE_ROUTES=new Set(['campaigns','campaignStudio','execution','evidence','data','integrations','settings']);
 const baseRouteRender=render;
 let routeRenderEpoch=0;
 
@@ -15,9 +15,9 @@ render=async function guardedRender(){
  const epoch=++routeRenderEpoch;const route=state.route;
  if(useDemo)return baseRouteRender();
  if(runtimeAvailability==='unavailable'){renderApiUnavailable(runtimeLastError);return}
- // Deep links must prove that the business API is actually reachable before a
- // static/reference workbench is allowed to render. This prevents an unavailable
- // production runtime from being visually overwritten by fixture content.
+ // Deep links prove that the business API is reachable before either live or
+ // reference workbench content may render. This prevents an unavailable runtime
+ // from being visually overwritten by fixture content.
  if(route!=='dashboard'&&!state.dashboard){
   try{state.dashboard=await api('/api/v1/dashboard')}
   catch(error){if(epoch===routeRenderEpoch)renderApiUnavailable(error);return}
