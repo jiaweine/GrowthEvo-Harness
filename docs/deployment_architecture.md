@@ -156,6 +156,8 @@ window.GROWTHEVO_CONFIG = {
 
 ## Container run
 
+The production base image is pinned by digest in `Dockerfile`, so rebuilding the same commit does not silently resolve a different `python:3.13-slim` image. Dependabot watches the Docker ecosystem separately so base-image security updates arrive as explicit reviewable PRs rather than tag drift.
+
 Reference/local container:
 
 ```bash
@@ -213,9 +215,11 @@ sum(action_distribution) ~= 1
 
 Guardrail fallbacks log a one-hot `NO_TREATMENT: 1.0` distribution. This makes the reference contract internally coherent for behavior-propensity logging while the repository's locked CATE/OPE/Safe-PI stack remains authoritative for real production policy work.
 
+The product stress suite also checks assignment calibration across many independent entities: observed action frequencies must remain statistically consistent with the accumulated logged action distributions. This prevents a future deterministic-argmax implementation from passing merely by writing plausible-looking propensity fields.
+
 ## Mobile reproducibility
 
-`apps/mobile/package-lock.json` is committed and CI uses `npm ci`. This prevents the same commit from resolving a different transitive npm dependency graph on a later date. Dependabot covers GitHub Actions and the mobile npm project weekly.
+`apps/mobile/package-lock.json` is committed and CI uses `npm ci`. This prevents the same commit from resolving a different transitive npm dependency graph on a later date. Dependabot covers GitHub Actions, the pinned Docker base image and the mobile npm project weekly.
 
 Python research/evidence dependencies are intentionally **not** managed by Dependabot. Changes to locked scientific/runtime pins stay behind the repository's evidence/provenance review so an automated dependency PR cannot silently change an accepted benchmark identity or research runtime.
 
@@ -247,8 +251,9 @@ It is reasonable for a solo maintainer to physically run only `local + public de
 - Use GitHub Environments for production deployment policy.
 - Prefer GitHub Actions OIDC over long-lived cloud deployment credentials.
 - Keep provenance/attestations for released packages and images.
+- Pin external GitHub Actions and the production base image to immutable SHAs/digests.
 - Run CodeQL for Python and JavaScript/TypeScript.
-- Let Dependabot update Actions and mobile npm dependencies; keep Python research pins under evidence-aware review.
+- Let Dependabot update Actions, the Docker base image and mobile npm dependencies; keep Python research pins under evidence-aware review.
 
 ## GitHub Pages setup
 
