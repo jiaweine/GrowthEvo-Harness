@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import threading
 import uuid
@@ -12,6 +13,14 @@ from typing import Any
 from .schemas import DecisionRequest
 
 UTC = timezone.utc
+
+
+class DecisionInputError(ValueError):
+    """Raised when a syntactically valid decision request has unsafe context values."""
+
+
+class IdempotencyConflict(ValueError):
+    """Raised when one idempotency key is reused for a materially different request."""
 
 
 @dataclass(frozen=True)
@@ -52,7 +61,7 @@ class ReferenceDecisionEngine:
             raise ValueError("max_idempotency_size must be > 0")
         self._lock = threading.Lock()
         self._recent: deque[dict[str, Any]] = deque(maxlen=max_log_size)
-        self._idempotency: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._idempotency: OrderedDict[str, tuple[str, dict[str, Any]]] = OrderedDict()
         self._max_idempotency_size = max_idempotency_size
 
     @staticmethod
@@ -68,16 +77,94 @@ class ReferenceDecisionEngine:
         total = sum(exps.values())
         return {key: value / total for key, value in exps.items()}
 
-    def _cached(self, idempotency_key: str | None) -> dict[str, Any] | None:
+    @staticmethod
+    def _request_fingerprint(request: DecisionRequest) -> str:
+        candidates = (
+            None
+            if request.candidate_action_ids is None
+            else sorted(set(request.candidate_action_ids))
+        )
+        canonical = {
+            "entity_id": request.entity_id,
+            "placement": request.placement,
+            "context": request.context,
+            "candidate_action_ids": candidates,
+            "consent_state": request.consent_state,
+            "frequency_remaining": request.frequency_remaining,
+            "budget_remaining": request.budget_remaining,
+            "context_freshness_seconds": request.context_freshness_seconds,
+        }
+        try:
+            encoded = json.dumps(
+                canonical,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise DecisionInputError("decision request must contain finite JSON values") from exc
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _context_float(
+        context: dict[str, Any],
+        key: str,
+        default: float = 0.0,
+        *,
+        minimum: float | None = None,
+        maximum: float | None = None,
+    ) -> float:
+        raw = context.get(key, default)
+        if isinstance(raw, bool):
+            raise DecisionInputError(f"context.{key} must be numeric, not boolean")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise DecisionInputError(f"context.{key} must be numeric") from exc
+        if not math.isfinite(value):
+            raise DecisionInputError(f"context.{key} must be finite")
+        if minimum is not None and value < minimum:
+            raise DecisionInputError(f"context.{key} must be >= {minimum}")
+        if maximum is not None and value > maximum:
+            raise DecisionInputError(f"context.{key} must be <= {maximum}")
+        return value
+
+    @staticmethod
+    def _context_bool(context: dict[str, Any], key: str, default: bool = False) -> bool:
+        raw = context.get(key, default)
+        if isinstance(raw, bool):
+            return raw
+        if raw in {0, 1}:
+            return bool(raw)
+        raise DecisionInputError(f"context.{key} must be boolean")
+
+    def _cached(
+        self,
+        idempotency_key: str | None,
+        request_fingerprint: str | None,
+    ) -> dict[str, Any] | None:
         if not idempotency_key:
             return None
         with self._lock:
-            payload = self._idempotency.get(idempotency_key)
-            if payload is not None:
-                self._idempotency.move_to_end(idempotency_key)
+            entry = self._idempotency.get(idempotency_key)
+            if entry is None:
+                return None
+            stored_fingerprint, payload = entry
+            if request_fingerprint != stored_fingerprint:
+                raise IdempotencyConflict(
+                    "Idempotency-Key was already used for a different decision request"
+                )
+            self._idempotency.move_to_end(idempotency_key)
             return payload
 
-    def _fallback(self, request: DecisionRequest, reasons: list[str], idempotency_key: str | None) -> dict[str, Any]:
+    def _fallback(
+        self,
+        request: DecisionRequest,
+        reasons: list[str],
+        idempotency_key: str | None,
+        request_fingerprint: str | None,
+    ) -> dict[str, Any]:
         now = datetime.now(UTC)
         payload = {
             "decision_id": f"dec_{uuid.uuid4().hex[:18]}",
@@ -86,6 +173,7 @@ class ReferenceDecisionEngine:
             "action_id": "NO_TREATMENT",
             "creative_id": None,
             "propensity": 1.0,
+            "action_distribution": {"NO_TREATMENT": 1.0},
             "policy_id": "policy_growth_safe",
             "policy_version": "pv_reference_1",
             "engine_mode": "reference-contract",
@@ -100,15 +188,17 @@ class ReferenceDecisionEngine:
             "reasons": reasons,
             "logged_at": now.isoformat(),
         }
-        return self._record(payload, idempotency_key)
+        return self._record(payload, idempotency_key, request_fingerprint)
 
     def score_actions(self, request: DecisionRequest, actions: list[ActionDefinition]) -> dict[str, float]:
         ctx = request.context
-        cart_value = float(ctx.get("cart_value", 0) or 0)
+        cart_value = self._context_float(ctx, "cart_value", minimum=0.0)
         intent = str(ctx.get("session_intent", "medium")).lower()
-        churn_risk = float(ctx.get("churn_risk", 0) or 0)
-        new_user = bool(ctx.get("new_user", False))
-        abandoned_cart = bool(ctx.get("abandoned_cart", False))
+        if intent not in {"low", "medium", "high"}:
+            raise DecisionInputError("context.session_intent must be low, medium, or high")
+        churn_risk = self._context_float(ctx, "churn_risk", minimum=0.0, maximum=1.0)
+        new_user = self._context_bool(ctx, "new_user")
+        abandoned_cart = self._context_bool(ctx, "abandoned_cart")
         scores: dict[str, float] = {}
         for action in actions:
             if action.action_id == "NO_TREATMENT":
@@ -127,23 +217,53 @@ class ReferenceDecisionEngine:
         return scores
 
     def decide(self, request: DecisionRequest, idempotency_key: str | None = None) -> dict[str, Any]:
-        cached = self._cached(idempotency_key)
+        if not math.isfinite(request.budget_remaining):
+            raise DecisionInputError("budget_remaining must be finite")
+        request_fingerprint = self._request_fingerprint(request) if idempotency_key else None
+        cached = self._cached(idempotency_key, request_fingerprint)
         if cached is not None:
             return cached
         if not request.consent_state:
-            return self._fallback(request, ["Consent unavailable; enforced NO_TREATMENT."], idempotency_key)
+            return self._fallback(
+                request,
+                ["Consent unavailable; enforced NO_TREATMENT."],
+                idempotency_key,
+                request_fingerprint,
+            )
         if request.frequency_remaining <= 0:
-            return self._fallback(request, ["Frequency cap exhausted; enforced NO_TREATMENT."], idempotency_key)
+            return self._fallback(
+                request,
+                ["Frequency cap exhausted; enforced NO_TREATMENT."],
+                idempotency_key,
+                request_fingerprint,
+            )
         if request.context_freshness_seconds > 300:
-            return self._fallback(request, ["Context stale (>300s); conservative fallback."], idempotency_key)
+            return self._fallback(
+                request,
+                ["Context stale (>300s); conservative fallback."],
+                idempotency_key,
+                request_fingerprint,
+            )
 
-        candidate_ids = request.candidate_action_ids or list(ACTION_REGISTRY)
+        # ``None`` means the caller did not constrain candidates. An explicitly
+        # empty list means no treatment candidate is allowed, so only the safe
+        # NO_TREATMENT action may be considered.
+        candidate_ids = (
+            list(ACTION_REGISTRY)
+            if request.candidate_action_ids is None
+            else list(dict.fromkeys(request.candidate_action_ids))
+        )
         if "NO_TREATMENT" not in candidate_ids:
             candidate_ids = ["NO_TREATMENT", *candidate_ids]
         actions = [ACTION_REGISTRY[action_id] for action_id in candidate_ids if action_id in ACTION_REGISTRY]
         actions = [a for a in actions if a.cost <= request.budget_remaining or a.action_id == "NO_TREATMENT"]
         if not actions:
-            return self._fallback(request, ["No eligible action after registry and budget checks."], idempotency_key)
+            return self._fallback(
+                request,
+                ["No eligible action after registry and budget checks."],
+                idempotency_key,
+                request_fingerprint,
+            )
 
         scores = self.score_actions(request, actions)
         probabilities = self._softmax(scores)
@@ -176,21 +296,34 @@ class ReferenceDecisionEngine:
             ],
             "logged_at": now.isoformat(),
         }
-        return self._record(payload, idempotency_key)
+        return self._record(payload, idempotency_key, request_fingerprint)
 
-    def _record(self, payload: dict[str, Any], idempotency_key: str | None) -> dict[str, Any]:
+    def _record(
+        self,
+        payload: dict[str, Any],
+        idempotency_key: str | None,
+        request_fingerprint: str | None,
+    ) -> dict[str, Any]:
         with self._lock:
             # Double-check inside the write lock. Multiple concurrent first-seen
-            # requests with the same idempotency key must all observe one result.
+            # requests with the same key must all observe one result; a different
+            # request using that key is an explicit conflict rather than a stale hit.
             if idempotency_key:
-                existing = self._idempotency.get(idempotency_key)
-                if existing is not None:
+                entry = self._idempotency.get(idempotency_key)
+                if entry is not None:
+                    stored_fingerprint, existing = entry
+                    if request_fingerprint != stored_fingerprint:
+                        raise IdempotencyConflict(
+                            "Idempotency-Key was already used for a different decision request"
+                        )
                     self._idempotency.move_to_end(idempotency_key)
                     return existing
 
             self._recent.appendleft(payload)
             if idempotency_key:
-                self._idempotency[idempotency_key] = payload
+                if request_fingerprint is None:  # pragma: no cover - defensive invariant
+                    raise RuntimeError("idempotent decisions require a request fingerprint")
+                self._idempotency[idempotency_key] = (request_fingerprint, payload)
                 self._idempotency.move_to_end(idempotency_key)
                 while len(self._idempotency) > self._max_idempotency_size:
                     self._idempotency.popitem(last=False)
