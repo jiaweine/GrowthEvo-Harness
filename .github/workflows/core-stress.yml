@@ -55,14 +55,27 @@ jobs:
       - name: Run causal / OPE / Safe-PI / evidence pressure test
         run: |
           mkdir -p core-stress-reports
+          set +e
           python scripts/stress_core.py \
             --profile "${{ steps.profile.outputs.profile }}" \
             --json-out "core-stress-reports/core-stress-${{ steps.profile.outputs.profile }}.json" \
             --markdown-out "core-stress-reports/core-stress-${{ steps.profile.outputs.profile }}.md"
-          cat "core-stress-reports/core-stress-${{ steps.profile.outputs.profile }}.md" >> "$GITHUB_STEP_SUMMARY"
+          STATUS=$?
+          set -e
+          if [[ -f "core-stress-reports/core-stress-${{ steps.profile.outputs.profile }}.md" ]]; then
+            cat "core-stress-reports/core-stress-${{ steps.profile.outputs.profile }}.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ "$STATUS" != "0" ]]; then
+            if [[ -f "core-stress-reports/core-stress-${{ steps.profile.outputs.profile }}.json" ]]; then
+              echo "Core stress JSON follows:" >&2
+              cat "core-stress-reports/core-stress-${{ steps.profile.outputs.profile }}.json" >&2
+            fi
+            exit "$STATUS"
+          fi
       - name: Upload core stress report
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: growthevo-core-stress-${{ steps.profile.outputs.profile }}
           path: core-stress-reports/*
-          if-no-files-found: error
+          if-no-files-found: warn
