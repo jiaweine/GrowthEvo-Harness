@@ -4,7 +4,12 @@ from pathlib import Path
 from typing import Any
 
 from .data import build_dashboard_payload
-from .decisioning import ReferenceDecisionEngine, action_registry_payload
+from .decisioning import (
+    DecisionInputError,
+    IdempotencyConflict,
+    ReferenceDecisionEngine,
+    action_registry_payload,
+)
 from .product_data import (
     agent_plan,
     approvals,
@@ -20,7 +25,6 @@ from .runtime import RuntimeSettings
 from .schemas import AgentPlanRequest, ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest
 
 STATIC_DIR = Path(__file__).with_name("static")
-_engine = ReferenceDecisionEngine()
 
 
 def create_app() -> Any:
@@ -34,6 +38,7 @@ def create_app() -> Any:
         raise RuntimeError("GrowthEvo web dependencies are not installed. Install: pip install -e '.[web]'") from exc
 
     settings = RuntimeSettings.from_env()
+    decision_engine = ReferenceDecisionEngine()
     app = FastAPI(
         title="GrowthEvo Growth OS",
         version="1.0",
@@ -42,6 +47,9 @@ def create_app() -> Any:
         redoc_url=None,
         openapi_url="/api/openapi.json",
     )
+    # App-factory instances must not share decision/idempotency state. Expose the
+    # engine only through app.state for tests/diagnostics rather than a module global.
+    app.state.decision_engine = decision_engine
 
     if settings.cors_origins:
         app.add_middleware(
@@ -57,6 +65,13 @@ def create_app() -> Any:
         response = await call_next(request)
         response.headers["X-GrowthEvo-Mode"] = settings.mode
         response.headers["X-GrowthEvo-Environment"] = settings.environment
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["X-Frame-Options"] = "DENY"
+        if request.url.path == "/api" or request.url.path.startswith("/api/"):
+            # Dynamic product/governance/decision data must never be served from
+            # browser or intermediary caches. The PWA shell is cached separately.
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.get("/api/health", tags=["system"])
@@ -107,7 +122,13 @@ def create_app() -> Any:
 
     @app.post("/api/v1/campaigns/draft", tags=["campaigns"], status_code=201)
     def campaign_draft(request: CampaignDraftRequest) -> dict[str, Any]:
-        return create_campaign_draft(request.name, request.goal, request.audience, request.budget, request.candidate_action_ids)
+        return create_campaign_draft(
+            request.name,
+            request.goal,
+            request.audience,
+            request.budget,
+            request.candidate_action_ids,
+        )
 
     @app.get("/api/v1/experiments", tags=["experiments"])
     def experiment_list() -> list[dict[str, Any]]:
@@ -142,12 +163,25 @@ def create_app() -> Any:
 
     @app.post("/api/v1/realtime/decision", tags=["decisioning"], include_in_schema=False)
     @app.post("/api/v1/decide", tags=["decisioning"])
-    def decide(request: DecisionRequest, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
-        return _engine.decide(request, idempotency_key=idempotency_key)
+    def decide(
+        request: DecisionRequest,
+        idempotency_key: str | None = Header(
+            default=None,
+            alias="Idempotency-Key",
+            min_length=1,
+            max_length=256,
+        ),
+    ) -> dict[str, Any]:
+        try:
+            return decision_engine.decide(request, idempotency_key=idempotency_key)
+        except IdempotencyConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except DecisionInputError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/v1/decisions/recent", tags=["decisioning"])
     def recent_decisions(limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, Any]]:
-        return _engine.recent(limit)
+        return decision_engine.recent(limit)
 
     app.mount("/assets", StaticFiles(directory=str(STATIC_DIR)), name="assets")
 
@@ -157,11 +191,19 @@ def create_app() -> Any:
 
     @app.get("/service-worker.js", include_in_schema=False)
     def service_worker() -> FileResponse:
-        return FileResponse(STATIC_DIR / "service-worker.js", media_type="application/javascript")
+        return FileResponse(
+            STATIC_DIR / "service-worker.js",
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.get("/", include_in_schema=False)
     @app.get("/{route:path}", include_in_schema=False)
     def index(route: str = "") -> FileResponse:
+        # SPA history fallback must never turn a misspelled/unknown API GET into
+        # a misleading HTTP 200 HTML page.
+        if route == "api" or route.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API route not found")
         return FileResponse(STATIC_DIR / "index.html")
 
     return app
