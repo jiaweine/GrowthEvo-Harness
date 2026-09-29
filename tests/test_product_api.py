@@ -153,7 +153,7 @@ def test_idempotency_key_reuse_with_different_request_is_conflict() -> None:
     assert "different decision request" in conflict.json()["detail"]
 
 
-def test_idempotency_key_is_trimmed_and_blank_is_rejected() -> None:
+def test_idempotency_key_is_trimmed_and_invalid_values_are_rejected() -> None:
     client = TestClient(create_app())
     body = _decision_request()
 
@@ -178,6 +178,14 @@ def test_idempotency_key_is_trimmed_and_blank_is_rejected() -> None:
     )
     assert blank.status_code == 422
     assert "non-whitespace" in blank.json()["detail"]
+
+    too_long = client.post(
+        "/api/v1/decide",
+        headers={"Idempotency-Key": "x" * 257},
+        json=body,
+    )
+    assert too_long.status_code == 422
+    assert "at most 256" in too_long.json()["detail"]
 
 
 def test_duplicate_idempotency_keys_are_rejected() -> None:
