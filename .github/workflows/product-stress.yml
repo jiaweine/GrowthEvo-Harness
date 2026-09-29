@@ -17,6 +17,7 @@ on:
     paths:
       - "growthevo/web/**"
       - "scripts/stress_product.py"
+      - "scripts/stress_decision_semantics.py"
       - "tests/test_product_*.py"
       - "pyproject.toml"
       - ".github/workflows/product-stress.yml"
@@ -98,6 +99,20 @@ jobs:
               cat "stress-reports/product-stress-${{ steps.profile.outputs.profile }}.json" >&2
             fi
             exit "$STATUS"
+          fi
+
+          set +e
+          python scripts/stress_decision_semantics.py \
+            --base-url http://127.0.0.1:8765 \
+            --profile "${{ steps.profile.outputs.profile }}" \
+            > "stress-reports/decision-semantics-${{ steps.profile.outputs.profile }}.json"
+          SEMANTIC_STATUS=$?
+          set -e
+          cat "stress-reports/decision-semantics-${{ steps.profile.outputs.profile }}.json"
+          if [[ "$SEMANTIC_STATUS" != "0" ]]; then
+            echo "Decision propensity semantic pressure gate failed; container log follows:" >&2
+            docker logs growthevo-api-pressure || true
+            exit "$SEMANTIC_STATUS"
           fi
       - name: Upload pressure report
         if: always()
