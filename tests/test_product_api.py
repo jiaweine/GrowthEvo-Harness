@@ -12,13 +12,66 @@ from growthevo.web.app import create_app
 
 def test_product_api_health_dashboard_and_opportunities() -> None:
     client = TestClient(create_app())
-    assert client.get("/api/health").json()["status"] == "ok"
+    health = client.get("/api/health")
+    assert health.json()["status"] == "ok"
+    assert health.headers["X-GrowthEvo-Mode"]
     dashboard = client.get("/api/v1/dashboard")
     assert dashboard.status_code == 200
     assert dashboard.json()["summary"]["api_version"] == "v1"
     opportunities = client.get("/api/v1/opportunities")
     assert opportunities.status_code == 200
     assert opportunities.json()[0]["evidence_tier"] in {"A", "B", "C", "D"}
+
+
+def test_runtime_contract_is_public_safe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROWTHEVO_MODE", "demo")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("GROWTHEVO_DATABASE_URL", raising=False)
+    client = TestClient(create_app())
+    runtime = client.get("/api/v1/system/runtime").json()
+    assert runtime["mode"] == "demo"
+    assert runtime["data_mode"] == "synthetic"
+    assert runtime["side_effects_enabled"] is False
+    assert runtime["execution_mode"] == "reference-only"
+    assert runtime["persistence"]["configured"] is False
+    assert client.get("/api/ready").status_code == 200
+
+
+def test_production_readiness_requires_durable_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROWTHEVO_MODE", "production")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("GROWTHEVO_DATABASE_URL", raising=False)
+    client = TestClient(create_app())
+    response = client.get("/api/ready")
+    assert response.status_code == 503
+    assert response.json()["status"] == "not_ready"
+
+
+def test_runtime_never_exposes_database_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROWTHEVO_MODE", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://private_user:private_password@db.example.test:5432/growthevo")
+    client = TestClient(create_app())
+    response = client.get("/api/ready")
+    assert response.status_code == 200
+    payload_text = response.text
+    assert "private_password" not in payload_text
+    assert "private_user" not in payload_text
+    assert response.json()["persistence"]["host"] == "db.example.test"
+
+
+def test_pages_origin_can_be_enabled_explicitly(monkeypatch: pytest.MonkeyPatch) -> None:
+    origin = "https://jiaweine.github.io"
+    monkeypatch.setenv("GROWTHEVO_CORS_ORIGINS", origin)
+    client = TestClient(create_app())
+    response = client.options(
+        "/api/v1/dashboard",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
 
 
 def _decision_request() -> dict[str, object]:
