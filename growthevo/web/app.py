@@ -127,7 +127,7 @@ class ApiBodyLimitMiddleware:
 def create_app() -> Any:
     """Create the GrowthEvo product surface and versioned API."""
     try:
-        from fastapi import FastAPI, Header, HTTPException, Query, Request
+        from fastapi import FastAPI, Header, HTTPException, Query
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import FileResponse, JSONResponse
         from fastapi.staticfiles import StaticFiles
@@ -286,24 +286,26 @@ def create_app() -> Any:
     @app.post("/api/v1/decide", tags=["decisioning"])
     def decide(
         request: DecisionRequest,
-        http_request: Request,
-        idempotency_key: str | None = Header(
+        idempotency_keys: list[str] | None = Header(
             default=None,
             alias="Idempotency-Key",
-            min_length=1,
-            max_length=256,
         ),
     ) -> dict[str, Any]:
-        raw_idempotency_keys = http_request.headers.getlist("idempotency-key")
-        if len(raw_idempotency_keys) > 1:
+        if idempotency_keys is not None and len(idempotency_keys) > 1:
             raise HTTPException(
                 status_code=422,
                 detail="Idempotency-Key must be supplied at most once",
             )
 
         normalized_key: str | None = None
-        if idempotency_key is not None:
-            normalized_key = idempotency_key.strip()
+        if idempotency_keys:
+            raw_key = idempotency_keys[0]
+            if len(raw_key) > 256:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Idempotency-Key must be at most 256 characters",
+                )
+            normalized_key = raw_key.strip()
             if not normalized_key:
                 raise HTTPException(
                     status_code=422,
