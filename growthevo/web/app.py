@@ -293,8 +293,16 @@ def create_app() -> Any:
             max_length=256,
         ),
     ) -> dict[str, Any]:
+        normalized_key: str | None = None
+        if idempotency_key is not None:
+            normalized_key = idempotency_key.strip()
+            if not normalized_key:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Idempotency-Key must contain non-whitespace characters",
+                )
         try:
-            return decision_engine.decide(request, idempotency_key=idempotency_key)
+            return decision_engine.decide(request, idempotency_key=normalized_key)
         except IdempotencyConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except DecisionInputError as exc:
