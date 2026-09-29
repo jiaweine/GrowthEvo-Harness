@@ -5,6 +5,28 @@ import json
 import os
 import shutil
 from pathlib import Path
+from urllib.parse import urlsplit
+
+
+def normalize_api_base(value: str | None) -> str:
+    """Return a safe Pages API base or fail the build on a malformed value."""
+    raw = (value or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    if any(char.isspace() for char in raw):
+        raise ValueError("GROWTHEVO_API_BASE cannot contain whitespace")
+    try:
+        parsed = urlsplit(raw)
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("GROWTHEVO_API_BASE is not a valid URL") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("GROWTHEVO_API_BASE must be an absolute http(s) URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("GROWTHEVO_API_BASE must not embed credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("GROWTHEVO_API_BASE must not contain a query string or fragment")
+    return raw
 
 
 def build(output: Path, source: Path) -> None:
@@ -35,7 +57,7 @@ def build(output: Path, source: Path) -> None:
     ):
         shutil.copy2(source / name, output / "assets" / name)
 
-    api_base = os.getenv("GROWTHEVO_API_BASE", "").strip().rstrip("/")
+    api_base = normalize_api_base(os.getenv("GROWTHEVO_API_BASE"))
     mode = "api" if api_base else "demo"
     cfg = f"window.GROWTHEVO_CONFIG = {json.dumps({'MODE': mode, 'API_BASE': api_base}, ensure_ascii=False)};\n"
     (output / "assets" / "config.js").write_text(cfg, encoding="utf-8")
