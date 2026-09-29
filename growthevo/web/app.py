@@ -16,6 +16,7 @@ from .product_data import (
     harness_runs,
     opportunities,
 )
+from .runtime import RuntimeSettings
 from .schemas import AgentPlanRequest, ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -26,11 +27,13 @@ def create_app() -> Any:
     """Create the GrowthEvo product surface and versioned API."""
     try:
         from fastapi import FastAPI, Header, HTTPException, Query
-        from fastapi.responses import FileResponse
+        from fastapi.middleware.cors import CORSMiddleware
+        from fastapi.responses import FileResponse, JSONResponse
         from fastapi.staticfiles import StaticFiles
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("GrowthEvo web dependencies are not installed. Install: pip install -e '.[web]'") from exc
 
+    settings = RuntimeSettings.from_env()
     app = FastAPI(
         title="GrowthEvo Growth OS",
         version="1.0",
@@ -40,9 +43,46 @@ def create_app() -> Any:
         openapi_url="/api/openapi.json",
     )
 
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(settings.cors_origins),
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Content-Type", "Idempotency-Key"],
+        )
+
+    @app.middleware("http")
+    async def runtime_headers(request: Any, call_next: Any) -> Any:
+        response = await call_next(request)
+        response.headers["X-GrowthEvo-Mode"] = settings.mode
+        response.headers["X-GrowthEvo-Environment"] = settings.environment
+        return response
+
     @app.get("/api/health", tags=["system"])
-    def health() -> dict[str, str]:
-        return {"status": "ok", "service": "growthevo-web", "api": "v1"}
+    def health() -> dict[str, object]:
+        return {
+            "status": "ok",
+            "service": "growthevo-web",
+            "api": "v1",
+            "mode": settings.mode,
+            "environment": settings.environment,
+        }
+
+    @app.get("/api/ready", tags=["system"])
+    def readiness() -> Any:
+        payload = settings.public_payload()
+        if not settings.ready:
+            return JSONResponse(status_code=503, content={"status": "not_ready", **payload})
+        return {"status": "ready", **payload}
+
+    @app.get("/api/v1/system/runtime", tags=["system"])
+    def runtime() -> dict[str, object]:
+        return settings.public_payload()
+
+    @app.get("/api/v1/system/connectors", tags=["system"])
+    def connectors() -> list[dict[str, str]]:
+        return settings.connector_states()
 
     @app.get("/api/dashboard", tags=["compat"])
     @app.get("/api/v1/dashboard", tags=["dashboard"])
