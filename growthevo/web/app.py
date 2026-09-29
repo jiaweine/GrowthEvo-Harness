@@ -148,6 +148,10 @@ def create_app() -> Any:
     app.state.decision_engine = decision_engine
     app.state.product_state = product_state
 
+    # Add the byte limiter before CORS so Starlette's middleware stacking leaves
+    # CORS outside it. Rejections from the limiter therefore retain the exact
+    # configured Access-Control-Allow-Origin and remain readable by the Pages UI.
+    app.add_middleware(ApiBodyLimitMiddleware, max_bytes=MAX_API_BODY_BYTES)
     if settings.cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -156,7 +160,6 @@ def create_app() -> Any:
             allow_methods=["GET", "POST", "OPTIONS"],
             allow_headers=["Content-Type", "Idempotency-Key"],
         )
-    app.add_middleware(ApiBodyLimitMiddleware, max_bytes=MAX_API_BODY_BYTES)
 
     @app.middleware("http")
     async def runtime_headers(request: Any, call_next: Any) -> Any:
