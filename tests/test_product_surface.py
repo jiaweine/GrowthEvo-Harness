@@ -39,17 +39,24 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
     index = (STATIC / "index.html").read_text(encoding="utf-8")
+    runtime_ui = (STATIC / "runtime-ui.js").read_text(encoding="utf-8")
     assert "DOMContentLoaded" not in pages
     assert "document.addEventListener('DOMContentLoaded',init)" in app
     assert "fidelity.css" in styles
     assert "product-pages.css" in styles
+    assert "runtime-ui.js" in index
     assert "product-data.js" in index
-    assert index.index("product-data.js") < index.index("pages.js") < index.index("app.js")
+    assert "product-advanced-data.js" in index
+    assert index.index("data.js") < index.index("runtime-ui.js") < index.index("product-data.js")
+    assert index.index("product-data.js") < index.index("product-advanced-data.js") < index.index("pages.js") < index.index("app.js")
+    assert "will not substitute synthetic data" in runtime_ui
+    assert "Demo Workspace · Synthetic Data" in runtime_ui
 
 
 def test_core_product_workbenches_are_real_routes() -> None:
     pages = (STATIC / "pages.js").read_text(encoding="utf-8")
     product_data = (STATIC / "product-data.js").read_text(encoding="utf-8")
+    advanced_data = (STATIC / "product-advanced-data.js").read_text(encoding="utf-8")
     required_functions = (
         "function opportunities()",
         "function campaignStudio()",
@@ -66,12 +73,14 @@ def test_core_product_workbenches_are_real_routes() -> None:
     assert "NO_TREATMENT" in pages
     assert "propensity" in pages
     assert "Replay" in pages and "Shadow" in pages and "Canary" in pages
+    assert "creatives" in advanced_data and "journeys" in advanced_data and "memories" in advanced_data
+    assert "models" in advanced_data and "policies" in advanced_data and "entities" in advanced_data
 
 
 def test_pages_builder_packages_all_product_assets() -> None:
     build_script = (ROOT / "scripts" / "build_pages.py").read_text(encoding="utf-8")
     service_worker = (STATIC / "service-worker.js").read_text(encoding="utf-8")
-    for asset in ("product-pages.css", "product-data.js"):
+    for asset in ("product-pages.css", "runtime-ui.js", "product-data.js", "product-advanced-data.js"):
         assert asset in build_script
         assert asset in service_worker
 
