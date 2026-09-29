@@ -6,12 +6,14 @@ on:
       - "growthevo/web/**"
       - "apps/mobile/**"
       - "scripts/build_pages.py"
+      - "scripts/stress_product.py"
       - "tests/test_web_dashboard.py"
       - "tests/test_product_*.py"
       - "pyproject.toml"
       - "Dockerfile"
       - ".dockerignore"
       - "docs/deployment_architecture.md"
+      - "docs/performance_testing.md"
       - ".github/workflows/product-surface.yml"
       - ".github/workflows/deploy-pages.yml"
   push:
@@ -20,12 +22,14 @@ on:
       - "growthevo/web/**"
       - "apps/mobile/**"
       - "scripts/build_pages.py"
+      - "scripts/stress_product.py"
       - "tests/test_web_dashboard.py"
       - "tests/test_product_*.py"
       - "pyproject.toml"
       - "Dockerfile"
       - ".dockerignore"
       - "docs/deployment_architecture.md"
+      - "docs/performance_testing.md"
       - ".github/workflows/product-surface.yml"
       - ".github/workflows/deploy-pages.yml"
 
@@ -44,7 +48,7 @@ jobs:
       - name: Install web product dependencies
         run: python -m pip install -e '.[web,dev]'
       - name: Run web product tests
-        run: pytest tests/test_web_dashboard.py tests/test_product_surface.py tests/test_product_api.py
+        run: pytest tests/test_web_dashboard.py tests/test_product_surface.py tests/test_product_api.py tests/test_product_concurrency.py
       - name: Check browser JavaScript syntax
         run: |
           for file in growthevo/web/static/*.js; do node --check "$file"; done
@@ -62,6 +66,27 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:8765/api/health | python -m json.tool
           curl --fail --silent http://127.0.0.1:8765/api/ready | python -m json.tool
+      - name: Stress product API and critical workflows
+        run: |
+          docker run --rm -d --name growthevo-api-stress -p 8765:8765 -e GROWTHEVO_MODE=api -e GROWTHEVO_ENV=stress-ci growthevo-api:ci
+          trap 'docker rm -f growthevo-api-stress >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8765/api/ready >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          python scripts/stress_product.py \
+            --base-url http://127.0.0.1:8765 \
+            --profile ci \
+            --json-out stress-reports/product-stress.json \
+            --markdown-out stress-reports/product-stress.md
+      - name: Upload product stress report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: growthevo-product-stress-report
+          path: stress-reports/*
+          if-no-files-found: error
       - name: Build GitHub Pages artifact
         run: python scripts/build_pages.py --output _site
       - name: Check Pages artifact JavaScript
