@@ -9,8 +9,12 @@ from typing import Any
 from growthevo._version import __version__
 
 UTC = timezone.utc
-_lock = threading.Lock()
 MAX_REFERENCE_CAMPAIGNS = 1_000
+
+
+class ApprovalDecisionConflict(ValueError):
+    """Raised when a finalized approval receives a conflicting second decision."""
+
 
 KPI = [
     {"id":"incremental_revenue","label":"增量收入","value":2846320,"formatted":"¥ 2,846,320","delta":"+23.4%","spark":[18,22,21,29,32,28,39,43,41,51,47,62]},
@@ -35,7 +39,6 @@ CAMPAIGNS = [
     {"id":"exp_511","name":"节日礼品推荐","type":"Experiment","status":"分析中","goal":"GMV","population":520331,"started_at":"09-10","expected_lift":"-1.2%","evidence_tier":"A","mode":"A/B/n"},
     {"id":"cmp_618","name":"会员升级激励","type":"Campaign","status":"已暂停","goal":"会员转化","population":72881,"started_at":"09-08","expected_lift":"+9.4%","evidence_tier":"B","mode":"Batch"},
 ]
-_campaign_state = copy.deepcopy(CAMPAIGNS)
 
 EXPERIMENTS = [
     {"id":"exp_208","name":"沉默用户召回","hypothesis":"轻量提醒对高支持度沉默会员产生正向增量活跃","primary_metric":"active_7d","assignment":"user_id","variants":["NO_TREATMENT","push_reminder_v4"],"allocation":"50/50 within 5% canary","maturity":"7d","status":"running","estimate":"+4.7pp","ci":"+3.2 ~ +6.1pp","guardrails":["unsubscribe_rate","complaint_rate"]},
@@ -46,7 +49,6 @@ APPROVALS = [
     {"id":"apr_281","title":"新用户首购计划扩大至 25%","campaign":"新用户首购提升计划","affected_users":186421,"budget":286000,"max_risk":"Push unsubscribe +0.08pp","incremental_value":724000,"evidence_tier":"A","uncertainty":"95% CI +5.9 ~ +10.7pp","agent_version":"growth-agent-0.3","harness_version":"harness-0.2","policy_version":"pv_42","status":"pending"},
     {"id":"apr_404","title":"Creative Set #12 发布到 Email","campaign":"会员升级激励","affected_users":72881,"budget":62000,"max_risk":"brand claim review","incremental_value":134000,"evidence_tier":"B","uncertainty":"OPE SE 0.0041","agent_version":"growth-agent-0.3","harness_version":"harness-0.2","policy_version":"pv_37","status":"pending"},
 ]
-_approval_state = copy.deepcopy(APPROVALS)
 
 HARNESS_RUNS = [
     {"id":"run_9081","task":"Create 5% canary for dormant users","agent_version":"growth-agent-0.3","harness_version":"harness-0.2","success":True,"policy":"pass","evidence":"A","tool_calls":8,"cost":.84,"latency_ms":8240,"outcome":"approval_requested"},
@@ -69,14 +71,122 @@ EVIDENCE = [
 ]
 
 
+class ReferenceProductState:
+    """Bounded, process-local product state used only by the reference surface.
+
+    Each FastAPI app factory receives its own instance so tests, preview apps,
+    and multiple app objects inside one process cannot leak campaigns or approval
+    decisions into each other. Production still requires durable shared state.
+    """
+
+    def __init__(self, *, max_campaigns: int = MAX_REFERENCE_CAMPAIGNS) -> None:
+        if max_campaigns < len(CAMPAIGNS):
+            raise ValueError("max_campaigns must retain the built-in reference campaigns")
+        self._lock = threading.Lock()
+        self._max_campaigns = max_campaigns
+        self._campaign_state = copy.deepcopy(CAMPAIGNS)
+        self._approval_state = copy.deepcopy(APPROVALS)
+
+    def campaigns(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return copy.deepcopy(self._campaign_state)
+
+    def approvals(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return copy.deepcopy(self._approval_state)
+
+    def stats(self) -> dict[str, int]:
+        with self._lock:
+            return {
+                "campaigns": len(self._campaign_state),
+                "max_campaigns": self._max_campaigns,
+                "approvals": len(self._approval_state),
+            }
+
+    def dashboard_payload(self) -> dict[str, Any]:
+        return {
+            "project": {
+                "name": "GrowthEvo",
+                "version": __version__,
+                "tagline": "因果驱动的增长操作系统",
+                "status": "operational-demo",
+                "surface": "growth-os",
+            },
+            "summary": {
+                "online_decisions": 18420831,
+                "running_campaigns": 12,
+                "agent_automation": .68,
+                "no_treatment_rate": .31,
+            },
+            "kpis": copy.deepcopy(KPI),
+            "trend": TREND[:],
+            "channels": copy.deepcopy(CHANNELS),
+            "campaigns": self.campaigns(),
+            "approvals": self.approvals(),
+            "agent_activity": copy.deepcopy(AGENT_ACTIVITY),
+            "capabilities": copy.deepcopy(CAPABILITIES),
+            "evidence": copy.deepcopy(EVIDENCE),
+        }
+
+    def decide_approval(self, approval_id: str, decision: str, note: str) -> dict[str, Any] | None:
+        with self._lock:
+            for item in self._approval_state:
+                if item["id"] != approval_id:
+                    continue
+                current = str(item.get("status", "pending"))
+                if current == "pending":
+                    item["status"] = decision
+                    item["decision_note"] = note
+                    item["decided_at"] = datetime.now(UTC).isoformat()
+                    return copy.deepcopy(item)
+                if current == decision:
+                    # Identical retries are idempotent and preserve the first
+                    # decision timestamp/note for audit stability.
+                    return copy.deepcopy(item)
+                raise ApprovalDecisionConflict(
+                    f"approval {approval_id!r} is already finalized as {current!r}; "
+                    f"cannot change it to {decision!r}"
+                )
+        return None
+
+    def create_campaign_draft(
+        self,
+        name: str,
+        goal: str,
+        audience: str,
+        budget: float,
+        candidate_action_ids: list[str],
+    ) -> dict[str, Any]:
+        item = {
+            "id": f"cmp_{uuid.uuid4().hex[:8]}",
+            "name": name,
+            "type": "Campaign",
+            "status": "Draft",
+            "goal": goal,
+            "audience": audience,
+            "budget": budget,
+            "candidate_action_ids": list(candidate_action_ids),
+            "population": None,
+            "started_at": None,
+            "expected_lift": "pending causal evaluation",
+            "evidence_tier": "D",
+            "mode": "Draft",
+        }
+        with self._lock:
+            self._campaign_state.insert(0, item)
+            del self._campaign_state[self._max_campaigns :]
+        return copy.deepcopy(item)
+
+
+_default_state = ReferenceProductState()
+
+
 def campaigns() -> list[dict[str, Any]]:
-    with _lock:
-        return copy.deepcopy(_campaign_state)
+    return _default_state.campaigns()
 
 
 def approvals() -> list[dict[str, Any]]:
-    with _lock:
-        return copy.deepcopy(_approval_state)
+    return _default_state.approvals()
 
 
 def opportunities() -> list[dict[str, Any]]:
@@ -96,38 +206,25 @@ def evolution_candidates() -> list[dict[str, Any]]:
 
 
 def reference_state_stats() -> dict[str, int]:
-    with _lock:
-        return {
-            "campaigns": len(_campaign_state),
-            "max_campaigns": MAX_REFERENCE_CAMPAIGNS,
-            "approvals": len(_approval_state),
-        }
+    return _default_state.stats()
 
 
-def dashboard_payload() -> dict[str, Any]:
-    return {"project":{"name":"GrowthEvo","version":__version__,"tagline":"因果驱动的增长操作系统","status":"operational-demo","surface":"growth-os"},"summary":{"online_decisions":18420831,"running_campaigns":12,"agent_automation":.68,"no_treatment_rate":.31},"kpis":copy.deepcopy(KPI),"trend":TREND[:],"channels":copy.deepcopy(CHANNELS),"campaigns":campaigns(),"approvals":approvals(),"agent_activity":copy.deepcopy(AGENT_ACTIVITY),"capabilities":copy.deepcopy(CAPABILITIES),"evidence":copy.deepcopy(EVIDENCE)}
+def dashboard_payload(state: ReferenceProductState | None = None) -> dict[str, Any]:
+    return (state or _default_state).dashboard_payload()
 
 
 def decide_approval(approval_id: str, decision: str, note: str) -> dict[str, Any] | None:
-    with _lock:
-        for item in _approval_state:
-            if item["id"] == approval_id:
-                item["status"] = decision
-                item["decision_note"] = note
-                item["decided_at"] = datetime.now(UTC).isoformat()
-                return copy.deepcopy(item)
-    return None
+    return _default_state.decide_approval(approval_id, decision, note)
 
 
-def create_campaign_draft(name: str, goal: str, audience: str, budget: float, candidate_action_ids: list[str]) -> dict[str, Any]:
-    item = {"id":f"cmp_{uuid.uuid4().hex[:8]}","name":name,"type":"Campaign","status":"Draft","goal":goal,"audience":audience,"budget":budget,"candidate_action_ids":candidate_action_ids,"population":None,"started_at":None,"expected_lift":"pending causal evaluation","evidence_tier":"D","mode":"Draft"}
-    with _lock:
-        _campaign_state.insert(0, item)
-        # This is a reference/demo state store, not durable production storage.
-        # Keep it bounded so soak tests and long-running demos cannot grow memory
-        # without limit while preserving the newest drafts for the UI.
-        del _campaign_state[MAX_REFERENCE_CAMPAIGNS:]
-    return copy.deepcopy(item)
+def create_campaign_draft(
+    name: str,
+    goal: str,
+    audience: str,
+    budget: float,
+    candidate_action_ids: list[str],
+) -> dict[str, Any]:
+    return _default_state.create_campaign_draft(name, goal, audience, budget, candidate_action_ids)
 
 
 def agent_plan(goal: str, budget_limit: float | None, primary_metric: str, guardrails: list[str]) -> dict[str, Any]:
@@ -141,7 +238,17 @@ def agent_plan(goal: str, budget_limit: float | None, primary_metric: str, guard
             {"type":"IDEA","text":"以 NO_TREATMENT 为 control，测试免邮与轻量提醒的受控组合。","source":"Growth Agent"},
         ],
         "artifacts":[
-            {"type":"StrategyProposal","title":"新用户 7 日首购增量策略","status":"draft"},{"type":"AudienceDraft","title":"高意向 · 0–7 天 · 未首购 · 频控可用","status":"draft"},{"type":"ExperimentDraft","title":"NO_TREATMENT vs 首单免邮","status":"draft"},{"type":"CreativeSet","title":"4 个免邮表达变体","status":"draft"},{"type":"CampaignDraft","title":"5% Canary","status":"awaiting_shadow"},{"type":"ApprovalRequest","title":f"预算上限 {budget_text}","status":"not_submitted"},
+            {"type":"StrategyProposal","title":"新用户 7 日首购增量策略","status":"draft"},
+            {"type":"AudienceDraft","title":"高意向 · 0–7 天 · 未首购 · 频控可用","status":"draft"},
+            {"type":"ExperimentDraft","title":"NO_TREATMENT vs 首单免邮","status":"draft"},
+            {"type":"CreativeSet","title":"4 个免邮表达变体","status":"draft"},
+            {"type":"CampaignDraft","title":"5% Canary","status":"awaiting_shadow"},
+            {"type":"ApprovalRequest","title":f"预算上限 {budget_text}","status":"not_submitted"},
         ],
-        "compiled_goal":{"primary_metric":primary_metric,"budget_limit":budget_limit,"guardrails":guardrails or ["unsubscribe_rate","complaint_rate"]},"next_gate":"Shadow preflight",
+        "compiled_goal": {
+            "primary_metric": primary_metric,
+            "budget_limit": budget_limit,
+            "guardrails": guardrails or ["unsubscribe_rate", "complaint_rate"],
+        },
+        "next_gate":"Shadow preflight",
     }
