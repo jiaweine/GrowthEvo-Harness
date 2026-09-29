@@ -1,0 +1,68 @@
+name: Core Stress
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Core stress profile to run
+        required: true
+        default: standard
+        type: choice
+        options:
+          - quick
+          - ci
+          - standard
+          - soak
+  pull_request:
+    paths:
+      - "scripts/stress_core.py"
+      - "growthevo/causal/**"
+      - "growthevo/rl/**"
+      - "growthevo/bench/_fingerprints.py"
+      - "growthevo/bench/synthetic.py"
+      - ".github/workflows/core-stress.yml"
+  schedule:
+    - cron: "41 3 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  core-stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Select core stress profile
+        id: profile
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            PROFILE=soak
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            PROFILE="${{ inputs.profile }}"
+          else
+            PROFILE=standard
+          fi
+          echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
+          echo "Selected profile: $PROFILE"
+      - name: Install GrowthEvo
+        run: python -m pip install -e .
+      - name: Run causal / OPE / Safe-PI / evidence pressure test
+        run: |
+          mkdir -p core-stress-reports
+          python scripts/stress_core.py \
+            --profile "${{ steps.profile.outputs.profile }}" \
+            --json-out "core-stress-reports/core-stress-${{ steps.profile.outputs.profile }}.json" \
+            --markdown-out "core-stress-reports/core-stress-${{ steps.profile.outputs.profile }}.md"
+          cat "core-stress-reports/core-stress-${{ steps.profile.outputs.profile }}.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload core stress report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: growthevo-core-stress-${{ steps.profile.outputs.profile }}
+          path: core-stress-reports/*
+          if-no-files-found: error
