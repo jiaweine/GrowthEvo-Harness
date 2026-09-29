@@ -120,7 +120,9 @@ def test_not_ready_production_blocks_business_apis(monkeypatch: pytest.MonkeyPat
     client = TestClient(create_app())
 
     assert client.get("/api/health").status_code == 200
-    assert client.get("/api/ready").status_code == 503
+    ready = client.get("/api/ready")
+    assert ready.status_code == 503
+    assert ready.json()["authentication"]["active"] is False
     assert client.get("/api/v1/system/runtime").status_code == 200
 
     dashboard = client.get("/api/v1/dashboard")
@@ -132,6 +134,20 @@ def test_not_ready_production_blocks_business_apis(monkeypatch: pytest.MonkeyPat
         json={"entity_id": "u-prod", "placement": "checkout"},
     )
     assert decision.status_code == 503
+
+
+def test_auth_configuration_is_not_fake_activation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROWTHEVO_MODE", "production")
+    monkeypatch.setenv("GROWTHEVO_AUTH_ISSUER", "https://identity.example.test")
+    client = TestClient(create_app())
+    payload = client.get("/api/ready").json()
+    assert payload["authentication"] == {
+        "configured": True,
+        "active": False,
+        "backend": "none",
+    }
+    connector = next(item for item in payload["connectors"] if item["id"] == "authentication")
+    assert connector["state"] == "configured_not_active"
 
 
 def test_fail_closed_production_response_keeps_exact_cors_origin(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -163,3 +179,20 @@ def test_actual_oversized_body_is_rejected_even_if_declared_length_lies() -> Non
         headers={"Content-Length": "1", "Content-Type": "application/json"},
     )
     assert response.status_code == 413
+
+
+def test_body_limit_error_keeps_exact_cors_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    origin = "https://jiaweine.github.io"
+    monkeypatch.setenv("GROWTHEVO_CORS_ORIGINS", origin)
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/agent/plan",
+        content=b"{}",
+        headers={
+            "Origin": origin,
+            "Content-Length": str(MAX_API_BODY_BYTES + 1),
+            "Content-Type": "application/json",
+        },
+    )
+    assert response.status_code == 413
+    assert response.headers.get("access-control-allow-origin") == origin
