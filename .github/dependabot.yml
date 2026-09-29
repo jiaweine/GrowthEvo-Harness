@@ -9,17 +9,10 @@ updates:
     commit-message:
       prefix: "chore(actions)"
 
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-    commit-message:
-      prefix: "chore(python-deps)"
-
+  # Python research/evidence dependencies are intentionally not managed by
+  # Dependabot. Changes to locked scientific/runtime pins must go through the
+  # repository's evidence/provenance review so accepted benchmark identities
+  # cannot drift through an automated dependency PR.
   - package-ecosystem: "npm"
     directory: "/apps/mobile"
     schedule:
