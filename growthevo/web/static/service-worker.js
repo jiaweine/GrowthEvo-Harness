@@ -24,12 +24,15 @@ self.addEventListener('fetch',event=>{
     return;
   }
   if(!SHELL.has(url.toString()))return;
-  const refresh=fetch(request).then(response=>{
-    if(response.ok){const copy=response.clone();return caches.open(CACHE).then(cache=>cache.put(request,copy)).then(()=>response)}
+  const network=fetch(request).then(response=>{
+    if(response.ok){
+      const copy=response.clone();
+      event.waitUntil(caches.open(CACHE).then(cache=>cache.put(request,copy)).catch(()=>undefined));
+    }
     return response;
   });
   event.respondWith(caches.match(request).then(hit=>{
-    if(hit){event.waitUntil(refresh.catch(()=>undefined));return hit}
-    return refresh;
+    if(hit){event.waitUntil(network.then(()=>undefined).catch(()=>undefined));return hit}
+    return network;
   }));
 });
