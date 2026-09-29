@@ -24,11 +24,12 @@ self.addEventListener('fetch',event=>{
     return;
   }
   if(!SHELL.has(url.toString()))return;
+  const refresh=fetch(request).then(response=>{
+    if(response.ok){const copy=response.clone();return caches.open(CACHE).then(cache=>cache.put(request,copy)).then(()=>response)}
+    return response;
+  });
   event.respondWith(caches.match(request).then(hit=>{
-    if(hit)return hit;
-    return fetch(request).then(response=>{
-      if(response.ok){const copy=response.clone();event.waitUntil(caches.open(CACHE).then(cache=>cache.put(request,copy)));}
-      return response;
-    });
+    if(hit){event.waitUntil(refresh.catch(()=>undefined));return hit}
+    return refresh;
   }));
 });
