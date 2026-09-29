@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 pytest.importorskip("pydantic")
 
 from growthevo.web.decisioning import ReferenceDecisionEngine
+from growthevo.web import product_data
 from growthevo.web.product_data import agent_plan, decide_approval
 from growthevo.web.schemas import DecisionRequest
 
@@ -84,3 +86,31 @@ def test_approval_mutation_is_safe_under_concurrent_retries() -> None:
 
     assert all(result is not None for result in results)
     assert all(result["status"] == "approve_5" for result in results if result is not None)
+
+
+def test_reference_campaign_state_is_bounded_under_sustained_parallel_writes() -> None:
+    # Preserve module state so this pressure contract does not pollute other tests.
+    with product_data._lock:
+        original = copy.deepcopy(product_data._campaign_state)
+    try:
+        count = product_data.MAX_REFERENCE_CAMPAIGNS + 500
+
+        def create(index: int) -> str:
+            return product_data.create_campaign_draft(
+                f"pressure-{index}",
+                "bounded reference state",
+                "synthetic audience",
+                1000.0,
+                ["NO_TREATMENT", "free_shipping_v3"],
+            )["id"]
+
+        with ThreadPoolExecutor(max_workers=64) as pool:
+            ids = list(pool.map(create, range(count)))
+
+        assert len(set(ids)) == count
+        stats = product_data.reference_state_stats()
+        assert stats["campaigns"] == product_data.MAX_REFERENCE_CAMPAIGNS
+        assert stats["max_campaigns"] == product_data.MAX_REFERENCE_CAMPAIGNS
+    finally:
+        with product_data._lock:
+            product_data._campaign_state[:] = original
