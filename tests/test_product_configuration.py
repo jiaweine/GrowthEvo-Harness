@@ -5,7 +5,12 @@ import argparse
 import pytest
 
 pydantic = pytest.importorskip("pydantic")
+fastapi = pytest.importorskip("fastapi")
+pytest.importorskip("httpx")
 
+from fastapi.testclient import TestClient
+
+from growthevo.web.app import MAX_API_BODY_BYTES, create_app
 from growthevo.web.cli import _default_port, _port
 from growthevo.web.schemas import DecisionRequest
 from scripts.build_pages import normalize_api_base
@@ -62,3 +67,33 @@ def test_decision_request_rejects_non_finite_budget() -> None:
             placement="checkout",
             budget_remaining=float("inf"),
         )
+
+
+def test_not_ready_production_blocks_business_apis(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROWTHEVO_MODE", "production")
+    monkeypatch.setenv("GROWTHEVO_ENV", "test-production")
+    client = TestClient(create_app())
+
+    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/ready").status_code == 503
+    assert client.get("/api/v1/system/runtime").status_code == 200
+
+    dashboard = client.get("/api/v1/dashboard")
+    assert dashboard.status_code == 503
+    assert "fail-closed" in dashboard.json()["detail"]
+
+    decision = client.post(
+        "/api/v1/decide",
+        json={"entity_id": "u-prod", "placement": "checkout"},
+    )
+    assert decision.status_code == 503
+
+
+def test_declared_oversized_api_body_is_rejected_before_parsing() -> None:
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/agent/plan",
+        content=b"{}",
+        headers={"Content-Length": str(MAX_API_BODY_BYTES + 1), "Content-Type": "application/json"},
+    )
+    assert response.status_code == 413
