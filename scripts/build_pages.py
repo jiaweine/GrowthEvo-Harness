@@ -7,9 +7,16 @@ import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
 
 def normalize_api_base(value: str | None) -> str:
-    """Return a safe Pages API base or fail the build on a malformed value."""
+    """Return a safe Pages API base or fail the build on a malformed value.
+
+    GitHub Pages is HTTPS. A remote ``http://`` API would be blocked as mixed
+    content and could expose requests in transit, so cleartext is only accepted
+    for loopback development addresses.
+    """
     raw = (value or "").strip().rstrip("/")
     if not raw:
         return ""
@@ -26,6 +33,8 @@ def normalize_api_base(value: str | None) -> str:
         raise ValueError("GROWTHEVO_API_BASE must not embed credentials")
     if parsed.query or parsed.fragment:
         raise ValueError("GROWTHEVO_API_BASE must not contain a query string or fragment")
+    if parsed.scheme == "http" and parsed.hostname not in _LOOPBACK_HOSTS:
+        raise ValueError("remote GROWTHEVO_API_BASE must use https to avoid mixed-content/insecure transport")
     return raw
 
 
