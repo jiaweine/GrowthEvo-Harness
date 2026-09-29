@@ -180,6 +180,20 @@ def test_idempotency_key_is_trimmed_and_blank_is_rejected() -> None:
     assert "non-whitespace" in blank.json()["detail"]
 
 
+def test_duplicate_idempotency_keys_are_rejected() -> None:
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/decide",
+        headers=[
+            ("Idempotency-Key", "duplicate-a"),
+            ("Idempotency-Key", "duplicate-b"),
+        ],
+        json=_decision_request(),
+    )
+    assert response.status_code == 422
+    assert "at most once" in response.json()["detail"]
+
+
 def test_invalid_decision_context_returns_422_not_500() -> None:
     client = TestClient(create_app())
     body = _decision_request()
