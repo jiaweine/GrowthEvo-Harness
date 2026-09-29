@@ -7,20 +7,35 @@ let runtimeBackend = useDemo ? {mode:'demo',environment:'static'} : null;
 
 async function runtimeFetch(url, options = {}, timeoutMs = RUNTIME_API_TIMEOUT_MS) {
   const controller = new AbortController();
+  const upstream = options.signal;
+  const abortFromUpstream = () => controller.abort();
+  if (upstream) {
+    if (upstream.aborted) controller.abort();
+    else upstream.addEventListener('abort', abortFromUpstream, {once:true});
+  }
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {...options, signal: controller.signal});
+    const {signal: _ignored, ...rest} = options;
+    return await fetch(url, {...rest, signal: controller.signal});
   } catch (error) {
-    if (error && error.name === 'AbortError') throw Error(`API request timed out after ${timeoutMs}ms`);
+    if (error && error.name === 'AbortError') throw Error(`API request aborted or timed out after ${timeoutMs}ms`);
     throw error;
   } finally {
     clearTimeout(timer);
+    if (upstream) upstream.removeEventListener('abort', abortFromUpstream);
   }
 }
 
 api = async function runtimeAwareApi(path, options = {}) {
   if (useDemo) return demoApi(path, options);
-  const headers = {'Content-Type': 'application/json', ...(options.headers || {})};
+  const headers = new Headers(options.headers || {});
+  if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+  // Avoid forcing application/json on GET/HEAD: doing so turns otherwise-simple
+  // cross-origin reads into unnecessary CORS preflights. JSON write helpers pass
+  // string bodies, so add Content-Type only when a body actually exists.
+  if (typeof options.body === 'string' && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   const response = await runtimeFetch(`${config.API_BASE || ''}${path}`, {
     ...options,
     headers,
@@ -85,10 +100,16 @@ async function probeRuntime() {
     runtimeBackend = payload || {};
     const mode = payload && payload.mode ? payload.mode : 'api';
     const env = payload && payload.environment ? ` · ${payload.environment}` : '';
+    const durable = mode === 'production' && payload && payload.persistence && payload.persistence.active === true;
+    const dataMode = payload && payload.data_mode ? payload.data_mode : 'reference-contract';
     const meta = document.querySelector('.workspace-card .workspace-copy span');
-    if (meta) meta.textContent = mode === 'production' ? 'Production Workspace · Live API' : 'API Workspace · Reference API';
+    if (meta) {
+      meta.textContent = durable
+        ? 'Production Workspace · Durable API'
+        : `API Workspace · ${dataMode === 'synthetic' ? 'Synthetic' : 'Reference Contract'}`;
+    }
     document.body.dataset.runtimeMode = mode;
-    setRuntimeStatus(`API Ready · ${mode}${env}`, latency, 'Live API');
+    setRuntimeStatus(`API Ready · ${mode}${env}`, latency, durable ? 'Durable production' : `Data: ${dataMode}`);
     setAgentAvailability(true);
   } catch (error) {
     runtimeAvailability = 'unavailable';
@@ -110,7 +131,7 @@ function renderApiUnavailable(error) {
     <div class="runtime-error card">
       <div class="runtime-error-icon">!</div>
       <div>
-        <h1>生产 API 暂不可用</h1>
+        <h1>GrowthEvo API 暂不可用</h1>
         <p>当前处于严格 API 模式，GrowthEvo 不会把 synthetic demo 数据伪装成真实生产数据。</p>
         <dl><div><dt>API</dt><dd>${base}</dd></div><div><dt>错误</dt><dd>${reason}</dd></div></dl>
         <button class="secondary" id="runtime-retry">重新连接</button>
