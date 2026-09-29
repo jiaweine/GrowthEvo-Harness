@@ -1,6 +1,9 @@
 const runtimeStrictApi = !useDemo;
 const RUNTIME_API_TIMEOUT_MS = 10000;
 const RUNTIME_READY_TIMEOUT_MS = 5000;
+let runtimeAvailability = useDemo ? 'demo' : 'checking';
+let runtimeLastError = null;
+let runtimeBackend = useDemo ? {mode:'demo',environment:'static'} : null;
 
 async function runtimeFetch(url, options = {}, timeoutMs = RUNTIME_API_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -60,8 +63,8 @@ function runtimeWorkspaceLabel() {
     setAgentAvailability(true);
     return;
   }
-  if (meta) meta.textContent = config.MODE === 'production' ? 'Production Workspace' : 'API Workspace';
-  document.body.dataset.runtimeMode = config.MODE === 'production' ? 'production' : 'api';
+  if (meta) meta.textContent = 'API Workspace · Checking';
+  document.body.dataset.runtimeMode = 'api';
   setRuntimeStatus('API 状态检查中');
 }
 
@@ -71,12 +74,25 @@ async function probeRuntime() {
   try {
     const response = await runtimeFetch(`${config.API_BASE || ''}/api/ready`, {cache: 'no-store'}, RUNTIME_READY_TIMEOUT_MS);
     const latency = Math.max(0, Math.round(performance.now() - started));
-    if (!response.ok) throw Error(`readiness returned HTTP ${response.status}`);
-    const payload = await response.json();
+    let payload = null;
+    try { payload = await response.json(); } catch (_) { payload = null; }
+    if (!response.ok) {
+      const mode = payload && payload.mode ? ` (${payload.mode})` : '';
+      throw Error(`readiness returned HTTP ${response.status}${mode}`);
+    }
+    runtimeAvailability = 'ready';
+    runtimeLastError = null;
+    runtimeBackend = payload || {};
+    const mode = payload && payload.mode ? payload.mode : 'api';
     const env = payload && payload.environment ? ` · ${payload.environment}` : '';
-    setRuntimeStatus(`API Ready${env}`, latency, 'Live API');
+    const meta = document.querySelector('.workspace-card .workspace-copy span');
+    if (meta) meta.textContent = mode === 'production' ? 'Production Workspace · Live API' : 'API Workspace · Reference API';
+    document.body.dataset.runtimeMode = mode;
+    setRuntimeStatus(`API Ready · ${mode}${env}`, latency, 'Live API');
     setAgentAvailability(true);
   } catch (error) {
+    runtimeAvailability = 'unavailable';
+    runtimeLastError = error;
     setRuntimeStatus('API 不可用');
     setAgentAvailability(false);
     renderApiUnavailable(error);
@@ -84,6 +100,8 @@ async function probeRuntime() {
 }
 
 function renderApiUnavailable(error) {
+  runtimeAvailability = useDemo ? 'demo' : 'unavailable';
+  runtimeLastError = error || runtimeLastError;
   const view = document.querySelector('#view');
   if (!view) return;
   const base = esc(config.API_BASE || 'same-origin API');
