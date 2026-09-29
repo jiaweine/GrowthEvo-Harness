@@ -22,10 +22,11 @@ from growthevo.web.schemas import (
 from scripts.build_pages import normalize_api_base
 
 
-def test_pages_api_base_accepts_only_absolute_http_urls() -> None:
+def test_pages_api_base_accepts_secure_remote_or_loopback_http_urls() -> None:
     assert normalize_api_base("") == ""
     assert normalize_api_base(" https://api.example.com/v1/ ") == "https://api.example.com/v1"
     assert normalize_api_base("http://127.0.0.1:8765") == "http://127.0.0.1:8765"
+    assert normalize_api_base("http://localhost:8765") == "http://localhost:8765"
     for value in (
         "api.example.com",
         "javascript:alert(1)",
@@ -33,6 +34,7 @@ def test_pages_api_base_accepts_only_absolute_http_urls() -> None:
         "https://api.example.com?token=secret",
         "https://api.example.com/#fragment",
         "https://api.example.com/bad path",
+        "http://api.example.com",
     ):
         with pytest.raises(ValueError):
             normalize_api_base(value)
@@ -64,6 +66,15 @@ def test_decision_request_rejects_unknown_safety_fields() -> None:
         )
     assert "consent_sate" in str(exc_info.value)
     assert "extra_forbidden" in str(exc_info.value)
+
+
+def test_decision_request_requires_real_boolean_consent() -> None:
+    with pytest.raises(pydantic.ValidationError):
+        DecisionRequest(
+            entity_id="u-consent",
+            placement="checkout",
+            consent_state="yes",
+        )
 
 
 def test_decision_request_rejects_non_finite_budget() -> None:
@@ -139,5 +150,16 @@ def test_declared_oversized_api_body_is_rejected_before_parsing() -> None:
         "/api/v1/agent/plan",
         content=b"{}",
         headers={"Content-Length": str(MAX_API_BODY_BYTES + 1), "Content-Type": "application/json"},
+    )
+    assert response.status_code == 413
+
+
+def test_actual_oversized_body_is_rejected_even_if_declared_length_lies() -> None:
+    client = TestClient(create_app())
+    body = b"x" * (MAX_API_BODY_BYTES + 1)
+    response = client.post(
+        "/api/v1/agent/plan",
+        content=body,
+        headers={"Content-Length": "1", "Content-Type": "application/json"},
     )
     assert response.status_code == 413
