@@ -18,6 +18,7 @@ on:
       - "growthevo/web/**"
       - "scripts/stress_product.py"
       - "scripts/stress_decision_semantics.py"
+      - "constraints/web-container-py313.txt"
       - "tests/test_product_*.py"
       - "pyproject.toml"
       - ".github/workflows/product-stress.yml"
