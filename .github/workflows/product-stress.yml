@@ -15,10 +15,13 @@ on:
           - soak
   pull_request:
     paths:
+      - "growthevo/web/**"
       - "scripts/stress_product.py"
-      - "tests/test_product_concurrency.py"
+      - "tests/test_product_*.py"
+      - "pyproject.toml"
       - ".github/workflows/product-stress.yml"
       - "Dockerfile"
+      - ".dockerignore"
   schedule:
     - cron: "17 3 * * 0"
 
@@ -51,7 +54,7 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -e '.[web,dev]'
       - name: Run race-sensitive concurrency contracts
-        run: pytest tests/test_product_concurrency.py
+        run: pytest tests/test_product_concurrency.py tests/test_product_api.py
       - name: Build production container
         run: docker build -t growthevo-api:stress .
       - name: Run pressure test
@@ -62,12 +65,19 @@ jobs:
             -e GROWTHEVO_ENV=pressure \
             growthevo-api:stress
           trap 'docker rm -f growthevo-api-pressure >/dev/null 2>&1 || true' EXIT
+          READY=0
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8765/api/ready >/dev/null; then
+              READY=1
               break
             fi
             sleep 1
           done
+          if [[ "$READY" != "1" ]]; then
+            docker logs growthevo-api-pressure || true
+            echo "GrowthEvo pressure container never became ready" >&2
+            exit 1
+          fi
           mkdir -p stress-reports
           python scripts/stress_product.py \
             --base-url http://127.0.0.1:8765 \
