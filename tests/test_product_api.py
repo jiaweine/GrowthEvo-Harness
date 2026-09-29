@@ -153,6 +153,33 @@ def test_idempotency_key_reuse_with_different_request_is_conflict() -> None:
     assert "different decision request" in conflict.json()["detail"]
 
 
+def test_idempotency_key_is_trimmed_and_blank_is_rejected() -> None:
+    client = TestClient(create_app())
+    body = _decision_request()
+
+    padded = client.post(
+        "/api/v1/decide",
+        headers={"Idempotency-Key": "  canonical-key  "},
+        json=body,
+    )
+    canonical = client.post(
+        "/api/v1/decide",
+        headers={"Idempotency-Key": "canonical-key"},
+        json=body,
+    )
+    assert padded.status_code == 200
+    assert canonical.status_code == 200
+    assert padded.json()["decision_id"] == canonical.json()["decision_id"]
+
+    blank = client.post(
+        "/api/v1/decide",
+        headers={"Idempotency-Key": "   "},
+        json=body,
+    )
+    assert blank.status_code == 422
+    assert "non-whitespace" in blank.json()["detail"]
+
+
 def test_invalid_decision_context_returns_422_not_500() -> None:
     client = TestClient(create_app())
     body = _decision_request()
