@@ -218,8 +218,8 @@ jobs:
         with:
           node-version: "22.13"
           cache: npm
-          cache-dependency-path: apps/mobile/package.json
-      - name: Install mobile dependencies
-        run: npm install --no-audit --no-fund
+          cache-dependency-path: apps/mobile/package-lock.json
+      - name: Install locked mobile dependencies
+        run: npm ci --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck
