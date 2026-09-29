@@ -11,11 +11,9 @@ from .decisioning import (
     action_registry_payload,
 )
 from .product_data import (
+    ApprovalDecisionConflict,
+    ReferenceProductState,
     agent_plan,
-    approvals,
-    campaigns,
-    create_campaign_draft,
-    decide_approval,
     evolution_candidates,
     experiments,
     harness_runs,
@@ -39,6 +37,7 @@ def create_app() -> Any:
 
     settings = RuntimeSettings.from_env()
     decision_engine = ReferenceDecisionEngine()
+    product_state = ReferenceProductState()
     app = FastAPI(
         title="GrowthEvo Growth OS",
         version="1.0",
@@ -47,9 +46,10 @@ def create_app() -> Any:
         redoc_url=None,
         openapi_url="/api/openapi.json",
     )
-    # App-factory instances must not share decision/idempotency state. Expose the
-    # engine only through app.state for tests/diagnostics rather than a module global.
+    # App-factory instances must not share mutable reference state. Expose state
+    # only through app.state for tests/diagnostics rather than module globals.
     app.state.decision_engine = decision_engine
+    app.state.product_state = product_state
 
     if settings.cors_origins:
         app.add_middleware(
@@ -102,15 +102,15 @@ def create_app() -> Any:
     @app.get("/api/dashboard", tags=["compat"])
     @app.get("/api/v1/dashboard", tags=["dashboard"])
     def dashboard() -> dict[str, Any]:
-        return build_dashboard_payload()
+        return build_dashboard_payload(product_state)
 
     @app.get("/api/capabilities", tags=["compat"])
     def capabilities() -> list[dict[str, Any]]:
-        return build_dashboard_payload()["capabilities"]
+        return build_dashboard_payload(product_state)["capabilities"]
 
     @app.get("/api/evidence", tags=["compat"])
     def evidence() -> list[dict[str, Any]]:
-        return build_dashboard_payload()["evidence"]
+        return build_dashboard_payload(product_state)["evidence"]
 
     @app.get("/api/v1/opportunities", tags=["causal"])
     def opportunity_list() -> list[dict[str, Any]]:
@@ -118,11 +118,11 @@ def create_app() -> Any:
 
     @app.get("/api/v1/campaigns", tags=["campaigns"])
     def campaign_list() -> list[dict[str, Any]]:
-        return campaigns()
+        return product_state.campaigns()
 
     @app.post("/api/v1/campaigns/draft", tags=["campaigns"], status_code=201)
     def campaign_draft(request: CampaignDraftRequest) -> dict[str, Any]:
-        return create_campaign_draft(
+        return product_state.create_campaign_draft(
             request.name,
             request.goal,
             request.audience,
@@ -136,11 +136,14 @@ def create_app() -> Any:
 
     @app.get("/api/v1/approvals", tags=["governance"])
     def approval_list() -> list[dict[str, Any]]:
-        return approvals()
+        return product_state.approvals()
 
     @app.post("/api/v1/approvals/{approval_id}/decision", tags=["governance"])
     def approval_decision(approval_id: str, request: ApprovalDecisionRequest) -> dict[str, Any]:
-        result = decide_approval(approval_id, request.decision, request.note)
+        try:
+            result = product_state.decide_approval(approval_id, request.decision, request.note)
+        except ApprovalDecisionConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         if result is None:
             raise HTTPException(status_code=404, detail="approval not found")
         return result
