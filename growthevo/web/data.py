@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .product_data import CAPABILITIES, EVIDENCE, dashboard_payload
+from .product_data import CAPABILITIES, EVIDENCE, ReferenceProductState, dashboard_payload
 
 _COMPAT_CAPABILITIES = (
     {
@@ -28,11 +28,13 @@ _ARCHITECTURE = (
 )
 
 
-def build_dashboard_payload() -> dict[str, Any]:
+def build_dashboard_payload(state: ReferenceProductState | None = None) -> dict[str, Any]:
     """Return the product dashboard while preserving the v0.1 compatibility contract."""
-    payload = dashboard_payload()
+    payload = dashboard_payload(state)
     ids = {item["id"] for item in payload["capabilities"]}
-    payload["capabilities"].extend(dict(item) for item in _COMPAT_CAPABILITIES if item["id"] not in ids)
+    payload["capabilities"].extend(
+        dict(item) for item in _COMPAT_CAPABILITIES if item["id"] not in ids
+    )
     payload["project"].update(
         {
             "name": "GrowthEvo-Harness",
