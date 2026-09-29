@@ -61,6 +61,7 @@ def build(output: Path, source: Path) -> None:
         "views.js",
         "dashboard-page.js",
         "pages.js",
+        "live-pages.js",
         "app.js",
         "icon.svg",
     ):
