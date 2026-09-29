@@ -4,7 +4,7 @@ import hashlib
 import math
 import threading
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -39,12 +39,21 @@ class ReferenceDecisionEngine:
 
     This reference scorer validates API semantics and guardrails. Production deployments
     should replace ``score_actions`` with the harness' locked CATE/OPE/policy pipeline.
+
+    The in-process idempotency cache is deliberately bounded. It is only a reference
+    contract for a single process; production should persist idempotency/decision logs
+    in durable storage so multiple replicas share the same contract.
     """
 
-    def __init__(self, max_log_size: int = 500) -> None:
+    def __init__(self, max_log_size: int = 500, max_idempotency_size: int = 5_000) -> None:
+        if max_log_size <= 0:
+            raise ValueError("max_log_size must be > 0")
+        if max_idempotency_size <= 0:
+            raise ValueError("max_idempotency_size must be > 0")
         self._lock = threading.Lock()
         self._recent: deque[dict[str, Any]] = deque(maxlen=max_log_size)
-        self._idempotency: dict[str, dict[str, Any]] = {}
+        self._idempotency: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._max_idempotency_size = max_idempotency_size
 
     @staticmethod
     def _stable_jitter(entity_id: str, action_id: str) -> float:
@@ -58,6 +67,15 @@ class ReferenceDecisionEngine:
         exps = {key: math.exp(value - peak) for key, value in scores.items()}
         total = sum(exps.values())
         return {key: value / total for key, value in exps.items()}
+
+    def _cached(self, idempotency_key: str | None) -> dict[str, Any] | None:
+        if not idempotency_key:
+            return None
+        with self._lock:
+            payload = self._idempotency.get(idempotency_key)
+            if payload is not None:
+                self._idempotency.move_to_end(idempotency_key)
+            return payload
 
     def _fallback(self, request: DecisionRequest, reasons: list[str], idempotency_key: str | None) -> dict[str, Any]:
         now = datetime.now(UTC)
@@ -109,8 +127,9 @@ class ReferenceDecisionEngine:
         return scores
 
     def decide(self, request: DecisionRequest, idempotency_key: str | None = None) -> dict[str, Any]:
-        if idempotency_key and idempotency_key in self._idempotency:
-            return self._idempotency[idempotency_key]
+        cached = self._cached(idempotency_key)
+        if cached is not None:
+            return cached
         if not request.consent_state:
             return self._fallback(request, ["Consent unavailable; enforced NO_TREATMENT."], idempotency_key)
         if request.frequency_remaining <= 0:
@@ -161,13 +180,33 @@ class ReferenceDecisionEngine:
 
     def _record(self, payload: dict[str, Any], idempotency_key: str | None) -> dict[str, Any]:
         with self._lock:
+            # Double-check inside the write lock. Multiple concurrent first-seen
+            # requests with the same idempotency key must all observe one result.
+            if idempotency_key:
+                existing = self._idempotency.get(idempotency_key)
+                if existing is not None:
+                    self._idempotency.move_to_end(idempotency_key)
+                    return existing
+
             self._recent.appendleft(payload)
             if idempotency_key:
                 self._idempotency[idempotency_key] = payload
+                self._idempotency.move_to_end(idempotency_key)
+                while len(self._idempotency) > self._max_idempotency_size:
+                    self._idempotency.popitem(last=False)
         return payload
 
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:
-        return list(self._recent)[:limit]
+        with self._lock:
+            return list(self._recent)[:limit]
+
+    def stats(self) -> dict[str, int]:
+        with self._lock:
+            return {
+                "recent_decisions": len(self._recent),
+                "idempotency_keys": len(self._idempotency),
+                "max_idempotency_keys": self._max_idempotency_size,
+            }
 
 
 def action_registry_payload() -> list[dict[str, Any]]:
