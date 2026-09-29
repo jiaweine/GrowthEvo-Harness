@@ -1,34 +1,70 @@
-const runtimeStrictApi = config.MODE === 'api' || config.MODE === 'production';
+const runtimeStrictApi = !useDemo;
 
 api = async function runtimeAwareApi(path, options = {}) {
   if (useDemo) return demoApi(path, options);
-  try {
-    const response = await fetch(`${config.API_BASE || ''}${path}`, {
-      headers: {'Content-Type': 'application/json', ...(options.headers || {})},
-      ...options,
-    });
-    if (!response.ok) throw Error(await response.text());
-    return await response.json();
-  } catch (error) {
-    if (!runtimeStrictApi && config.MODE === 'auto') {
-      console.warn('API unavailable; using demo mode because MODE=auto', error);
-      return demoApi(path, options);
-    }
-    console.error('GrowthEvo API unavailable; strict API mode will not substitute synthetic data', error);
-    throw error;
+  const response = await fetch(`${config.API_BASE || ''}${path}`, {
+    headers: {'Content-Type': 'application/json', ...(options.headers || {})},
+    cache: 'no-store',
+    ...options,
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw Error(`HTTP ${response.status}: ${detail.slice(0, 600)}`);
   }
+  return await response.json();
 };
+
+function setRuntimeStatus(label, latency = null, freshness = null) {
+  const status = document.querySelector('.status-right');
+  if (!status) return;
+  const parts = [label];
+  if (latency !== null) parts.push(`Readiness ${latency} ms`);
+  if (freshness) parts.push(freshness);
+  while (status.firstChild) status.removeChild(status.firstChild);
+  for (const text of parts) {
+    const span = document.createElement('span');
+    span.textContent = text;
+    status.appendChild(span);
+  }
+}
+
+function setAgentAvailability(online) {
+  const text = document.querySelector('.online-text');
+  if (text) text.textContent = online ? '在线' : 'API 不可用';
+  const dot = document.querySelector('.online-dot');
+  if (dot) dot.style.opacity = online ? '1' : '.35';
+}
 
 function runtimeWorkspaceLabel() {
   const meta = document.querySelector('.workspace-card .workspace-copy span');
-  if (!meta) return;
   if (useDemo) {
-    meta.textContent = 'Demo Workspace · Synthetic Data';
+    if (meta) meta.textContent = 'Demo Workspace · Synthetic Data';
     document.body.dataset.runtimeMode = 'demo';
+    setRuntimeStatus('Demo · Synthetic Data', null, '非生产数据');
+    setAgentAvailability(true);
     return;
   }
-  meta.textContent = config.MODE === 'production' ? 'Production Workspace' : 'API Workspace';
+  if (meta) meta.textContent = config.MODE === 'production' ? 'Production Workspace' : 'API Workspace';
   document.body.dataset.runtimeMode = config.MODE === 'production' ? 'production' : 'api';
+  setRuntimeStatus('API 状态检查中');
+}
+
+async function probeRuntime() {
+  if (useDemo) return;
+  const started = performance.now();
+  try {
+    const response = await fetch(`${config.API_BASE || ''}/api/ready`, {cache: 'no-store'});
+    const latency = Math.max(0, Math.round(performance.now() - started));
+    if (!response.ok) throw Error(`readiness returned HTTP ${response.status}`);
+    const payload = await response.json();
+    const env = payload && payload.environment ? ` · ${payload.environment}` : '';
+    setRuntimeStatus(`API Ready${env}`, latency, 'Live API');
+    setAgentAvailability(true);
+  } catch (error) {
+    setRuntimeStatus('API 不可用');
+    setAgentAvailability(false);
+    renderApiUnavailable(error);
+  }
 }
 
 function renderApiUnavailable(error) {
@@ -46,11 +82,16 @@ function renderApiUnavailable(error) {
         <button class="secondary" id="runtime-retry">重新连接</button>
       </div>
     </div>`;
+  setRuntimeStatus('API 不可用');
+  setAgentAvailability(false);
   const retry = document.querySelector('#runtime-retry');
   if (retry) retry.onclick = () => location.reload();
 }
 
-window.addEventListener('DOMContentLoaded', runtimeWorkspaceLabel);
+window.addEventListener('DOMContentLoaded', () => {
+  runtimeWorkspaceLabel();
+  void probeRuntime();
+});
 window.addEventListener('unhandledrejection', event => {
   if (!runtimeStrictApi) return;
   event.preventDefault();
