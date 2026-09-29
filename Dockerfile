@@ -10,7 +10,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY growthevo ./growthevo
-RUN python -m pip install --upgrade pip && python -m pip install '.[web]'
+RUN python -m pip install --disable-pip-version-check '.[web]'
 
 RUN useradd --create-home --uid 10001 growthevo && chown -R growthevo:growthevo /app
 USER growthevo
