@@ -51,3 +51,8 @@ function renderApiUnavailable(error) {
 }
 
 window.addEventListener('DOMContentLoaded', runtimeWorkspaceLabel);
+window.addEventListener('unhandledrejection', event => {
+  if (!runtimeStrictApi) return;
+  event.preventDefault();
+  renderApiUnavailable(event.reason);
+});
