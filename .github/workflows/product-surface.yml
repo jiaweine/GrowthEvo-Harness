@@ -58,29 +58,51 @@ jobs:
         run: |
           docker run --rm -d --name growthevo-api-ci -p 8765:8765 -e GROWTHEVO_MODE=api -e GROWTHEVO_ENV=ci growthevo-api:ci
           trap 'docker rm -f growthevo-api-ci >/dev/null 2>&1 || true' EXIT
+          READY=0
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8765/api/health >/dev/null; then
+            if curl --fail --silent http://127.0.0.1:8765/api/ready >/dev/null; then
+              READY=1
               break
             fi
             sleep 1
           done
+          if [[ "$READY" != "1" ]]; then
+            docker logs growthevo-api-ci || true
+            echo "GrowthEvo CI container never became ready" >&2
+            exit 1
+          fi
           curl --fail --silent http://127.0.0.1:8765/api/health | python -m json.tool
           curl --fail --silent http://127.0.0.1:8765/api/ready | python -m json.tool
       - name: Stress product API and critical workflows
         run: |
           mkdir -p stress-reports
+          set +e
           python scripts/stress_product.py \
             --base-url http://127.0.0.1:8765 \
             --profile ci \
             --json-out stress-reports/product-stress.json \
             --markdown-out stress-reports/product-stress.md
-          cat stress-reports/product-stress.md >> "$GITHUB_STEP_SUMMARY"
+          STATUS=$?
+          set -e
+          if [[ -f stress-reports/product-stress.md ]]; then
+            cat stress-reports/product-stress.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ "$STATUS" != "0" ]]; then
+            echo "CI pressure test failed; container log follows:" >&2
+            docker logs growthevo-api-ci || true
+            if [[ -f stress-reports/product-stress.json ]]; then
+              echo "Pressure report with sample errors follows:" >&2
+              cat stress-reports/product-stress.json >&2
+            fi
+            exit "$STATUS"
+          fi
       - name: Upload product stress report
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: growthevo-product-stress-report
           path: stress-reports/*
-          if-no-files-found: error
+          if-no-files-found: warn
       - name: Build GitHub Pages artifact
         run: python scripts/build_pages.py --output _site
       - name: Check Pages artifact JavaScript
