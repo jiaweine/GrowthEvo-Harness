@@ -8,10 +8,42 @@ from urllib.parse import urlparse
 _VALID_MODES = {"demo", "api", "production"}
 
 
-def _csv(value: str | None) -> tuple[str, ...]:
+def _cors_origins(value: str | None) -> tuple[str, ...]:
+    """Parse exact HTTP(S) origins and reject permissive/malformed values."""
     if not value:
         return ()
-    return tuple(item.strip().rstrip("/") for item in value.split(",") if item.strip())
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw in value.split(","):
+        origin = raw.strip().rstrip("/")
+        if not origin:
+            continue
+        if "*" in origin:
+            raise ValueError("GROWTHEVO_CORS_ORIGINS must use exact origins; wildcards are not allowed")
+        try:
+            parsed = urlparse(origin)
+            # Accessing .port also validates malformed ports.
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError(f"invalid CORS origin: {origin!r}") from exc
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "GROWTHEVO_CORS_ORIGINS entries must be exact http(s) origins without "
+                f"credentials, paths, query strings, or fragments: {origin!r}"
+            )
+        if origin not in seen:
+            result.append(origin)
+            seen.add(origin)
+    return tuple(result)
 
 
 def _configured(*names: str) -> bool:
@@ -22,7 +54,7 @@ def _safe_host(value: str | None) -> str | None:
     if not value:
         return None
     try:
-        return urlparse(value).hostname
+        return urlparse(value.strip()).hostname
     except ValueError:
         return None
 
@@ -49,16 +81,21 @@ class RuntimeSettings:
 
     @classmethod
     def from_env(cls) -> "RuntimeSettings":
-        raw_mode = os.getenv("GROWTHEVO_MODE", "demo").strip().lower() or "demo"
-        mode = raw_mode if raw_mode in _VALID_MODES else "demo"
+        configured_mode = os.getenv("GROWTHEVO_MODE")
+        raw_mode = (configured_mode or "demo").strip().lower() or "demo"
+        if raw_mode not in _VALID_MODES:
+            raise ValueError(
+                f"invalid GROWTHEVO_MODE {raw_mode!r}; expected one of {sorted(_VALID_MODES)}"
+            )
         environment = os.getenv("GROWTHEVO_ENV", "local").strip().lower() or "local"
         database_url = os.getenv("GROWTHEVO_DATABASE_URL") or os.getenv("DATABASE_URL")
-        cors_origins = _csv(os.getenv("GROWTHEVO_CORS_ORIGINS"))
+        database_url = database_url.strip() if database_url else None
+        cors_origins = _cors_origins(os.getenv("GROWTHEVO_CORS_ORIGINS"))
         # No durable persistence adapter is wired into product_data/decisioning
         # yet. Keep this explicit rather than inferring activation from a URL.
         persistence_backend = "reference-memory"
         return cls(
-            mode=mode,
+            mode=raw_mode,
             environment=environment,
             cors_origins=cors_origins,
             database_configured=bool(database_url),
