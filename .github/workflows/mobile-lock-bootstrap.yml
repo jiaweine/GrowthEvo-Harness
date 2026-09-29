@@ -1,0 +1,32 @@
+name: Mobile Lock Bootstrap
+
+on:
+  pull_request:
+    paths:
+      - "apps/mobile/package.json"
+      - ".github/workflows/mobile-lock-bootstrap.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-lock:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22.13"
+      - name: Resolve lockfile without lifecycle scripts
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Validate resolved dependency tree
+        run: npm install --ignore-scripts --no-audit --no-fund && npm run typecheck
+      - name: Upload resolved lockfile
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: growthevo-mobile-package-lock
+          path: apps/mobile/package-lock.json
+          if-no-files-found: error
