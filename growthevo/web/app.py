@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,93 @@ PRODUCTION_SYSTEM_PATHS = frozenset(
 )
 
 
+class ApiBodyLimitMiddleware:
+    """Bound API request bodies by bytes actually received, not just headers.
+
+    Content-Length is useful as an early rejection hint but cannot be trusted as
+    the sole limit because clients can stream chunked bodies or provide an
+    incorrect value. This middleware buffers at most ``max_bytes`` for JSON API
+    writes, then replays the bounded body to FastAPI. Oversized/malformed bodies
+    fail before validation and the HTTP/1.1 connection is closed so unread bytes
+    cannot bleed into a subsequent request.
+    """
+
+    def __init__(self, app: Any, max_bytes: int = MAX_API_BODY_BYTES) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def _reject(self, send: Any, status: int, detail: str) -> None:
+        body = json.dumps({"detail": detail}, separators=(",", ":")).encode("utf-8")
+        headers = [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode("ascii")),
+            (b"connection", b"close"),
+        ]
+        await send({"type": "http.response.start", "status": status, "headers": headers})
+        await send({"type": "http.response.body", "body": body, "more_body": False})
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        method = str(scope.get("method", "GET")).upper()
+        path = str(scope.get("path", ""))
+        is_api = path == "/api" or path.startswith("/api/")
+        if not is_api or method not in {"POST", "PUT", "PATCH"}:
+            await self.app(scope, receive, send)
+            return
+
+        raw_length: bytes | None = None
+        for name, value in scope.get("headers", []):
+            if name.lower() == b"content-length":
+                raw_length = value
+                break
+        if raw_length is not None:
+            try:
+                declared = int(raw_length.decode("ascii"))
+            except (UnicodeDecodeError, ValueError):
+                await self._reject(send, 400, "invalid Content-Length")
+                return
+            if declared < 0:
+                await self._reject(send, 400, "invalid Content-Length")
+                return
+            if declared > self.max_bytes:
+                await self._reject(send, 413, f"API request body exceeds {self.max_bytes} bytes")
+                return
+
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            message = await receive()
+            message_type = message.get("type")
+            if message_type == "http.disconnect":
+                return
+            if message_type != "http.request":
+                continue
+            chunk = message.get("body", b"")
+            total += len(chunk)
+            if total > self.max_bytes:
+                await self._reject(send, 413, f"API request body exceeds {self.max_bytes} bytes")
+                return
+            if chunk:
+                chunks.append(chunk)
+            if not message.get("more_body", False):
+                break
+
+        body = b"".join(chunks)
+        replayed = False
+
+        async def replay_receive() -> dict[str, Any]:
+            nonlocal replayed
+            if replayed:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            replayed = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        await self.app(scope, replay_receive, send)
+
+
 def create_app() -> Any:
     """Create the GrowthEvo product surface and versioned API."""
     try:
@@ -57,8 +145,6 @@ def create_app() -> Any:
         redoc_url=None,
         openapi_url="/api/openapi.json",
     )
-    # App-factory instances must not share mutable reference state. Expose state
-    # only through app.state for tests/diagnostics rather than module globals.
     app.state.decision_engine = decision_engine
     app.state.product_state = product_state
 
@@ -70,51 +156,29 @@ def create_app() -> Any:
             allow_methods=["GET", "POST", "OPTIONS"],
             allow_headers=["Content-Type", "Idempotency-Key"],
         )
+    app.add_middleware(ApiBodyLimitMiddleware, max_bytes=MAX_API_BODY_BYTES)
 
     @app.middleware("http")
     async def runtime_headers(request: Any, call_next: Any) -> Any:
         path = request.url.path
         is_api = path == "/api" or path.startswith("/api/")
 
-        if is_api and request.method in {"POST", "PUT", "PATCH"}:
-            raw_length = request.headers.get("content-length")
-            if raw_length:
-                try:
-                    content_length = int(raw_length)
-                except ValueError:
-                    response = JSONResponse(status_code=400, content={"detail": "invalid Content-Length"})
-                else:
-                    if content_length < 0:
-                        response = JSONResponse(status_code=400, content={"detail": "invalid Content-Length"})
-                    elif content_length > MAX_API_BODY_BYTES:
-                        response = JSONResponse(
-                            status_code=413,
-                            content={"detail": f"API request body exceeds {MAX_API_BODY_BYTES} bytes"},
-                        )
-                    else:
-                        response = None
-            else:
-                response = None
+        if (
+            settings.production
+            and not settings.ready
+            and is_api
+            and path not in PRODUCTION_SYSTEM_PATHS
+        ):
+            response = JSONResponse(
+                status_code=503,
+                content={
+                    "detail": "production runtime is not ready; business APIs are fail-closed",
+                    "mode": settings.mode,
+                    "environment": settings.environment,
+                },
+            )
         else:
-            response = None
-
-        if response is None:
-            if (
-                settings.production
-                and not settings.ready
-                and is_api
-                and path not in PRODUCTION_SYSTEM_PATHS
-            ):
-                response = JSONResponse(
-                    status_code=503,
-                    content={
-                        "detail": "production runtime is not ready; business APIs are fail-closed",
-                        "mode": settings.mode,
-                        "environment": settings.environment,
-                    },
-                )
-            else:
-                response = await call_next(request)
+            response = await call_next(request)
 
         response.headers["X-GrowthEvo-Mode"] = settings.mode
         response.headers["X-GrowthEvo-Environment"] = settings.environment
@@ -122,8 +186,6 @@ def create_app() -> Any:
         response.headers["Referrer-Policy"] = "same-origin"
         response.headers["X-Frame-Options"] = "DENY"
         if is_api:
-            # Dynamic product/governance/decision data must never be served from
-            # browser or intermediary caches. The PWA shell is cached separately.
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -256,8 +318,6 @@ def create_app() -> Any:
     @app.get("/", include_in_schema=False)
     @app.get("/{route:path}", include_in_schema=False)
     def index(route: str = "") -> FileResponse:
-        # SPA history fallback must never turn a misspelled/unknown API GET into
-        # a misleading HTTP 200 HTML page.
         if route == "api" or route.startswith("api/"):
             raise HTTPException(status_code=404, detail="API route not found")
         return FileResponse(STATIC_DIR / "index.html")
