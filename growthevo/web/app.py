@@ -23,6 +23,17 @@ from .runtime import RuntimeSettings
 from .schemas import AgentPlanRequest, ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest
 
 STATIC_DIR = Path(__file__).with_name("static")
+MAX_API_BODY_BYTES = 1_000_000
+PRODUCTION_SYSTEM_PATHS = frozenset(
+    {
+        "/api/health",
+        "/api/ready",
+        "/api/v1/system/runtime",
+        "/api/v1/system/connectors",
+        "/api/docs",
+        "/api/openapi.json",
+    }
+)
 
 
 def create_app() -> Any:
@@ -62,13 +73,55 @@ def create_app() -> Any:
 
     @app.middleware("http")
     async def runtime_headers(request: Any, call_next: Any) -> Any:
-        response = await call_next(request)
+        path = request.url.path
+        is_api = path == "/api" or path.startswith("/api/")
+
+        if is_api and request.method in {"POST", "PUT", "PATCH"}:
+            raw_length = request.headers.get("content-length")
+            if raw_length:
+                try:
+                    content_length = int(raw_length)
+                except ValueError:
+                    response = JSONResponse(status_code=400, content={"detail": "invalid Content-Length"})
+                else:
+                    if content_length < 0:
+                        response = JSONResponse(status_code=400, content={"detail": "invalid Content-Length"})
+                    elif content_length > MAX_API_BODY_BYTES:
+                        response = JSONResponse(
+                            status_code=413,
+                            content={"detail": f"API request body exceeds {MAX_API_BODY_BYTES} bytes"},
+                        )
+                    else:
+                        response = None
+            else:
+                response = None
+        else:
+            response = None
+
+        if response is None:
+            if (
+                settings.production
+                and not settings.ready
+                and is_api
+                and path not in PRODUCTION_SYSTEM_PATHS
+            ):
+                response = JSONResponse(
+                    status_code=503,
+                    content={
+                        "detail": "production runtime is not ready; business APIs are fail-closed",
+                        "mode": settings.mode,
+                        "environment": settings.environment,
+                    },
+                )
+            else:
+                response = await call_next(request)
+
         response.headers["X-GrowthEvo-Mode"] = settings.mode
         response.headers["X-GrowthEvo-Environment"] = settings.environment
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
         response.headers["X-Frame-Options"] = "DENY"
-        if request.url.path == "/api" or request.url.path.startswith("/api/"):
+        if is_api:
             # Dynamic product/governance/decision data must never be served from
             # browser or intermediary caches. The PWA shell is cached separately.
             response.headers["Cache-Control"] = "no-store"
