@@ -40,6 +40,7 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
     index = (STATIC / "index.html").read_text(encoding="utf-8")
     runtime_ui = (STATIC / "runtime-ui.js").read_text(encoding="utf-8")
+    live_pages = (STATIC / "live-pages.js").read_text(encoding="utf-8")
     assert "DOMContentLoaded" not in pages
     assert "document.addEventListener('DOMContentLoaded',init)" in app
     assert "fidelity.css" in styles
@@ -47,14 +48,22 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     assert "runtime-ui.js" in index
     assert "product-data.js" in index
     assert "product-advanced-data.js" in index
+    assert "live-pages.js" in index
     assert index.index("data.js") < index.index("runtime-ui.js") < index.index("product-data.js")
-    assert index.index("product-data.js") < index.index("product-advanced-data.js") < index.index("pages.js") < index.index("app.js")
+    assert index.index("product-data.js") < index.index("product-advanced-data.js") < index.index("pages.js")
+    assert index.index("pages.js") < index.index("live-pages.js") < index.index("app.js")
     assert "不会把 synthetic demo 数据伪装成真实生产数据" in runtime_ui
     assert "Demo Workspace · Synthetic Data" in runtime_ui
     assert "using demo mode because MODE=auto" not in runtime_ui
     assert "/api/ready" in runtime_ui
     assert "typeof options.body === 'string'" in runtime_ui
     assert "Data: ${dataMode}" in runtime_ui
+    assert "/api/v1/opportunities" in live_pages
+    assert "/api/v1/experiments" in live_pages
+    assert "/api/v1/decisions/recent" in live_pages
+    assert "/api/v1/harness/runs" in live_pages
+    assert "/api/v1/approvals/" in live_pages
+    assert "/api/v1/evolution/candidates" in live_pages
 
 
 def test_core_product_workbenches_are_real_routes() -> None:
@@ -84,7 +93,13 @@ def test_core_product_workbenches_are_real_routes() -> None:
 def test_pages_builder_packages_all_product_assets() -> None:
     build_script = (ROOT / "scripts" / "build_pages.py").read_text(encoding="utf-8")
     service_worker = (STATIC / "service-worker.js").read_text(encoding="utf-8")
-    for asset in ("product-pages.css", "runtime-ui.js", "product-data.js", "product-advanced-data.js"):
+    for asset in (
+        "product-pages.css",
+        "runtime-ui.js",
+        "product-data.js",
+        "product-advanced-data.js",
+        "live-pages.js",
+    ):
         assert asset in build_script
         assert asset in service_worker
     assert "isApi(url)" in service_worker
@@ -97,6 +112,7 @@ def test_pages_builder_packages_all_product_assets() -> None:
 def test_mutable_dashboard_fields_are_html_escaped() -> None:
     views = (STATIC / "views.js").read_text(encoding="utf-8")
     dashboard = (STATIC / "dashboard-page.js").read_text(encoding="utf-8")
+    live_pages = (STATIC / "live-pages.js").read_text(encoding="utf-8")
     assert "${esc(c.name)}" in views
     assert "${esc(c.goal)}" in views
     assert "${esc(c.type)}" in views
@@ -104,6 +120,9 @@ def test_mutable_dashboard_fields_are_html_escaped() -> None:
     assert "${esc(k.label)}" in dashboard
     assert "safeColor" in dashboard
     assert "go('campaignStudio')" in dashboard
+    assert "esc(liveText(x.title))" in live_pages
+    assert "esc(liveText(x.task))" in live_pages
+    assert "esc(liveText(x.problem))" in live_pages
 
 
 def test_agent_composer_calls_real_api_outside_demo() -> None:
@@ -147,7 +166,6 @@ def test_optional_decision_engine_contract() -> None:
     assert ACTION_REGISTRY["NO_TREATMENT"].cost == 0
     assert ACTION_REGISTRY["NO_TREATMENT"].risk_level == "L0"
 
-    # Returned payloads must not alias the engine's cached/audit state.
     first["action_id"] = "tampered"
     replay = engine.decide(request, idempotency_key="idem-1")
     assert replay["action_id"] != "tampered"
