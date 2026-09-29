@@ -31,9 +31,10 @@ def _safe_host(value: str | None) -> str | None:
 class RuntimeSettings:
     """Public-safe runtime configuration.
 
-    This contract reports configuration presence, never secret values. The
-    current product API remains a reference implementation until durable
-    persistence and side-effect adapters are wired explicitly.
+    Presence of credentials/configuration is deliberately distinct from an
+    active adapter. This prevents a production process from claiming durable
+    persistence merely because ``DATABASE_URL`` exists while product state is
+    still served by the reference in-memory implementation.
     """
 
     mode: str
@@ -44,6 +45,7 @@ class RuntimeSettings:
     llm_configured: bool
     channel_configured: bool
     database_host: str | None
+    persistence_backend: str
 
     @classmethod
     def from_env(cls) -> "RuntimeSettings":
@@ -52,6 +54,9 @@ class RuntimeSettings:
         environment = os.getenv("GROWTHEVO_ENV", "local").strip().lower() or "local"
         database_url = os.getenv("GROWTHEVO_DATABASE_URL") or os.getenv("DATABASE_URL")
         cors_origins = _csv(os.getenv("GROWTHEVO_CORS_ORIGINS"))
+        # No durable persistence adapter is wired into product_data/decisioning
+        # yet. Keep this explicit rather than inferring activation from a URL.
+        persistence_backend = "reference-memory"
         return cls(
             mode=mode,
             environment=environment,
@@ -73,6 +78,7 @@ class RuntimeSettings:
                 "GOOGLE_ADS_DEVELOPER_TOKEN",
             ),
             database_host=_safe_host(database_url),
+            persistence_backend=persistence_backend,
         )
 
     @property
@@ -84,32 +90,47 @@ class RuntimeSettings:
         return self.mode == "production"
 
     @property
+    def persistence_active(self) -> bool:
+        # Future durable adapters should make activation an explicit runtime
+        # capability after successful initialization/migration checks. The
+        # current branch intentionally has no such adapter yet.
+        return self.persistence_backend not in {"reference-memory", "none"}
+
+    @property
     def ready(self) -> bool:
-        # Demo/reference API mode is credential-free. Explicit production mode
-        # refuses readiness without durable persistence configured.
-        return not self.production or self.database_configured
+        # Demo/reference API mode is credential-free. Production fails closed
+        # until an actual durable adapter is active, not merely configured.
+        return not self.production or self.persistence_active
 
     def connector_states(self) -> list[dict[str, str]]:
+        if self.persistence_active:
+            persistence_state = "connected"
+        elif self.database_configured:
+            persistence_state = "configured_not_active"
+        elif self.synthetic_data:
+            persistence_state = "demo"
+        else:
+            persistence_state = "unconfigured"
         return [
             {
                 "id": "persistence",
                 "label": "Durable PostgreSQL",
-                "state": "configured" if self.database_configured else ("demo" if self.synthetic_data else "unconfigured"),
+                "state": persistence_state,
             },
             {
                 "id": "object_store",
                 "label": "Object Storage",
-                "state": "configured" if self.object_store_configured else "unconfigured",
+                "state": "configured_not_active" if self.object_store_configured else "unconfigured",
             },
             {
                 "id": "llm",
                 "label": "LLM Provider",
-                "state": "configured" if self.llm_configured else "unconfigured",
+                "state": "configured_not_active" if self.llm_configured else "unconfigured",
             },
             {
                 "id": "channels",
                 "label": "Execution Channels",
-                "state": "configured" if self.channel_configured else "unconfigured",
+                "state": "configured_not_active" if self.channel_configured else "unconfigured",
             },
         ]
 
@@ -123,6 +144,8 @@ class RuntimeSettings:
             "execution_mode": "reference-only",
             "persistence": {
                 "configured": self.database_configured,
+                "active": self.persistence_active,
+                "backend": self.persistence_backend,
                 "host": self.database_host,
             },
             "connectors": self.connector_states(),
