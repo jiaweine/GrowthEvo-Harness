@@ -25,6 +25,7 @@ from .schemas import AgentPlanRequest, ApprovalDecisionRequest, CampaignDraftReq
 
 STATIC_DIR = Path(__file__).with_name("static")
 MAX_API_BODY_BYTES = 1_000_000
+DECISION_IDEMPOTENCY_PATHS = frozenset({"/api/v1/decide", "/api/v1/realtime/decision"})
 PRODUCTION_SYSTEM_PATHS = frozenset(
     {
         "/api/health",
@@ -38,14 +39,15 @@ PRODUCTION_SYSTEM_PATHS = frozenset(
 
 
 class ApiBodyLimitMiddleware:
-    """Bound API request bodies by bytes actually received, not just headers.
+    """Bound API writes and reject ambiguous decision idempotency headers.
 
     Content-Length is useful as an early rejection hint but cannot be trusted as
     the sole limit because clients can stream chunked bodies or provide an
     incorrect value. This middleware buffers at most ``max_bytes`` for JSON API
-    writes, then replays the bounded body to FastAPI. Oversized/malformed bodies
-    fail before validation and the HTTP/1.1 connection is closed so unread bytes
-    cannot bleed into a subsequent request.
+    writes, then replays the bounded body to FastAPI. It also rejects duplicate
+    ``Idempotency-Key`` headers on decision endpoints before the request reaches
+    framework header normalization. Early rejections close the HTTP/1.1
+    connection so unread bytes cannot bleed into a subsequent request.
     """
 
     def __init__(self, app: Any, max_bytes: int = MAX_API_BODY_BYTES) -> None:
@@ -74,8 +76,17 @@ class ApiBodyLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
+        scope_headers = scope.get("headers", [])
+        if path in DECISION_IDEMPOTENCY_PATHS:
+            idempotency_header_count = sum(
+                1 for name, _ in scope_headers if name.lower() == b"idempotency-key"
+            )
+            if idempotency_header_count > 1:
+                await self._reject(send, 422, "Idempotency-Key must be supplied at most once")
+                return
+
         raw_length: bytes | None = None
-        for name, value in scope.get("headers", []):
+        for name, value in scope_headers:
             if name.lower() == b"content-length":
                 raw_length = value
                 break
@@ -148,9 +159,9 @@ def create_app() -> Any:
     app.state.decision_engine = decision_engine
     app.state.product_state = product_state
 
-    # Add the byte limiter before CORS so Starlette's middleware stacking leaves
-    # CORS outside it. Rejections from the limiter therefore retain the exact
-    # configured Access-Control-Allow-Origin and remain readable by the Pages UI.
+    # Add the byte/header limiter before CORS so Starlette's middleware stacking
+    # leaves CORS outside it. Rejections therefore retain the exact configured
+    # Access-Control-Allow-Origin and remain readable by the Pages UI.
     app.add_middleware(ApiBodyLimitMiddleware, max_bytes=MAX_API_BODY_BYTES)
     if settings.cors_origins:
         app.add_middleware(
@@ -286,26 +297,16 @@ def create_app() -> Any:
     @app.post("/api/v1/decide", tags=["decisioning"])
     def decide(
         request: DecisionRequest,
-        idempotency_keys: list[str] | None = Header(
+        idempotency_key: str | None = Header(
             default=None,
             alias="Idempotency-Key",
+            min_length=1,
+            max_length=256,
         ),
     ) -> dict[str, Any]:
-        if idempotency_keys is not None and len(idempotency_keys) > 1:
-            raise HTTPException(
-                status_code=422,
-                detail="Idempotency-Key must be supplied at most once",
-            )
-
         normalized_key: str | None = None
-        if idempotency_keys:
-            raw_key = idempotency_keys[0]
-            if len(raw_key) > 256:
-                raise HTTPException(
-                    status_code=422,
-                    detail="Idempotency-Key must be at most 256 characters",
-                )
-            normalized_key = raw_key.strip()
+        if idempotency_key is not None:
+            normalized_key = idempotency_key.strip()
             if not normalized_key:
                 raise HTTPException(
                     status_code=422,
