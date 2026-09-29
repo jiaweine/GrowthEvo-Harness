@@ -1,0 +1,50 @@
+name: CodeQL
+
+on:
+  pull_request:
+    paths:
+      - "growthevo/**"
+      - "apps/mobile/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - ".github/workflows/codeql.yml"
+  push:
+    branches: [main]
+    paths:
+      - "growthevo/**"
+      - "apps/mobile/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - ".github/workflows/codeql.yml"
+  schedule:
+    - cron: "23 4 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - python
+          - javascript-typescript
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3, 2026-09-24
+        with:
+          languages: ${{ matrix.language }}
+      - name: Analyze
+        uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3, 2026-09-24
+        with:
+          category: "/language:${{ matrix.language }}"
