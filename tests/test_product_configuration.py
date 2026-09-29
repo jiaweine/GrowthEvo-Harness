@@ -5,7 +5,7 @@ import argparse
 import pytest
 
 pydantic = pytest.importorskip("pydantic")
-fastapi = pytest.importorskip("fastapi")
+pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
@@ -87,6 +87,16 @@ def test_not_ready_production_blocks_business_apis(monkeypatch: pytest.MonkeyPat
         json={"entity_id": "u-prod", "placement": "checkout"},
     )
     assert decision.status_code == 503
+
+
+def test_fail_closed_production_response_keeps_exact_cors_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    origin = "https://jiaweine.github.io"
+    monkeypatch.setenv("GROWTHEVO_MODE", "production")
+    monkeypatch.setenv("GROWTHEVO_CORS_ORIGINS", origin)
+    client = TestClient(create_app())
+    response = client.get("/api/v1/dashboard", headers={"Origin": origin})
+    assert response.status_code == 503
+    assert response.headers.get("access-control-allow-origin") == origin
 
 
 def test_declared_oversized_api_body_is_rejected_before_parsing() -> None:
