@@ -158,6 +158,8 @@ window.GROWTHEVO_CONFIG = {
 
 The production base image is pinned by digest in `Dockerfile`, so rebuilding the same commit does not silently resolve a different `python:3.13-slim` image. Dependabot watches the Docker ecosystem separately so base-image security updates arrive as explicit reviewable PRs rather than tag drift.
 
+The Python 3.13 Web runtime graph is independently constrained by `constraints/web-container-py313.txt`. The container still installs the repository's `web` extra, but pip must resolve FastAPI, Uvicorn and their runtime transitive dependencies to the exact versions in that lock. This lock is deliberately separate from the research/evidence pins and any change to it triggers Product Surface and Product Stress CI.
+
 Reference/local container:
 
 ```bash
@@ -252,6 +254,7 @@ It is reasonable for a solo maintainer to physically run only `local + public de
 - Prefer GitHub Actions OIDC over long-lived cloud deployment credentials.
 - Keep provenance/attestations for released packages and images.
 - Pin external GitHub Actions and the production base image to immutable SHAs/digests.
+- Lock the Python 3.13 Web container runtime separately from research/evidence dependencies.
 - Run CodeQL for Python and JavaScript/TypeScript.
 - Let Dependabot update Actions, the Docker base image and mobile npm dependencies; keep Python research pins under evidence-aware review.
 
