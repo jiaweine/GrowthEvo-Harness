@@ -1,31 +1,30 @@
 # GrowthEvo Deployment Architecture
 
-This repository supports two deployment profiles. The default profile is intentionally usable by a solo maintainer with **no enterprise credentials**; the upgrade path keeps enterprise boundaries without forcing enterprise infrastructure on day one.
+GrowthEvo supports a credential-free public demo and an enterprise-shaped solo-production upgrade path. The goal is **enterprise discipline without enterprise infrastructure overhead**.
 
-## Profile A — GitHub-only public demo (default)
+## Profile A — GitHub-only public demo
 
 ```text
 GitHub repository
-  ├─ Pull Requests + branch review
+  ├─ Pull Requests + review
   ├─ GitHub Actions
   │   ├─ Python 3.11–3.14 core tests
   │   ├─ Product Surface CI
   │   ├─ Product / Core stress tests
-  │   ├─ container smoke test
-  │   ├─ real Chrome UI screenshots
-  │   ├─ Mobile TypeScript check
+  │   ├─ container smoke + readiness
+  │   ├─ real Chrome screenshots
+  │   ├─ API-mode browser integration
+  │   ├─ Mobile npm-ci + TypeScript
   │   └─ Pages build + deploy
-  ├─ GitHub Pages
-  │   ├─ high-fidelity Web UI
-  │   ├─ PWA shell
-  │   ├─ demo causal / campaign fixtures
-  │   └─ local simulated mutations
-  └─ release provenance / attestations already present in the repository
+  └─ GitHub Pages
+      ├─ high-fidelity Web UI
+      ├─ PWA shell
+      └─ clearly labelled synthetic/reference fixtures
 ```
 
-This mode requires **no API keys, database, LLM key, cloud account, or enterprise identity provider**. It is the correct public portfolio / research demo mode.
+This mode requires **no API key, database, LLM credential, cloud account, or enterprise IdP**. The sidebar explicitly labels it `Demo Workspace · Synthetic Data` and no external connector is presented as live.
 
-The browser config is generated during the Pages build:
+The Pages build emits:
 
 ```js
 window.GROWTHEVO_CONFIG = {
@@ -34,11 +33,9 @@ window.GROWTHEVO_CONFIG = {
 }
 ```
 
-The sidebar labels this workspace `Demo Workspace · Synthetic Data`. No fake external integrations are presented as live. Campaign sends, approvals and agent execution are demo/reference state transitions.
+## Profile B — solo production, enterprise-shaped
 
-## Profile B — Solo production, enterprise-shaped
-
-When a real backend is needed, keep GitHub as the control plane and add only two runtime services:
+When private/real state is introduced, keep GitHub as the control plane and add a small OCI API runtime plus managed services:
 
 ```text
                          GitHub
@@ -48,13 +45,13 @@ When a real backend is needed, keep GitHub as the control plane and add only two
             GitHub Pages        OCI image
               Web / PWA        FastAPI API
                    |               |
-                   | HTTPS         v
-                   +---------- FastAPI service
-                                 |
-                    +------------+------------+
-                    |                         |
-                PostgreSQL                Object store
-          product/event/evidence       large artifacts only
+                   | HTTPS         |
+                   +---------------+
+                                   |
+                    +--------------+--------------+
+                    |              |              |
+                PostgreSQL      Identity       Object store
+               durable state   auth / JWT      large artifacts
 ```
 
 Recommended responsibilities:
@@ -64,27 +61,26 @@ Recommended responsibilities:
 | Source / review | GitHub | one control plane |
 | CI/CD | GitHub Actions | existing CI stays authoritative |
 | Web / PWA | GitHub Pages | zero-server frontend hosting |
-| API | repository `Dockerfile` + existing FastAPI app | keeps research + product API in Python |
-| Container registry | GitHub Container Registry | release image stays attached to repository |
-| Durable state | managed PostgreSQL | approvals, campaigns, decision / exposure / outcome logs |
-| Large artifacts | S3-compatible object storage | model/evidence bundles, creative assets |
-| Async work | Postgres outbox + worker initially | avoids operating Kafka/Temporal for a solo project |
-| Observability | structured JSON + OpenTelemetry interface | portable to Sentry/Grafana/OTel collector later |
-| Secrets | GitHub Environment + OIDC where the cloud supports it | avoids long-lived cloud deploy keys |
+| API | repository `Dockerfile` + FastAPI | keeps research + product API in Python |
+| Container registry | GitHub Container Registry | image stays attached to repository |
+| Durable state | managed PostgreSQL | approvals, campaigns, idempotency, decision/exposure/outcome logs |
+| Authentication | managed OIDC/JWT provider (for example Supabase Auth) | identity must be active before production readiness |
+| Large artifacts | S3-compatible object storage | model/evidence bundles and creative assets |
+| Async work | Postgres outbox + worker initially | avoids premature Kafka/Temporal operations |
+| Observability | structured JSON + OpenTelemetry interface | portable to Sentry/Grafana/OTel later |
+| Secrets | GitHub Environment + OIDC where supported | avoids long-lived deploy credentials |
 
-For a personal project, **do not start with Kubernetes, Kafka, a service mesh, a separate feature store, or a full Temporal cluster**. Keep those as adapter boundaries. The repository's scientific evidence and policy contracts matter more than infrastructure theatre.
+For a personal project, **do not begin with Kubernetes, Kafka, a service mesh, a separate feature store, or a full Temporal cluster**. Keep those as adapter boundaries. The scientific evidence, audit and policy contracts matter more than infrastructure theatre.
 
 ## Runtime modes
 
-The API runtime has three explicit modes:
-
 ```text
 demo        -> synthetic/reference product data; credential-free
-api         -> strict API client mode / reference-contract backend
-production  -> production declaration; readiness requires an active durable persistence adapter
+api         -> strict reference-contract backend; no silent demo substitution
+production  -> real-production declaration; readiness requires active persistence AND active authentication
 ```
 
-The backend exposes:
+System endpoints:
 
 ```text
 GET /api/health
@@ -93,33 +89,62 @@ GET /api/v1/system/runtime
 GET /api/v1/system/connectors
 ```
 
-`/api/ready` returns HTTP 503 when `GROWTHEVO_MODE=production` unless durable persistence is **actually active**. A `DATABASE_URL` by itself only means configuration is present; it does not turn the current in-memory product state into PostgreSQL-backed state. Runtime responses expose `configured`, `active`, and `backend` separately and never return database credentials.
+`/api/health` is process liveness. `/api/ready` is traffic readiness. The container healthcheck follows `/api/ready`.
 
-The current product APIs still identify themselves as **reference-contract** implementations. Merely setting a database, object-store, LLM, or channel environment variable does not claim that a connector is live; those connectors report `configured_not_active`, and `side_effects_enabled` remains false until real adapters are wired.
+In `production`, business APIs fail closed with HTTP 503 until both of these are **actually active**:
 
-## Critical anti-fake-data rule
+1. a durable persistence adapter;
+2. an authentication/identity adapter.
 
-GitHub Pages demo mode may use synthetic fixtures. Strict API/production mode may not silently fall back to them.
+A `DATABASE_URL`, `SUPABASE_URL`, issuer URL, JWKS URL, or other configuration variable only means **configured**. It does not make a connector **active**. The current branch intentionally reports:
 
-If a configured API is unavailable, the UI shows an explicit production API outage state instead of substituting synthetic values. This prevents a backend outage from looking like valid campaign or decision data.
+```text
+persistence.backend = reference-memory
+persistence.active = false
+authentication.backend = none
+authentication.active = false
+```
+
+Therefore the current reference branch cannot accidentally become production-ready just because credentials were added to the environment.
+
+External side effects are also disabled in the current reference runtime. LLM, object-store and channel variables are exposed only as safe `configured_not_active` connector states until real adapters are initialized.
+
+## Strict API / anti-fake-data rule
+
+GitHub Pages demo mode may use synthetic fixtures. API/production mode may **not** silently substitute synthetic data when the backend fails.
+
+The browser probes `/api/ready`; failures render an explicit API-unavailable state. The PWA service worker never caches API responses or replaces API failures with `index.html`.
+
+In API mode these workbenches are wired directly to `/api/v1/*`:
+
+- Opportunity Map;
+- Experiment Center;
+- realtime Action Registry + Decision Log;
+- Harness Runs;
+- Governance / Approval;
+- Evolution candidates.
+
+Pages that still contain static product-design fixtures display an explicit `Reference UI Fixture` banner rather than masquerading as live state.
 
 ## Cross-origin Pages → API
 
-GitHub Pages and the API are different origins. Configure the API with the exact allowed Pages origin:
+Configure the API with the **exact** Pages origin:
 
 ```text
 GROWTHEVO_CORS_ORIGINS=https://jiaweine.github.io
 ```
 
-Do not use `*` once authentication or user-specific data is introduced.
+Wildcards, credential-bearing origins and origins containing paths/query/fragment are rejected. CORS remains exact even on body-limit and fail-closed error responses.
 
-The Pages deployment gets the API base from a repository/environment variable:
+The Pages build gets its API base from:
 
 ```text
 GROWTHEVO_API_BASE=https://api.example.com
 ```
 
-The Pages build then emits:
+Remote Pages API bases must use HTTPS. Cleartext `http://` is accepted only for loopback development addresses because GitHub Pages itself is HTTPS and browsers block insecure mixed-content APIs.
+
+The build emits:
 
 ```js
 window.GROWTHEVO_CONFIG = {
@@ -130,7 +155,7 @@ window.GROWTHEVO_CONFIG = {
 
 ## Container run
 
-The repository includes a non-root production-shaped container. Local/reference smoke run:
+Reference/local container:
 
 ```bash
 docker build -t growthevo-api .
@@ -140,7 +165,7 @@ docker run --rm -p 8765:8765 \
   growthevo-api
 ```
 
-Then open:
+Then inspect:
 
 ```text
 http://127.0.0.1:8765/api/health
@@ -148,41 +173,78 @@ http://127.0.0.1:8765/api/ready
 http://127.0.0.1:8765/api/docs
 ```
 
-For an eventual hosted production service, the shape remains:
+A future production configuration will look roughly like:
 
 ```text
 GROWTHEVO_MODE=production
 GROWTHEVO_ENV=production
 DATABASE_URL=<managed PostgreSQL URL>
+GROWTHEVO_AUTH_ISSUER=<OIDC issuer>
+GROWTHEVO_AUTH_JWKS_URL=<JWKS URL>
 GROWTHEVO_CORS_ORIGINS=https://jiaweine.github.io
 ```
 
-But this branch intentionally **will not become ready merely from those variables**. The PostgreSQL repository/outbox/decision-log adapter must be implemented and initialized first. Until then, use `demo` for the public Pages experience and `api` for the reference container. Provider-specific credentials remain server-side only.
+Those variables alone still **do not** make this branch ready. The persistence and auth adapters must be implemented, initialized and report active state first.
+
+## Request / state safety boundaries
+
+The reference runtime intentionally includes production-shaped protections even before durable adapters exist:
+
+- 1 MB API request-body limit is enforced against bytes actually received, not only `Content-Length`;
+- unknown request fields fail validation instead of being silently ignored;
+- consent requires a real JSON boolean;
+- unknown Action Registry IDs fail closed;
+- `NO_TREATMENT` stays in the candidate set;
+- idempotency keys are request-bound and conflicting reuse returns HTTP 409;
+- reference idempotency/campaign state is bounded in memory;
+- approval decisions are first-write atomic: identical retries are idempotent, conflicting later decisions return HTTP 409;
+- independent FastAPI app instances do not share reference campaign, approval or decision state;
+- API responses are `Cache-Control: no-store`.
+
+## Decision/OPE semantics
+
+The reference decision endpoint is not presented as causal optimality. Its reference policy now **actually samples from the distribution it logs** using stable hash bucketing. For every non-fallback decision:
+
+```text
+propensity == action_distribution[selected_action]
+sum(action_distribution) ~= 1
+```
+
+Guardrail fallbacks log a one-hot `NO_TREATMENT: 1.0` distribution. This makes the reference contract internally coherent for behavior-propensity logging while the repository's locked CATE/OPE/Safe-PI stack remains authoritative for real production policy work.
+
+## Mobile reproducibility
+
+`apps/mobile/package-lock.json` is committed and CI uses `npm ci`. This prevents the same commit from resolving a different transitive npm dependency graph on a later date. Dependabot covers GitHub Actions, Python dependencies and the mobile npm project weekly.
+
+For a physical Expo device, explicitly set the API address; `127.0.0.1` points to the device itself:
+
+```bash
+EXPO_PUBLIC_GROWTHEVO_API=http://YOUR-LAN-IP:8765 npm start
+```
+
+The mobile API client validates the configured URL, has a request timeout, preserves caller cancellation and surfaces API failures instead of replacing them with demo data.
 
 ## Logical environments
 
-Use three logical environments even if only production is publicly hosted:
-
 ```text
-local       -> localhost FastAPI + deterministic fixture state
+local       -> localhost FastAPI + deterministic reference state
 preview     -> PR CI artifact / optional temporary API
-production  -> GitHub Pages + configured API_BASE + active durable backend
+production  -> Pages + HTTPS API + active durable persistence + active authentication
 ```
 
-For a solo project it is reasonable to physically run only `local + public demo` first, then add a managed production database/runtime when real users or private data appear.
+It is reasonable for a solo maintainer to physically run only `local + public demo` until real users/private data appear.
 
 ## Security baseline
 
-- Keep `NO_TREATMENT` a first-class action.
-- Never allow the browser to hold channel, database, LLM or cloud provider secrets.
-- External side effects remain server-side and pass Action Registry, consent, budget, frequency, approval and canary gates.
-- Use GitHub Environments for production deployment policy.
-- Prefer GitHub Actions OIDC to long-lived cloud credentials when adding a cloud runtime.
-- Keep build provenance / attestations for released packages and images.
+- Never put channel, database, LLM or cloud-provider secrets in browser/mobile public config.
 - Do not put production PII in Pages, Actions artifacts, issues or public benchmark files.
-- Keep exact CORS origins rather than permissive wildcards.
-- Treat `/api/ready` as the deployment readiness probe and `/api/health` as process liveness.
-- Treat “configured” and “active” as different connector states; deployment configuration alone is not proof of a working integration.
+- Keep exact CORS origins.
+- Require authentication before production readiness.
+- Keep `NO_TREATMENT`, consent, budget, frequency, approval and canary gates explicit.
+- Use GitHub Environments for production deployment policy.
+- Prefer GitHub Actions OIDC over long-lived cloud deployment credentials.
+- Keep provenance/attestations for released packages and images.
+- Dependabot monitors Actions, Python and mobile npm dependencies.
 
 ## GitHub Pages setup
 
@@ -190,18 +252,18 @@ After this branch lands on `main`:
 
 1. Repository **Settings → Pages**.
 2. Set **Source** to **GitHub Actions**.
-3. Run `GrowthEvo Pages` or push a web change to `main`.
-4. The site will be published at the repository's Pages URL.
+3. Run `GrowthEvo Pages` or push a relevant web change to `main`.
+4. The site publishes at the repository Pages URL.
 
 No secrets are needed for demo mode.
 
 ## Why GitHub Pages is not the backend
 
-GitHub Pages serves static files. It does not run FastAPI, background workers or a database. Therefore GrowthEvo deliberately has:
+GitHub Pages serves static files. It does not run FastAPI, background workers, authentication enforcement or a database. GrowthEvo therefore separates:
 
-- a credential-free, fully navigable **demo mode** for Pages;
-- the FastAPI application plus container for real API/reference mode;
-- a small configuration boundary between them;
-- an explicit readiness contract so `production` cannot pretend to be ready until durable persistence is genuinely wired and active.
+- credential-free public demo/PWA;
+- FastAPI reference API/container;
+- future authenticated durable production adapters;
+- explicit readiness and connector activation contracts.
 
-This prevents a static portfolio deployment or a configured-but-unwired database URL from being misrepresented as a real campaign execution backend while keeping the project inexpensive to operate.
+This keeps the project inexpensive without misrepresenting a static portfolio deployment or a configured-but-unwired connector as a real production execution platform.
