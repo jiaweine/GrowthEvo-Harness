@@ -34,10 +34,12 @@ def test_runtime_contract_is_public_safe(monkeypatch: pytest.MonkeyPatch) -> Non
     assert runtime["side_effects_enabled"] is False
     assert runtime["execution_mode"] == "reference-only"
     assert runtime["persistence"]["configured"] is False
+    assert runtime["persistence"]["active"] is False
+    assert runtime["persistence"]["backend"] == "reference-memory"
     assert client.get("/api/ready").status_code == 200
 
 
-def test_production_readiness_requires_durable_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_readiness_requires_active_durable_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GROWTHEVO_MODE", "production")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("GROWTHEVO_DATABASE_URL", raising=False)
@@ -45,18 +47,25 @@ def test_production_readiness_requires_durable_persistence(monkeypatch: pytest.M
     response = client.get("/api/ready")
     assert response.status_code == 503
     assert response.json()["status"] == "not_ready"
+    assert response.json()["persistence"]["active"] is False
 
 
-def test_runtime_never_exposes_database_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_database_url_is_configuration_not_fake_activation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GROWTHEVO_MODE", "production")
     monkeypatch.setenv("DATABASE_URL", "postgresql://private_user:private_password@db.example.test:5432/growthevo")
     client = TestClient(create_app())
     response = client.get("/api/ready")
-    assert response.status_code == 200
+    assert response.status_code == 503
     payload_text = response.text
     assert "private_password" not in payload_text
     assert "private_user" not in payload_text
-    assert response.json()["persistence"]["host"] == "db.example.test"
+    payload = response.json()
+    assert payload["persistence"]["configured"] is True
+    assert payload["persistence"]["active"] is False
+    assert payload["persistence"]["host"] == "db.example.test"
+    assert payload["persistence"]["backend"] == "reference-memory"
+    connector = next(item for item in payload["connectors"] if item["id"] == "persistence")
+    assert connector["state"] == "configured_not_active"
 
 
 def test_pages_origin_can_be_enabled_explicitly(monkeypatch: pytest.MonkeyPatch) -> None:
