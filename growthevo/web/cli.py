@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+import os
+
+
+def _default_port() -> int:
+    value = os.getenv("PORT") or os.getenv("GROWTHEVO_PORT") or "8765"
+    try:
+        return int(value)
+    except ValueError:
+        return 8765
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the GrowthEvo web dashboard.")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--host", default=os.getenv("GROWTHEVO_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=_default_port())
     parser.add_argument("--reload", action="store_true")
     args = parser.parse_args(argv)
 
