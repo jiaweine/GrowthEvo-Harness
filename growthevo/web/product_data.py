@@ -10,6 +10,7 @@ from growthevo._version import __version__
 
 UTC = timezone.utc
 _lock = threading.Lock()
+MAX_REFERENCE_CAMPAIGNS = 1_000
 
 KPI = [
     {"id":"incremental_revenue","label":"增量收入","value":2846320,"formatted":"¥ 2,846,320","delta":"+23.4%","spark":[18,22,21,29,32,28,39,43,41,51,47,62]},
@@ -69,15 +70,38 @@ EVIDENCE = [
 
 
 def campaigns() -> list[dict[str, Any]]:
-    with _lock: return copy.deepcopy(_campaign_state)
+    with _lock:
+        return copy.deepcopy(_campaign_state)
+
 
 def approvals() -> list[dict[str, Any]]:
-    with _lock: return copy.deepcopy(_approval_state)
+    with _lock:
+        return copy.deepcopy(_approval_state)
 
-def opportunities() -> list[dict[str, Any]]: return copy.deepcopy(OPPORTUNITIES)
-def experiments() -> list[dict[str, Any]]: return copy.deepcopy(EXPERIMENTS)
-def harness_runs() -> list[dict[str, Any]]: return copy.deepcopy(HARNESS_RUNS)
-def evolution_candidates() -> list[dict[str, Any]]: return copy.deepcopy(EVOLUTION)
+
+def opportunities() -> list[dict[str, Any]]:
+    return copy.deepcopy(OPPORTUNITIES)
+
+
+def experiments() -> list[dict[str, Any]]:
+    return copy.deepcopy(EXPERIMENTS)
+
+
+def harness_runs() -> list[dict[str, Any]]:
+    return copy.deepcopy(HARNESS_RUNS)
+
+
+def evolution_candidates() -> list[dict[str, Any]]:
+    return copy.deepcopy(EVOLUTION)
+
+
+def reference_state_stats() -> dict[str, int]:
+    with _lock:
+        return {
+            "campaigns": len(_campaign_state),
+            "max_campaigns": MAX_REFERENCE_CAMPAIGNS,
+            "approvals": len(_approval_state),
+        }
 
 
 def dashboard_payload() -> dict[str, Any]:
@@ -97,7 +121,12 @@ def decide_approval(approval_id: str, decision: str, note: str) -> dict[str, Any
 
 def create_campaign_draft(name: str, goal: str, audience: str, budget: float, candidate_action_ids: list[str]) -> dict[str, Any]:
     item = {"id":f"cmp_{uuid.uuid4().hex[:8]}","name":name,"type":"Campaign","status":"Draft","goal":goal,"audience":audience,"budget":budget,"candidate_action_ids":candidate_action_ids,"population":None,"started_at":None,"expected_lift":"pending causal evaluation","evidence_tier":"D","mode":"Draft"}
-    with _lock: _campaign_state.insert(0, item)
+    with _lock:
+        _campaign_state.insert(0, item)
+        # This is a reference/demo state store, not durable production storage.
+        # Keep it bounded so soak tests and long-running demos cannot grow memory
+        # without limit while preserving the newest drafts for the UI.
+        del _campaign_state[MAX_REFERENCE_CAMPAIGNS:]
     return copy.deepcopy(item)
 
 
