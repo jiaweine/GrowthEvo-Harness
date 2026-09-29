@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 
 ClaimType = Literal["FACT", "ESTIMATE", "INFERENCE", "HYPOTHESIS", "IDEA"]
@@ -51,7 +51,9 @@ class DecisionRequest(RequestModel):
     placement: str = Field(min_length=1, max_length=128)
     context: dict[str, Any] = Field(default_factory=dict, max_length=128)
     candidate_action_ids: list[ActionId] | None = Field(default=None, max_length=64)
-    consent_state: bool = True
+    # Consent is a hard safety boundary. Do not coerce strings such as "yes" or
+    # integers into truthy values; clients must send a real JSON boolean.
+    consent_state: StrictBool = True
     frequency_remaining: int = Field(default=1, ge=0)
     budget_remaining: float = Field(default=1000.0, ge=0, allow_inf_nan=False)
     context_freshness_seconds: int = Field(default=0, ge=0)
