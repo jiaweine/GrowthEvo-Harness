@@ -69,6 +69,98 @@ def _github_json(path: str) -> Any:
         raise RuntimeError(f"GitHub API request failed for {path}: {exc.reason}") from exc
 
 
+def _verify_ci_run(
+    *,
+    repository: str,
+    head_sha: str,
+    event: str,
+    identity: str,
+    event_label: str,
+) -> dict[str, object]:
+    runs_payload = _github_json(
+        f"repos/{repository}/actions/runs"
+        f"?head_sha={head_sha}&event={event}&per_page=100"
+    )
+    if not isinstance(runs_payload, dict) or not isinstance(
+        runs_payload.get("workflow_runs"), list
+    ):
+        raise RuntimeError("GitHub workflow-runs response is malformed")
+
+    matching_runs = [
+        run
+        for run in runs_payload["workflow_runs"]
+        if isinstance(run, dict)
+        and run.get("head_sha") == head_sha
+        and run.get("event") == event
+        and run.get("name") == _CI_WORKFLOW_NAME
+        and run.get("path") == _CI_WORKFLOW_PATH
+    ]
+    if not matching_runs:
+        raise RuntimeError(
+            f"{identity} {head_sha} has no {_CI_WORKFLOW_NAME} {event_label} run"
+        )
+
+    ci_run = max(
+        matching_runs,
+        key=lambda run: (
+            int(run.get("id") or 0),
+            int(run.get("run_attempt") or 0),
+        ),
+    )
+    if ci_run.get("status") != "completed" or ci_run.get("conclusion") != "success":
+        raise RuntimeError(
+            f"latest {_CI_WORKFLOW_NAME} run for {identity} {head_sha} "
+            f"is not successful: status={ci_run.get('status')!r}, "
+            f"conclusion={ci_run.get('conclusion')!r}"
+        )
+    run_id = ci_run.get("id")
+    if isinstance(run_id, bool) or not isinstance(run_id, int):
+        raise RuntimeError(f"{identity} CI run is missing a numeric run id")
+
+    jobs_payload = _github_json(
+        f"repos/{repository}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"
+    )
+    if not isinstance(jobs_payload, dict) or not isinstance(jobs_payload.get("jobs"), list):
+        raise RuntimeError("GitHub workflow-jobs response is malformed")
+
+    jobs_by_name: dict[str, list[dict[str, Any]]] = {}
+    for job in jobs_payload["jobs"]:
+        if not isinstance(job, dict):
+            continue
+        name = job.get("name")
+        if isinstance(name, str):
+            jobs_by_name.setdefault(name, []).append(job)
+
+    verified_jobs: list[dict[str, object]] = []
+    for name in _REQUIRED_CI_JOBS:
+        jobs = jobs_by_name.get(name, [])
+        if len(jobs) != 1:
+            raise RuntimeError(
+                f"{identity} CI run {run_id} must contain exactly one latest job named "
+                f"{name!r}; found {len(jobs)}"
+            )
+        job = jobs[0]
+        if job.get("status") != "completed" or job.get("conclusion") != "success":
+            raise RuntimeError(
+                f"{identity} CI job {name!r} is not successful: "
+                f"status={job.get('status')!r}, conclusion={job.get('conclusion')!r}"
+            )
+        verified_jobs.append(
+            {
+                "name": name,
+                "job_id": job.get("id"),
+                "status": "completed",
+                "conclusion": "success",
+            }
+        )
+
+    return {
+        "run_id": run_id,
+        "run_attempt": ci_run.get("run_attempt"),
+        "jobs": verified_jobs,
+    }
+
+
 def _verify_reviewed_pr_and_ci(
     *,
     repository: str,
@@ -101,80 +193,20 @@ def _verify_reviewed_pr_and_ci(
         raise RuntimeError("reviewed pull request is missing its head SHA")
     head_sha = head["sha"]
 
-    runs_payload = _github_json(
-        f"repos/{repository}/actions/runs"
-        f"?head_sha={head_sha}&event=pull_request&per_page=100"
+    reviewed_ci = _verify_ci_run(
+        repository=repository,
+        head_sha=head_sha,
+        event="pull_request",
+        identity="reviewed PR head",
+        event_label="pull-request",
     )
-    if not isinstance(runs_payload, dict) or not isinstance(
-        runs_payload.get("workflow_runs"), list
-    ):
-        raise RuntimeError("GitHub workflow-runs response is malformed")
-    matching_runs = [
-        run
-        for run in runs_payload["workflow_runs"]
-        if isinstance(run, dict)
-        and run.get("head_sha") == head_sha
-        and run.get("event") == "pull_request"
-        and run.get("name") == _CI_WORKFLOW_NAME
-        and run.get("path") == _CI_WORKFLOW_PATH
-    ]
-    if not matching_runs:
-        raise RuntimeError(
-            f"reviewed PR head {head_sha} has no {_CI_WORKFLOW_NAME} pull-request run"
-        )
-    ci_run = max(
-        matching_runs,
-        key=lambda run: (
-            int(run.get("id") or 0),
-            int(run.get("run_attempt") or 0),
-        ),
+    landed_ci = _verify_ci_run(
+        repository=repository,
+        head_sha=expected_sha,
+        event="push",
+        identity="landed main commit",
+        event_label="push",
     )
-    if ci_run.get("status") != "completed" or ci_run.get("conclusion") != "success":
-        raise RuntimeError(
-            f"latest {_CI_WORKFLOW_NAME} run for reviewed PR head {head_sha} "
-            f"is not successful: status={ci_run.get('status')!r}, "
-            f"conclusion={ci_run.get('conclusion')!r}"
-        )
-    run_id = ci_run.get("id")
-    if isinstance(run_id, bool) or not isinstance(run_id, int):
-        raise RuntimeError("reviewed CI run is missing a numeric run id")
-
-    jobs_payload = _github_json(
-        f"repos/{repository}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"
-    )
-    if not isinstance(jobs_payload, dict) or not isinstance(jobs_payload.get("jobs"), list):
-        raise RuntimeError("GitHub workflow-jobs response is malformed")
-
-    jobs_by_name: dict[str, list[dict[str, Any]]] = {}
-    for job in jobs_payload["jobs"]:
-        if not isinstance(job, dict):
-            continue
-        name = job.get("name")
-        if isinstance(name, str):
-            jobs_by_name.setdefault(name, []).append(job)
-
-    verified_jobs: list[dict[str, object]] = []
-    for name in _REQUIRED_CI_JOBS:
-        jobs = jobs_by_name.get(name, [])
-        if len(jobs) != 1:
-            raise RuntimeError(
-                f"reviewed CI run {run_id} must contain exactly one latest job named "
-                f"{name!r}; found {len(jobs)}"
-            )
-        job = jobs[0]
-        if job.get("status") != "completed" or job.get("conclusion") != "success":
-            raise RuntimeError(
-                f"reviewed CI job {name!r} is not successful: "
-                f"status={job.get('status')!r}, conclusion={job.get('conclusion')!r}"
-            )
-        verified_jobs.append(
-            {
-                "name": name,
-                "job_id": job.get("id"),
-                "status": "completed",
-                "conclusion": "success",
-            }
-        )
 
     number = pull.get("number")
     if isinstance(number, bool) or not isinstance(number, int):
@@ -187,10 +219,18 @@ def _verify_reviewed_pr_and_ci(
         "reviewed_pull_request_base_ref": trusted_branch,
         "reviewed_ci_workflow_name": _CI_WORKFLOW_NAME,
         "reviewed_ci_workflow_path": _CI_WORKFLOW_PATH,
-        "reviewed_ci_run_id": run_id,
-        "reviewed_ci_run_attempt": ci_run.get("run_attempt"),
-        "reviewed_ci_jobs": verified_jobs,
+        "reviewed_ci_run_id": reviewed_ci["run_id"],
+        "reviewed_ci_run_attempt": reviewed_ci["run_attempt"],
+        "reviewed_ci_jobs": reviewed_ci["jobs"],
         "reviewed_ci_verified": True,
+        "landed_main_ci_workflow_name": _CI_WORKFLOW_NAME,
+        "landed_main_ci_workflow_path": _CI_WORKFLOW_PATH,
+        "landed_main_ci_commit_sha": expected_sha,
+        "landed_main_ci_event": "push",
+        "landed_main_ci_run_id": landed_ci["run_id"],
+        "landed_main_ci_run_attempt": landed_ci["run_attempt"],
+        "landed_main_ci_jobs": landed_ci["jobs"],
+        "landed_main_ci_verified": True,
     }
 
 
