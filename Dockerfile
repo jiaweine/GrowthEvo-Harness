@@ -8,12 +8,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
 COPY constraints/web-container-py313.txt ./constraints/web-container-py313.txt
 COPY growthevo ./growthevo
+# The web container runs directly from the checked-in source tree. Avoid building
+# the local project through a separate PEP 517 isolation environment, whose
+# setuptools/wheel resolver would otherwise sit outside the runtime lock.
 RUN python -m pip install --disable-pip-version-check \
     --constraint constraints/web-container-py313.txt \
-    '.[web]'
+    fastapi==0.141.1 uvicorn==0.54.0
 
 RUN useradd --create-home --uid 10001 growthevo && chown -R growthevo:growthevo /app
 USER growthevo
@@ -26,4 +28,4 @@ EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/ready', timeout=3)" || exit 1
 
-CMD ["growthevo-web"]
+CMD ["python", "-m", "growthevo.web.cli"]
