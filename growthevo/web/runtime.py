@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import re
 from urllib.parse import urlparse
 
 
 _VALID_MODES = {"demo", "api", "production"}
+_ENVIRONMENT_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
 
 
 def _cors_origins(value: str | None) -> tuple[str, ...]:
@@ -49,6 +51,15 @@ def _configured(*names: str) -> bool:
     return any(bool(os.getenv(name, "").strip()) for name in names)
 
 
+def _environment(value: str | None) -> str:
+    environment = (value or "local").strip().lower() or "local"
+    if _ENVIRONMENT_RE.fullmatch(environment) is None:
+        raise ValueError(
+            "invalid GROWTHEVO_ENV; use 1-64 lowercase letters, digits, dot, underscore, or hyphen"
+        )
+    return environment
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeSettings:
     """Public-safe runtime configuration and production activation gates.
@@ -79,7 +90,7 @@ class RuntimeSettings:
             raise ValueError(
                 f"invalid GROWTHEVO_MODE {raw_mode!r}; expected one of {sorted(_VALID_MODES)}"
             )
-        environment = os.getenv("GROWTHEVO_ENV", "local").strip().lower() or "local"
+        environment = _environment(os.getenv("GROWTHEVO_ENV"))
         database_url = os.getenv("GROWTHEVO_DATABASE_URL") or os.getenv("DATABASE_URL")
         database_url = database_url.strip() if database_url else None
         cors_origins = _cors_origins(os.getenv("GROWTHEVO_CORS_ORIGINS"))
