@@ -69,6 +69,14 @@ def _github_json(path: str) -> Any:
         raise RuntimeError(f"GitHub API request failed for {path}: {exc.reason}") from exc
 
 
+def _run_references_pull(run: dict[str, Any], pull_request_number: int) -> bool:
+    pull_requests = run.get("pull_requests")
+    return isinstance(pull_requests, list) and any(
+        isinstance(pull, dict) and pull.get("number") == pull_request_number
+        for pull in pull_requests
+    )
+
+
 def _verify_ci_run(
     *,
     repository: str,
@@ -76,6 +84,8 @@ def _verify_ci_run(
     event: str,
     identity: str,
     event_label: str,
+    expected_branch: str | None = None,
+    pull_request_number: int | None = None,
 ) -> dict[str, object]:
     runs_payload = _github_json(
         f"repos/{repository}/actions/runs"
@@ -94,6 +104,11 @@ def _verify_ci_run(
         and run.get("event") == event
         and run.get("name") == _CI_WORKFLOW_NAME
         and run.get("path") == _CI_WORKFLOW_PATH
+        and (expected_branch is None or run.get("head_branch") == expected_branch)
+        and (
+            pull_request_number is None
+            or _run_references_pull(run, pull_request_number)
+        )
     ]
     if not matching_runs:
         raise RuntimeError(
@@ -188,6 +203,9 @@ def _verify_reviewed_pr_and_ci(
             f"merged PR into {trusted_branch}; found {len(matching)}"
         )
     pull = matching[0]
+    number = pull.get("number")
+    if isinstance(number, bool) or not isinstance(number, int):
+        raise RuntimeError("reviewed pull request is missing a numeric PR number")
     head = pull.get("head")
     if not isinstance(head, dict) or not isinstance(head.get("sha"), str):
         raise RuntimeError("reviewed pull request is missing its head SHA")
@@ -199,6 +217,7 @@ def _verify_reviewed_pr_and_ci(
         event="pull_request",
         identity="reviewed PR head",
         event_label="pull-request",
+        pull_request_number=number,
     )
     landed_ci = _verify_ci_run(
         repository=repository,
@@ -206,11 +225,9 @@ def _verify_reviewed_pr_and_ci(
         event="push",
         identity="landed main commit",
         event_label="push",
+        expected_branch=trusted_branch,
     )
 
-    number = pull.get("number")
-    if isinstance(number, bool) or not isinstance(number, int):
-        raise RuntimeError("reviewed pull request is missing a numeric PR number")
     return {
         "reviewed_pull_request_number": number,
         "reviewed_pull_request_url": pull.get("html_url"),
@@ -227,6 +244,7 @@ def _verify_reviewed_pr_and_ci(
         "landed_main_ci_workflow_path": _CI_WORKFLOW_PATH,
         "landed_main_ci_commit_sha": expected_sha,
         "landed_main_ci_event": "push",
+        "landed_main_ci_branch": trusted_branch,
         "landed_main_ci_run_id": landed_ci["run_id"],
         "landed_main_ci_run_attempt": landed_ci["run_attempt"],
         "landed_main_ci_jobs": landed_ci["jobs"],
