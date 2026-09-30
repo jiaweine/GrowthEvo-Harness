@@ -150,6 +150,25 @@ def test_auth_configuration_is_not_fake_activation(monkeypatch: pytest.MonkeyPat
     assert connector["state"] == "configured_not_active"
 
 
+def test_production_cors_requires_https(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROWTHEVO_MODE", "production")
+    monkeypatch.setenv("GROWTHEVO_CORS_ORIGINS", "http://public.example.test")
+    with pytest.raises(ValueError, match="must use https"):
+        create_app()
+
+    monkeypatch.setenv("GROWTHEVO_CORS_ORIGINS", "https://public.example.test")
+    client = TestClient(create_app())
+    response = client.options(
+        "/api/v1/dashboard",
+        headers={
+            "Origin": "https://public.example.test",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://public.example.test"
+
+
 def test_fail_closed_production_response_keeps_exact_cors_origin(monkeypatch: pytest.MonkeyPatch) -> None:
     origin = "https://jiaweine.github.io"
     monkeypatch.setenv("GROWTHEVO_MODE", "production")
