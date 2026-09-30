@@ -51,10 +51,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.12"
+          python-version: "3.13"
           cache: pip
-      - name: Install web product dependencies
-        run: python -m pip install -e '.[web,dev]'
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/web-container-py313.txt
+      - name: Install production-aligned web product dependencies
+        run: python -m pip install --constraint constraints/web-container-py313.txt -e '.[web,dev]'
       - name: Run web product tests
         run: pytest tests/test_web_dashboard.py tests/test_product_*.py
       - name: Check browser JavaScript syntax
