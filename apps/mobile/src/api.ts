@@ -5,13 +5,17 @@ export type Dashboard = {
 };
 
 declare const process: { env: Record<string, string | undefined> };
+declare const __DEV__: boolean;
 
 function normalizeApiBase(value: string | undefined): string {
   const raw = value?.trim().replace(/\/+$/, "") ?? "";
   if (!raw) {
-    // Simulator-friendly fallback only. Physical devices must set the LAN/API
-    // address explicitly because 127.0.0.1 points back to the phone itself.
-    return "http://127.0.0.1:8765";
+    if (__DEV__) {
+      // Simulator-friendly fallback only. Physical devices must set the LAN/API
+      // address explicitly because 127.0.0.1 points back to the phone itself.
+      return "http://127.0.0.1:8765";
+    }
+    throw new Error("EXPO_PUBLIC_GROWTHEVO_API is required outside development");
   }
   let parsed: URL;
   try {
@@ -25,6 +29,9 @@ function normalizeApiBase(value: string | undefined): string {
   if (parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new Error("EXPO_PUBLIC_GROWTHEVO_API must not contain credentials, query strings, or fragments");
   }
+  if (!__DEV__ && parsed.protocol !== 'https:') {
+    throw new Error("production mobile builds require an HTTPS GrowthEvo API");
+  }
   return raw;
 }
 
@@ -37,7 +44,7 @@ export function getApiBase(): string {
 }
 
 export function isSimulatorFallback(): boolean {
-  return !configuredBase?.trim();
+  return __DEV__ && !configuredBase?.trim();
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
