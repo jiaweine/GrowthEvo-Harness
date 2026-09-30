@@ -49,15 +49,6 @@ def _configured(*names: str) -> bool:
     return any(bool(os.getenv(name, "").strip()) for name in names)
 
 
-def _safe_host(value: str | None) -> str | None:
-    if not value:
-        return None
-    try:
-        return urlparse(value.strip()).hostname
-    except ValueError:
-        return None
-
-
 @dataclass(frozen=True, slots=True)
 class RuntimeSettings:
     """Public-safe runtime configuration and production activation gates.
@@ -77,7 +68,6 @@ class RuntimeSettings:
     object_store_configured: bool
     llm_configured: bool
     channel_configured: bool
-    database_host: str | None
     persistence_backend: str
     auth_backend: str
 
@@ -124,7 +114,6 @@ class RuntimeSettings:
                 "META_ACCESS_TOKEN",
                 "GOOGLE_ADS_DEVELOPER_TOKEN",
             ),
-            database_host=_safe_host(database_url),
             persistence_backend=persistence_backend,
             auth_backend=auth_backend,
         )
@@ -210,7 +199,6 @@ class RuntimeSettings:
                 "configured": self.database_configured,
                 "active": self.persistence_active,
                 "backend": self.persistence_backend,
-                "host": self.database_host,
             },
             "authentication": {
                 "configured": self.auth_configured,
