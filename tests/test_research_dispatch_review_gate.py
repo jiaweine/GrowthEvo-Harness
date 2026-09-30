@@ -45,16 +45,23 @@ def _run(
     path: str = ".github/workflows/ci.yml",
     head_sha: str = HEAD_SHA,
     event: str = "pull_request",
+    head_branch: str = "feature",
+    pull_request_number: int | None = 79,
 ) -> dict[str, object]:
+    pull_requests: list[dict[str, int]] = []
+    if pull_request_number is not None:
+        pull_requests.append({"number": pull_request_number})
     return {
         "id": run_id,
         "run_attempt": attempt,
         "head_sha": head_sha,
+        "head_branch": head_branch,
         "event": event,
         "name": "GrowthEvo CI",
         "path": path,
         "status": "completed",
         "conclusion": conclusion,
+        "pull_requests": pull_requests,
     }
 
 
@@ -63,6 +70,8 @@ def _push_run(**overrides: object) -> dict[str, object]:
         "run_id": 344,
         "head_sha": MERGE_SHA,
         "event": "push",
+        "head_branch": "main",
+        "pull_request_number": None,
     }
     values.update(overrides)
     return _run(**values)  # type: ignore[arg-type]
@@ -137,6 +146,7 @@ def test_review_gate_accepts_exact_merged_main_pr_with_green_ci(
     assert [job["name"] for job in result["reviewed_ci_jobs"]] == list(REQUIRED_JOBS)
     assert result["landed_main_ci_commit_sha"] == MERGE_SHA
     assert result["landed_main_ci_event"] == "push"
+    assert result["landed_main_ci_branch"] == "main"
     assert result["landed_main_ci_run_id"] == 344
     assert result["landed_main_ci_verified"] is True
     assert [job["name"] for job in result["landed_main_ci_jobs"]] == list(REQUIRED_JOBS)
@@ -209,6 +219,19 @@ def test_review_gate_rejects_lookalike_workflow_path(
         )
 
 
+def test_review_gate_rejects_ci_from_different_pr_with_same_head_sha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_api(monkeypatch, runs=[_run(pull_request_number=78)])
+
+    with pytest.raises(RuntimeError, match="no GrowthEvo CI pull-request run"):
+        GUARD._verify_reviewed_pr_and_ci(
+            repository=REPOSITORY,
+            expected_sha=MERGE_SHA,
+            trusted_branch="main",
+        )
+
+
 @pytest.mark.parametrize(
     ("jobs", "message"),
     [
@@ -235,6 +258,19 @@ def test_review_gate_rejects_missing_exact_main_push_ci(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_api(monkeypatch, push_runs=[])
+
+    with pytest.raises(RuntimeError, match="landed main commit.*no GrowthEvo CI push run"):
+        GUARD._verify_reviewed_pr_and_ci(
+            repository=REPOSITORY,
+            expected_sha=MERGE_SHA,
+            trusted_branch="main",
+        )
+
+
+def test_review_gate_rejects_push_ci_from_different_branch_with_same_sha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_api(monkeypatch, push_runs=[_push_run(head_branch="release")])
 
     with pytest.raises(RuntimeError, match="landed main commit.*no GrowthEvo CI push run"):
         GUARD._verify_reviewed_pr_and_ci(
