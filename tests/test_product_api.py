@@ -68,10 +68,11 @@ def test_database_url_is_configuration_not_fake_activation(monkeypatch: pytest.M
     payload_text = response.text
     assert "private_password" not in payload_text
     assert "private_user" not in payload_text
+    assert "db.example.test" not in payload_text
     payload = response.json()
     assert payload["persistence"]["configured"] is True
     assert payload["persistence"]["active"] is False
-    assert payload["persistence"]["host"] == "db.example.test"
+    assert "host" not in payload["persistence"]
     assert payload["persistence"]["backend"] == "reference-memory"
     connector = next(item for item in payload["connectors"] if item["id"] == "persistence")
     assert connector["state"] == "configured_not_active"
