@@ -209,6 +209,21 @@ jobs:
           assert_live_route evolution 'EV-281'
           "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=5000 --screenshot=ui-screenshots/growthevo-api-realtime.png http://127.0.0.1:4174/#realtime
           test -s ui-screenshots/growthevo-api-realtime.png
+
+          # Kill the API and prove that strict API mode stays visibly unavailable
+          # instead of falling back to synthetic Demo/Reference Fixture content.
+          docker rm -f "$API_PID" >/dev/null
+          unavailable_out="/tmp/growthevo-api-unavailable.html"
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:4174/#dashboard" > "$unavailable_out"
+          grep -Fq 'GrowthEvo API 暂不可用' "$unavailable_out"
+          if grep -Fq 'Demo Workspace · Synthetic Data' "$unavailable_out"; then
+            echo "strict API mode silently exposed the Demo workspace after API failure" >&2
+            exit 1
+          fi
+          if grep -Fq 'Reference UI Fixture' "$unavailable_out"; then
+            echo "strict API mode rendered a reference fixture after API failure" >&2
+            exit 1
+          fi
       - name: Upload rendered UI screenshots
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
