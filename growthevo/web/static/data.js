@@ -44,5 +44,8 @@ const DEMO={
  ]
 };
 
-async function api(path,options={}){if(useDemo) return demoApi(path,options);try{const r=await fetch(`${config.API_BASE||''}${path}`,{headers:{'Content-Type':'application/json',...(options.headers||{})},...options});if(!r.ok)throw Error(await r.text());return await r.json()}catch(e){console.warn('API unavailable; using demo mode',e);return demoApi(path,options)}}
+async function api(path,options={}){
+ if(useDemo)return demoApi(path,options);
+ throw Error('Strict API runtime has not initialized; refusing synthetic fallback');
+}
 function demoApi(path,options={}){if(path.includes('/dashboard'))return Promise.resolve({...DEMO,kpis:DEMO.kpis});if(path.includes('/opportunities'))return Promise.resolve(DEMO.opportunities);if(path.includes('/campaigns'))return Promise.resolve(DEMO.campaigns);if(path.includes('/approvals'))return Promise.resolve(DEMO.approvals);if(path.includes('/harness/runs'))return Promise.resolve([{id:'run_9081',task:'Create 5% canary for dormant users',success:true,policy:'pass',evidence:'A',tool_calls:8,cost:.84,latency_ms:8240,outcome:'approval_requested'}]);if(path.includes('/agent/plan'))return Promise.resolve({run_id:'demo-run',status:'proposal_ready'});return Promise.resolve({ok:true,status:'demo'})}
