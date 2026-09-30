@@ -10,8 +10,13 @@ _VALID_MODES = {"demo", "api", "production"}
 _ENVIRONMENT_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
 
 
-def _cors_origins(value: str | None) -> tuple[str, ...]:
-    """Parse exact HTTP(S) origins and reject permissive/malformed values."""
+def _cors_origins(value: str | None, *, require_https: bool = False) -> tuple[str, ...]:
+    """Parse exact HTTP(S) origins and reject permissive/malformed values.
+
+    Reference/demo API mode may intentionally use cleartext origins for local or
+    LAN development. A declared production runtime must only trust HTTPS browser
+    origins so a configuration typo cannot authorize a cleartext public client.
+    """
     if not value:
         return ()
     result: list[str] = []
@@ -41,6 +46,8 @@ def _cors_origins(value: str | None) -> tuple[str, ...]:
                 "GROWTHEVO_CORS_ORIGINS entries must be exact http(s) origins without "
                 f"credentials, paths, query strings, or fragments: {origin!r}"
             )
+        if require_https and parsed.scheme != "https":
+            raise ValueError("production GROWTHEVO_CORS_ORIGINS entries must use https")
         if origin not in seen:
             result.append(origin)
             seen.add(origin)
@@ -93,7 +100,10 @@ class RuntimeSettings:
         environment = _environment(os.getenv("GROWTHEVO_ENV"))
         database_url = os.getenv("GROWTHEVO_DATABASE_URL") or os.getenv("DATABASE_URL")
         database_url = database_url.strip() if database_url else None
-        cors_origins = _cors_origins(os.getenv("GROWTHEVO_CORS_ORIGINS"))
+        cors_origins = _cors_origins(
+            os.getenv("GROWTHEVO_CORS_ORIGINS"),
+            require_https=raw_mode == "production",
+        )
 
         # No durable persistence or authentication adapter is wired into this
         # branch yet. Keep activation explicit instead of inferring it from URLs,
