@@ -16,7 +16,7 @@ GitHub repository
   │   ├─ real Chrome screenshots
   │   ├─ API-mode browser integration
   │   ├─ Mobile npm-ci + TypeScript
-  │   └─ Pages build + deploy
+  │   └─ Pages build + main-only deploy
   └─ GitHub Pages
       ├─ high-fidelity Web UI
       ├─ PWA shell
@@ -108,13 +108,13 @@ authentication.active = false
 
 Therefore the current reference branch cannot accidentally become production-ready just because credentials were added to the environment.
 
-External side effects are also disabled in the current reference runtime. LLM, object-store and channel variables are exposed only as safe `configured_not_active` connector states until real adapters are initialized.
+External side effects are also disabled in the current reference runtime. LLM, object-store and channel variables are exposed only as safe `configured_not_active` connector states until real adapters are initialized. Public readiness/runtime payloads expose state, not database credentials or database hostnames.
 
 ## Strict API / anti-fake-data rule
 
 GitHub Pages demo mode may use synthetic fixtures. API/production mode may **not** silently substitute synthetic data when the backend fails.
 
-The browser probes `/api/ready`; failures render an explicit API-unavailable state. The PWA service worker never caches API responses or replaces API failures with `index.html`.
+The browser probes `/api/ready`; failures render an explicit API-unavailable state. The PWA service worker never caches API responses or replaces API failures with `index.html`. Product Surface CI also kills the API during a real Chrome run and requires the UI to remain visibly unavailable rather than reveal Demo or Reference Fixture content.
 
 In API mode these workbenches are wired directly to `/api/v1/*`:
 
@@ -158,7 +158,9 @@ window.GROWTHEVO_CONFIG = {
 
 The production base image is pinned by digest in `Dockerfile`, so rebuilding the same commit does not silently resolve a different `python:3.13-slim` image. Dependabot watches the Docker ecosystem separately so base-image security updates arrive as explicit reviewable PRs rather than tag drift.
 
-The Python 3.13 Web runtime graph is independently constrained by `constraints/web-container-py313.txt`. The container still installs the repository's `web` extra, but pip must resolve FastAPI, Uvicorn and their runtime transitive dependencies to the exact versions in that lock. This lock is deliberately separate from the research/evidence pins and any change to it triggers Product Surface and Product Stress CI.
+The Python 3.13 Web runtime graph is independently constrained by `constraints/web-container-py313.txt`. The production image intentionally **does not build/install the local project through PEP 517**: it copies the checked-in `growthevo/` source tree, installs the exact constrained FastAPI/Uvicorn runtime, and starts `python -m growthevo.web.cli`. This removes a separate floating setuptools/wheel build-isolation resolver from the production image. Product Surface and Product Stress use Python 3.13 with the same runtime constraints for product boundary tests before exercising the same Docker image.
+
+This Web runtime lock remains separate from research/evidence pins. Changes to it trigger Product Surface and Product Stress CI; scientific Python dependency updates continue to follow the repository's evidence/provenance process.
 
 Reference/local container:
 
@@ -200,11 +202,12 @@ The reference runtime intentionally includes production-shaped protections even 
 - consent requires a real JSON boolean;
 - unknown Action Registry IDs fail closed;
 - `NO_TREATMENT` stays in the candidate set;
-- idempotency keys are request-bound and conflicting reuse returns HTTP 409;
+- decision `Idempotency-Key` values are trimmed, bounded, duplicate headers are rejected, and conflicting request reuse returns HTTP 409;
 - reference idempotency/campaign state is bounded in memory;
 - approval decisions are first-write atomic: identical retries are idempotent, conflicting later decisions return HTTP 409;
 - independent FastAPI app instances do not share reference campaign, approval or decision state;
-- API responses are `Cache-Control: no-store`.
+- API responses are `Cache-Control: no-store`;
+- runtime environment labels are length/character validated before being reflected into response headers.
 
 ## Decision/OPE semantics
 
@@ -219,19 +222,19 @@ Guardrail fallbacks log a one-hot `NO_TREATMENT: 1.0` distribution. This makes t
 
 The product stress suite also checks assignment calibration across many independent entities: observed action frequencies must remain statistically consistent with the accumulated logged action distributions. This prevents a future deterministic-argmax implementation from passing merely by writing plausible-looking propensity fields.
 
-## Mobile reproducibility
+## Mobile reproducibility and transport safety
 
 `apps/mobile/package-lock.json` is committed and CI uses `npm ci`. This prevents the same commit from resolving a different transitive npm dependency graph on a later date. Dependabot covers GitHub Actions, the pinned Docker base image and the mobile npm project weekly.
 
 Python research/evidence dependencies are intentionally **not** managed by Dependabot. Changes to locked scientific/runtime pins stay behind the repository's evidence/provenance review so an automated dependency PR cannot silently change an accepted benchmark identity or research runtime.
 
-For a physical Expo device, explicitly set the API address; `127.0.0.1` points to the device itself:
+For a physical Expo device during development, explicitly set the API address; `127.0.0.1` points to the device itself:
 
 ```bash
 EXPO_PUBLIC_GROWTHEVO_API=http://YOUR-LAN-IP:8765 npm start
 ```
 
-The mobile API client validates the configured URL, has a request timeout, preserves caller cancellation and surfaces API failures instead of replacing them with demo data.
+Cleartext remote HTTP is a development-only allowance. Production mobile builds require `EXPO_PUBLIC_GROWTHEVO_API` to be configured and require an HTTPS endpoint. The mobile API client validates the configured URL, has a request timeout, preserves caller cancellation and surfaces API failures instead of replacing them with demo data.
 
 ## Logical environments
 
@@ -257,6 +260,11 @@ It is reasonable for a solo maintainer to physically run only `local + public de
 - Lock the Python 3.13 Web container runtime separately from research/evidence dependencies.
 - Run CodeQL for Python and JavaScript/TypeScript.
 - Let Dependabot update Actions, the Docker base image and mobile npm dependencies; keep Python research pins under evidence-aware review.
+- Keep Pages production deployment main-only; feature branches and pull requests may build/validate but cannot receive `pages: write` or deploy the production site.
+
+### Repository-governance caveat
+
+The code/workflow controls above do **not** replace server-side protection of `main`. Repository issue #63 is the canonical tracker for enabling an active GitHub ruleset that requires pull requests and the six GrowthEvo evidence checks, with no routine bypass and force-push/deletion blocked. Until that repository-admin action is completed, CI can detect an invalid direct push after landing but cannot prevent the push from landing first.
 
 ## GitHub Pages setup
 
@@ -264,8 +272,10 @@ After this branch lands on `main`:
 
 1. Repository **Settings → Pages**.
 2. Set **Source** to **GitHub Actions**.
-3. Run `GrowthEvo Pages` or push a relevant web change to `main`.
+3. Run `GrowthEvo Pages` from `main`, or push a relevant web change to `main`.
 4. The site publishes at the repository Pages URL.
+
+A manual `GrowthEvo Pages` run from a feature branch only builds/validates; configure/upload/deploy steps are gated to `refs/heads/main`.
 
 No secrets are needed for demo mode.
 
