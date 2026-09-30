@@ -41,6 +41,16 @@ def _assert_success_bundle_gate(
         )
         assert absolute_path in upload, f"{absolute_path} is not persisted by the evidence upload"
 
+    # Full-data caches contain the downloaded/raw benchmark material. Evidence
+    # artifacts in this public repository must stay an explicit file allowlist;
+    # never broaden the upload to the whole bundle root or cache subtree.
+    upload_lines = {line.strip() for line in upload.splitlines() if line.strip()}
+    assert bundle_root not in upload_lines
+    assert f"{bundle_root}/**" not in upload_lines
+    assert f"{bundle_root}/cache" not in upload_lines
+    assert f"{bundle_root}/cache/**" not in upload_lines
+    assert not any(line.startswith(f"{bundle_root}/cache/") for line in upload_lines)
+
 
 def test_full_criteo_success_requires_complete_core_evidence_bundle() -> None:
     _assert_success_bundle_gate(
