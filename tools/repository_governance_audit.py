@@ -19,7 +19,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-API_VERSION = "2022-11-28"
+API_VERSION = "2026-03-10"
 GITHUB_ACTIONS_INTEGRATION_ID = 15368
 REQUIRED_CHECKS = (
     "test (3.11)",
