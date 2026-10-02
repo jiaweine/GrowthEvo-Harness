@@ -15,7 +15,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-
 JsonValue = dict[str, Any] | list[Any]
 Validator = Callable[[JsonValue | str], str | None]
 PayloadFactory = Callable[[int], tuple[dict[str, Any] | None, dict[str, str]]]
@@ -77,79 +76,49 @@ def validate_dict_status(expected: str) -> Validator:
     def validator(value: JsonValue | str) -> str | None:
         if not isinstance(value, dict):
             return "expected JSON object"
-        if value.get("status") != expected:
-            return f"expected status={expected!r}, got {value.get('status')!r}"
-        return None
-
+        return None if value.get("status") == expected else f"expected status={expected!r}"
     return validator
 
 
 def validate_dashboard(value: JsonValue | str) -> str | None:
-    if not isinstance(value, dict):
-        return "dashboard is not an object"
-    kpis = value.get("kpis")
-    if not isinstance(kpis, list) or len(kpis) < 4:
-        return "dashboard missing four KPI cards"
-    return None
+    return None if isinstance(value, dict) and isinstance(value.get("kpis"), list) and len(value["kpis"]) >= 4 else "dashboard KPI contract changed"
 
 
 def validate_list(value: JsonValue | str) -> str | None:
-    if not isinstance(value, list) or not value:
-        return "expected non-empty JSON list"
-    return None
+    return None if isinstance(value, list) and value else "expected non-empty JSON list"
 
 
 def validate_actions(value: JsonValue | str) -> str | None:
     if not isinstance(value, list):
         return "actions is not a list"
-    if not any(isinstance(item, dict) and item.get("action_id") == "NO_TREATMENT" for item in value):
-        return "NO_TREATMENT missing from Action Registry"
-    return None
+    ids = {item.get("action_id") for item in value if isinstance(item, dict)}
+    required = {"NO_TREATMENT", "free_shipping", "coupon_10", "push_reminder", "email_guide"}
+    return None if required <= ids else f"stable Action Registry incomplete: {sorted(required - ids)}"
 
 
 def validate_recent(value: JsonValue | str) -> str | None:
-    if not isinstance(value, list):
-        return "recent decisions is not a list"
-    return None
+    return None if isinstance(value, list) else "recent decisions is not a list"
 
 
 def validate_html(value: JsonValue | str) -> str | None:
-    if not isinstance(value, str) or "GrowthEvo" not in value or "id=\"app\"" not in value:
-        return "GrowthEvo app shell marker missing"
-    return None
+    return None if isinstance(value, str) and "GrowthEvo" in value and 'id="app"' in value else "GrowthEvo app shell marker missing"
 
 
 def validate_service_worker(value: JsonValue | str) -> str | None:
-    if not isinstance(value, str) or "CACHE" not in value or "fetch" not in value:
-        return "service worker shell markers missing"
-    return None
+    return None if isinstance(value, str) and "CACHE" in value and "fetch" in value else "service worker markers missing"
 
 
 def decision_payload(index: int) -> tuple[dict[str, Any], dict[str, str]]:
-    return (
-        {
-            "entity_id": f"stress-user-{index}",
-            "placement": "checkout_banner",
-            "context": {
-                "cart_value": 120 + (index % 400),
-                "session_intent": "high" if index % 3 else "medium",
-                "new_user": index % 2 == 0,
-                "abandoned_cart": index % 5 == 0,
-                "churn_risk": (index % 20) / 100,
-            },
-            "candidate_action_ids": [
-                "NO_TREATMENT",
-                "free_shipping_v3",
-                "coupon_10_v2",
-                "push_reminder_v4",
-            ],
-            "consent_state": True,
-            "frequency_remaining": 2,
-            "budget_remaining": 50,
-            "context_freshness_seconds": index % 60,
-        },
-        {"Idempotency-Key": f"stress-decision-{index}"},
-    )
+    return ({
+        "entity_id": f"stress-user-{index}",
+        "placement": "checkout_banner",
+        "context": {"cart_value": 120 + (index % 400), "session_intent": "high" if index % 3 else "medium", "new_user": index % 2 == 0, "abandoned_cart": index % 5 == 0, "churn_risk": (index % 20) / 100},
+        "candidate_action_ids": ["NO_TREATMENT", "free_shipping", "coupon_10", "push_reminder"],
+        "consent_state": True,
+        "frequency_remaining": 2,
+        "budget_remaining": 50,
+        "context_freshness_seconds": index % 60,
+    }, {"Idempotency-Key": f"stress-decision-{index}"})
 
 
 def fallback_payload(index: int) -> tuple[dict[str, Any], dict[str, str]]:
@@ -160,28 +129,11 @@ def fallback_payload(index: int) -> tuple[dict[str, Any], dict[str, str]]:
 
 
 def agent_payload(index: int) -> tuple[dict[str, Any], dict[str, str]]:
-    return (
-        {
-            "goal": f"压力测试目标 {index}: 提升新用户首购真实增量",
-            "budget_limit": 500000,
-            "primary_metric": "incremental_first_purchase",
-            "guardrails": ["unsubscribe_rate", "complaint_rate"],
-        },
-        {},
-    )
+    return ({"goal": f"压力测试目标 {index}: 提升新用户首购真实增量", "budget_limit": 500000, "primary_metric": "incremental_first_purchase", "guardrails": ["unsubscribe_rate", "complaint_rate"]}, {})
 
 
 def campaign_payload(index: int) -> tuple[dict[str, Any], dict[str, str]]:
-    return (
-        {
-            "name": f"Stress Campaign {index}",
-            "goal": "验证并发 Campaign Draft 创建路径",
-            "audience": f"synthetic-stress-audience-{index}",
-            "budget": 1000 + index,
-            "candidate_action_ids": ["NO_TREATMENT", "free_shipping_v3"],
-        },
-        {},
-    )
+    return ({"name": f"Stress Campaign {index}", "goal": "验证并发 Campaign Draft 创建路径", "audience": f"synthetic-stress-audience-{index}", "budget": 1000 + index, "candidate_action_ids": ["NO_TREATMENT", "free_shipping"]}, {})
 
 
 def approval_payload(index: int) -> tuple[dict[str, Any], dict[str, str]]:
@@ -198,72 +150,54 @@ def validate_decision(value: JsonValue | str) -> str | None:
     if action_id not in distribution:
         return "selected action is not in decision distribution"
     propensity = value.get("propensity")
-    if not isinstance(propensity, (int, float)) or not 0 < float(propensity) <= 1:
+    if not isinstance(propensity, (int, float)) or isinstance(propensity, bool) or not 0 < float(propensity) <= 1:
         return "invalid behavior propensity"
-    if value.get("engine_mode") != "reference-contract":
-        return "unexpected engine mode"
+    if value.get("engine_mode") != "reference-contract" or value.get("policy_id") != "policy_growth_safe":
+        return "stable decision identity changed"
     return None
 
 
 def validate_fallback(value: JsonValue | str) -> str | None:
-    if not isinstance(value, dict):
-        return "fallback is not an object"
-    if value.get("action_id") != "NO_TREATMENT" or value.get("propensity") != 1.0:
-        return "guardrail fallback did not enforce NO_TREATMENT with propensity 1"
-    return None
+    return None if isinstance(value, dict) and value.get("action_id") == "NO_TREATMENT" and value.get("propensity") == 1.0 else "guardrail fallback contract changed"
 
 
 def validate_agent(value: JsonValue | str) -> str | None:
-    if not isinstance(value, dict):
-        return "agent plan is not an object"
-    claims = value.get("claims")
-    if not isinstance(claims, list):
-        return "agent claims missing"
-    claim_types = {item.get("type") for item in claims if isinstance(item, dict)}
+    if not isinstance(value, dict) or not isinstance(value.get("claims"), list):
+        return "agent plan contract changed"
+    claim_types = {item.get("type") for item in value["claims"] if isinstance(item, dict)}
     if not {"FACT", "ESTIMATE", "HYPOTHESIS", "IDEA"} <= claim_types:
         return "agent claim hierarchy incomplete"
-    if value.get("next_gate") != "Shadow preflight":
-        return "agent control boundary changed"
-    return None
+    return None if value.get("next_gate") == "Shadow preflight" else "agent control boundary changed"
 
 
 def validate_campaign(value: JsonValue | str) -> str | None:
-    if not isinstance(value, dict):
-        return "campaign draft is not an object"
-    if value.get("status") != "Draft" or not str(value.get("id", "")).startswith("cmp_"):
-        return "campaign draft contract changed"
-    return None
+    return None if isinstance(value, dict) and value.get("status") == "Draft" and str(value.get("id", "")).startswith("cmp_") else "campaign draft contract changed"
 
 
 def validate_approval(value: JsonValue | str) -> str | None:
-    if not isinstance(value, dict):
-        return "approval result is not an object"
-    if value.get("status") != "approve_5" or value.get("id") != "apr_281":
-        return "approval retry contract changed"
-    return None
+    return None if isinstance(value, dict) and value.get("status") == "approve_5" and value.get("id") == "apr_281" else "approval retry contract changed"
 
 
 READ_CASES = [
     RequestCase("health", "GET", "/api/health", validate_dict_status("ok"), empty_payload),
     RequestCase("ready", "GET", "/api/ready", validate_dict_status("ready"), empty_payload),
-    RequestCase("dashboard", "GET", "/api/v1/dashboard", validate_dashboard, empty_payload),
-    RequestCase("opportunities", "GET", "/api/v1/opportunities", validate_list, empty_payload),
-    RequestCase("campaigns", "GET", "/api/v1/campaigns", validate_list, empty_payload),
-    RequestCase("experiments", "GET", "/api/v1/experiments", validate_list, empty_payload),
-    RequestCase("approvals", "GET", "/api/v1/approvals", validate_list, empty_payload),
-    RequestCase("harness", "GET", "/api/v1/harness/runs", validate_list, empty_payload),
-    RequestCase("evolution", "GET", "/api/v1/evolution/candidates", validate_list, empty_payload),
-    RequestCase("actions", "GET", "/api/v1/actions", validate_actions, empty_payload),
-    RequestCase("decision-log", "GET", "/api/v1/decisions/recent?limit=20", validate_recent, empty_payload),
+    RequestCase("dashboard", "GET", "/api/dashboard", validate_dashboard, empty_payload),
+    RequestCase("opportunities", "GET", "/api/opportunities", validate_list, empty_payload),
+    RequestCase("campaigns", "GET", "/api/campaigns", validate_list, empty_payload),
+    RequestCase("experiments", "GET", "/api/experiments", validate_list, empty_payload),
+    RequestCase("approvals", "GET", "/api/approvals", validate_list, empty_payload),
+    RequestCase("harness", "GET", "/api/harness/runs", validate_list, empty_payload),
+    RequestCase("evolution", "GET", "/api/evolution/candidates", validate_list, empty_payload),
+    RequestCase("actions", "GET", "/api/actions", validate_actions, empty_payload),
+    RequestCase("decision-log", "GET", "/api/decisions/recent?limit=20", validate_recent, empty_payload),
     RequestCase("web-shell", "GET", "/", validate_html, empty_payload, response_kind="text"),
     RequestCase("service-worker", "GET", "/service-worker.js", validate_service_worker, empty_payload, response_kind="text"),
 ]
-
-DECISION_CASE = RequestCase("decision", "POST", "/api/v1/decide", validate_decision, decision_payload)
-FALLBACK_CASE = RequestCase("guardrail-fallback", "POST", "/api/v1/decide", validate_fallback, fallback_payload)
-AGENT_CASE = RequestCase("agent-plan", "POST", "/api/v1/agent/plan", validate_agent, agent_payload)
-CAMPAIGN_CASE = RequestCase("campaign-draft", "POST", "/api/v1/campaigns/draft", validate_campaign, campaign_payload, (201,))
-APPROVAL_CASE = RequestCase("approval-retry", "POST", "/api/v1/approvals/apr_281/decision", validate_approval, approval_payload)
+DECISION_CASE = RequestCase("decision", "POST", "/api/decide", validate_decision, decision_payload)
+FALLBACK_CASE = RequestCase("guardrail-fallback", "POST", "/api/decide", validate_fallback, fallback_payload)
+AGENT_CASE = RequestCase("agent-plan", "POST", "/api/agent/plan", validate_agent, agent_payload)
+CAMPAIGN_CASE = RequestCase("campaign-draft", "POST", "/api/campaigns/draft", validate_campaign, campaign_payload, (201,))
+APPROVAL_CASE = RequestCase("approval-retry", "POST", "/api/approvals/apr_281/decision", validate_approval, approval_payload)
 
 
 def request_once(base_url: str, case: RequestCase, index: int, timeout: float) -> Result:
@@ -273,12 +207,7 @@ def request_once(base_url: str, case: RequestCase, index: int, timeout: float) -
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(
-        f"{base_url}{case.path}",
-        data=data,
-        headers=headers,
-        method=case.method,
-    )
+    request = urllib.request.Request(f"{base_url}{case.path}", data=data, headers=headers, method=case.method)
     started = time.perf_counter()
     status: int | None = None
     try:
@@ -299,7 +228,7 @@ def request_once(base_url: str, case: RequestCase, index: int, timeout: float) -
         latency_ms = (time.perf_counter() - started) * 1000
         body = exc.read().decode("utf-8", errors="replace")[:500]
         return Result(case.name, latency_ms, exc.code, http_error=f"HTTP {exc.code}: {body}")
-    except Exception as exc:  # noqa: BLE001 - stress runner must retain transport failures
+    except Exception as exc:  # noqa: BLE001
         latency_ms = (time.perf_counter() - started) * 1000
         return Result(case.name, latency_ms, status, http_error=f"{type(exc).__name__}: {exc}")
 
@@ -316,20 +245,7 @@ def summarize(results: list[Result]) -> dict[str, Any]:
     latencies = [result.latency_ms for result in results]
     http_errors = sum(result.http_error is not None for result in results)
     semantic_errors = sum(result.semantic_error is not None for result in results)
-    return {
-        "requests": len(results),
-        "ok": sum(result.ok for result in results),
-        "http_errors": http_errors,
-        "semantic_errors": semantic_errors,
-        "error_rate": round((http_errors + semantic_errors) / len(results), 6) if results else 0,
-        "latency_ms": {
-            "mean": round(statistics.fmean(latencies), 2) if latencies else 0,
-            "p50": round(percentile(latencies, 50), 2),
-            "p95": round(percentile(latencies, 95), 2),
-            "p99": round(percentile(latencies, 99), 2),
-            "max": round(max(latencies), 2) if latencies else 0,
-        },
-    }
+    return {"requests": len(results), "ok": sum(result.ok for result in results), "http_errors": http_errors, "semantic_errors": semantic_errors, "error_rate": round((http_errors + semantic_errors) / len(results), 6) if results else 0, "latency_ms": {"mean": round(statistics.fmean(latencies), 2) if latencies else 0, "p50": round(percentile(latencies, 50), 2), "p95": round(percentile(latencies, 95), 2), "p99": round(percentile(latencies, 99), 2), "max": round(max(latencies), 2) if latencies else 0}}
 
 
 def run_tasks(base_url: str, tasks: list[tuple[RequestCase, int]], concurrency: int, timeout: float) -> tuple[list[Result], float]:
@@ -344,24 +260,15 @@ def run_tasks(base_url: str, tasks: list[tuple[RequestCase, int]], concurrency: 
 
 def run_idempotency_burst(base_url: str, size: int, concurrency: int, timeout: float) -> dict[str, Any]:
     key = f"burst-{time.time_ns()}"
-
     def payload(_: int) -> tuple[dict[str, Any], dict[str, str]]:
         body, _ = decision_payload(999_999)
         body["entity_id"] = "burst-shared-entity"
         return body, {"Idempotency-Key": key}
-
-    case = RequestCase("idempotency-burst", "POST", "/api/v1/decide", validate_decision, payload)
-    tasks = [(case, index) for index in range(size)]
-    results, duration = run_tasks(base_url, tasks, min(concurrency, size), timeout)
+    case = RequestCase("idempotency-burst", "POST", "/api/decide", validate_decision, payload)
+    results, duration = run_tasks(base_url, [(case, index) for index in range(size)], min(concurrency, size), timeout)
     decision_ids = {result.decision_id for result in results if result.decision_id}
     summary = summarize(results)
-    summary.update(
-        {
-            "duration_seconds": round(duration, 3),
-            "unique_decision_ids": len(decision_ids),
-            "atomic": len(decision_ids) == 1 and summary["http_errors"] == 0 and summary["semantic_errors"] == 0,
-        }
-    )
+    summary.update({"duration_seconds": round(duration, 3), "unique_decision_ids": len(decision_ids), "atomic": len(decision_ids) == 1 and summary["http_errors"] == 0 and summary["semantic_errors"] == 0})
     return summary
 
 
@@ -380,48 +287,11 @@ def build_tasks(profile: Profile) -> list[tuple[RequestCase, int]]:
 
 def render_markdown(report: dict[str, Any]) -> str:
     overall = report["overall"]
-    lines = [
-        "# GrowthEvo Product Stress Report",
-        "",
-        f"- Profile: `{report['profile']}`",
-        f"- Base URL: `{report['base_url']}`",
-        f"- Concurrency: **{report['concurrency']}**",
-        f"- Requests: **{overall['requests']}** (+ {report['idempotency_burst']['requests']} idempotency burst)",
-        f"- Duration: **{report['duration_seconds']} s**",
-        f"- Throughput: **{report['throughput_rps']} req/s**",
-        f"- HTTP errors: **{overall['http_errors']}**",
-        f"- Semantic errors: **{overall['semantic_errors']}**",
-        f"- Global p95 / p99: **{overall['latency_ms']['p95']} / {overall['latency_ms']['p99']} ms**",
-        f"- Idempotency burst unique decision IDs: **{report['idempotency_burst']['unique_decision_ids']}**",
-        f"- Result: **{'PASS' if report['passed'] else 'FAIL'}**",
-        "",
-        "## Scenario latency",
-        "",
-        "| Scenario | Requests | Errors | p50 ms | p95 ms | p99 ms | Max ms |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ]
+    lines = ["# GrowthEvo Product Stress Report", "", f"- Profile: `{report['profile']}`", f"- Base URL: `{report['base_url']}`", f"- Concurrency: **{report['concurrency']}**", f"- Requests: **{overall['requests']}** (+ {report['idempotency_burst']['requests']} idempotency burst)", f"- Duration: **{report['duration_seconds']} s**", f"- Throughput: **{report['throughput_rps']} req/s**", f"- HTTP errors: **{overall['http_errors']}**", f"- Semantic errors: **{overall['semantic_errors']}**", f"- Global p95 / p99: **{overall['latency_ms']['p95']} / {overall['latency_ms']['p99']} ms**", f"- Idempotency burst unique decision IDs: **{report['idempotency_burst']['unique_decision_ids']}**", f"- Result: **{'PASS' if report['passed'] else 'FAIL'}**", "", "## Scenario latency", "", "| Scenario | Requests | Errors | p50 ms | p95 ms | p99 ms | Max ms |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for name, summary in sorted(report["scenarios"].items()):
-        errors = summary["http_errors"] + summary["semantic_errors"]
         latency = summary["latency_ms"]
-        lines.append(
-            f"| {name} | {summary['requests']} | {errors} | {latency['p50']} | {latency['p95']} | {latency['p99']} | {latency['max']} |"
-        )
-    lines.extend(
-        [
-            "",
-            "## Thresholds",
-            "",
-            f"- zero HTTP errors: {'PASS' if overall['http_errors'] == 0 else 'FAIL'}",
-            f"- zero semantic errors: {'PASS' if overall['semantic_errors'] == 0 else 'FAIL'}",
-            f"- global p95 <= {report['thresholds']['max_p95_ms']} ms: {'PASS' if overall['latency_ms']['p95'] <= report['thresholds']['max_p95_ms'] else 'FAIL'}",
-            f"- global p99 <= {report['thresholds']['max_p99_ms']} ms: {'PASS' if overall['latency_ms']['p99'] <= report['thresholds']['max_p99_ms'] else 'FAIL'}",
-            f"- throughput >= {report['thresholds']['min_rps']} req/s: {'PASS' if report['throughput_rps'] >= report['thresholds']['min_rps'] else 'FAIL'}",
-            f"- concurrent idempotency is atomic: {'PASS' if report['idempotency_burst']['atomic'] else 'FAIL'}",
-            "",
-            "> These numbers characterize the current single-container reference product surface on the runner that executed this test. They are not a capacity promise for a future database, LLM provider, channel connector, or multi-replica production deployment.",
-            "",
-        ]
-    )
+        lines.append(f"| {name} | {summary['requests']} | {summary['http_errors'] + summary['semantic_errors']} | {latency['p50']} | {latency['p95']} | {latency['p99']} | {latency['max']} |")
+    lines.extend(["", "## Thresholds", "", f"- zero HTTP errors: {'PASS' if overall['http_errors'] == 0 else 'FAIL'}", f"- zero semantic errors: {'PASS' if overall['semantic_errors'] == 0 else 'FAIL'}", f"- global p95 <= {report['thresholds']['max_p95_ms']} ms: {'PASS' if overall['latency_ms']['p95'] <= report['thresholds']['max_p95_ms'] else 'FAIL'}", f"- global p99 <= {report['thresholds']['max_p99_ms']} ms: {'PASS' if overall['latency_ms']['p99'] <= report['thresholds']['max_p99_ms'] else 'FAIL'}", f"- throughput >= {report['thresholds']['min_rps']} req/s: {'PASS' if report['throughput_rps'] >= report['thresholds']['min_rps'] else 'FAIL'}", f"- concurrent idempotency is atomic: {'PASS' if report['idempotency_burst']['atomic'] else 'FAIL'}", "", "> Results characterize the current single-container reference surface; they are not a capacity promise for future external infrastructure.", ""])
     return "\n".join(lines)
 
 
@@ -435,67 +305,28 @@ def main() -> int:
     parser.add_argument("--markdown-out", type=Path)
     parser.add_argument("--no-fail", action="store_true", help="Always exit 0 after writing the report.")
     args = parser.parse_args()
-
     profile = PROFILES[args.profile]
     concurrency = args.concurrency or profile.concurrency
     base_url = args.base_url.rstrip("/")
-    tasks = build_tasks(profile)
-
-    results, duration = run_tasks(base_url, tasks, concurrency, args.timeout)
+    results, duration = run_tasks(base_url, build_tasks(profile), concurrency, args.timeout)
     grouped: defaultdict[str, list[Result]] = defaultdict(list)
     for result in results:
         grouped[result.scenario].append(result)
-
     overall = summarize(results)
     throughput = round(len(results) / duration, 2) if duration else 0.0
-    idempotency_burst = run_idempotency_burst(
-        base_url,
-        profile.idempotency_burst,
-        concurrency,
-        args.timeout,
-    )
-    thresholds = {
-        "max_p95_ms": profile.max_p95_ms,
-        "max_p99_ms": profile.max_p99_ms,
-        "min_rps": profile.min_rps,
-    }
-    passed = (
-        overall["http_errors"] == 0
-        and overall["semantic_errors"] == 0
-        and overall["latency_ms"]["p95"] <= profile.max_p95_ms
-        and overall["latency_ms"]["p99"] <= profile.max_p99_ms
-        and throughput >= profile.min_rps
-        and bool(idempotency_burst["atomic"])
-    )
-    report = {
-        "profile": args.profile,
-        "base_url": base_url,
-        "concurrency": concurrency,
-        "duration_seconds": round(duration, 3),
-        "throughput_rps": throughput,
-        "thresholds": thresholds,
-        "overall": overall,
-        "idempotency_burst": idempotency_burst,
-        "scenarios": {name: summarize(items) for name, items in grouped.items()},
-        "passed": passed,
-        "sample_errors": [
-            asdict(result)
-            for result in results
-            if not result.ok
-        ][:20],
-    }
-
+    idempotency_burst = run_idempotency_burst(base_url, profile.idempotency_burst, concurrency, args.timeout)
+    thresholds = {"max_p95_ms": profile.max_p95_ms, "max_p99_ms": profile.max_p99_ms, "min_rps": profile.min_rps}
+    passed = overall["http_errors"] == 0 and overall["semantic_errors"] == 0 and overall["latency_ms"]["p95"] <= profile.max_p95_ms and overall["latency_ms"]["p99"] <= profile.max_p99_ms and throughput >= profile.min_rps and bool(idempotency_burst["atomic"])
+    report = {"profile": args.profile, "base_url": base_url, "concurrency": concurrency, "duration_seconds": round(duration, 3), "throughput_rps": throughput, "thresholds": thresholds, "overall": overall, "idempotency_burst": idempotency_burst, "scenarios": {name: summarize(items) for name, items in grouped.items()}, "passed": passed, "sample_errors": [asdict(result) for result in results if not result.ok][:20]}
     rendered_json = json.dumps(report, ensure_ascii=False, indent=2)
     rendered_markdown = render_markdown(report)
     print(rendered_markdown)
-
     if args.json_out:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
         args.json_out.write_text(rendered_json + "\n", encoding="utf-8")
     if args.markdown_out:
         args.markdown_out.parent.mkdir(parents=True, exist_ok=True)
         args.markdown_out.write_text(rendered_markdown, encoding="utf-8")
-
     if not passed and not args.no_fail:
         print("Stress thresholds failed. See report above.", file=sys.stderr)
         return 1

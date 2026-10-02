@@ -85,14 +85,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function getDashboard(): Promise<Dashboard> {
-  return request<Dashboard>("/api/v1/dashboard");
+  return request<Dashboard>("/api/dashboard");
 }
 
 export function approve(
   id: string,
   decision: "approve_5" | "approve_25" | "reject",
 ): Promise<Record<string, unknown>> {
-  return request(`/api/v1/approvals/${encodeURIComponent(id)}/decision`, {
+  return request(`/api/approvals/${encodeURIComponent(id)}/decision`, {
     method: "POST",
     body: JSON.stringify({ decision, note: "Reviewed from GrowthEvo Mobile" }),
   });

@@ -21,7 +21,7 @@ _COMPAT_CAPABILITIES = (
 
 _ARCHITECTURE = (
     {"name": "Growth OS", "detail": "Responsive web/PWA and mobile companion surfaces."},
-    {"name": "FastAPI", "detail": "Versioned product and decision contracts."},
+    {"name": "FastAPI", "detail": "Stable product and decision contracts."},
     {"name": "Agent Harness", "detail": "Context, tools, claims, traces, evals and approval boundaries."},
     {"name": "Decision stack", "detail": "Causal estimation, safe PI, OPE and risk-aware planning."},
     {"name": "Evidence", "detail": "Pre-registration, validation selection and final holdout."},
@@ -29,7 +29,7 @@ _ARCHITECTURE = (
 
 
 def build_dashboard_payload(state: ReferenceProductState | None = None) -> dict[str, Any]:
-    """Return the product dashboard while preserving the v0.1 compatibility contract."""
+    """Return the product dashboard under one stable public contract."""
     payload = dashboard_payload(state)
     ids = {item["id"] for item in payload["capabilities"]}
     payload["capabilities"].extend(
@@ -46,7 +46,7 @@ def build_dashboard_payload(state: ReferenceProductState | None = None) -> dict[
         {
             "capability_count": len(payload["capabilities"]),
             "locked_evidence_sets": len(EVIDENCE),
-            "api_version": "v1",
+            "api_contract": "stable",
         }
     )
     payload["architecture"] = [dict(item) for item in _ARCHITECTURE]

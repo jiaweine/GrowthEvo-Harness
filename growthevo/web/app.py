@@ -25,13 +25,13 @@ from .schemas import AgentPlanRequest, ApprovalDecisionRequest, CampaignDraftReq
 
 STATIC_DIR = Path(__file__).with_name("static")
 MAX_API_BODY_BYTES = 1_000_000
-DECISION_IDEMPOTENCY_PATHS = frozenset({"/api/v1/decide", "/api/v1/realtime/decision"})
+DECISION_IDEMPOTENCY_PATHS = frozenset({"/api/decide", "/api/realtime/decision"})
 PRODUCTION_SYSTEM_PATHS = frozenset(
     {
         "/api/health",
         "/api/ready",
-        "/api/v1/system/runtime",
-        "/api/v1/system/connectors",
+        "/api/system/runtime",
+        "/api/system/connectors",
         "/api/docs",
         "/api/openapi.json",
     }
@@ -136,7 +136,7 @@ class ApiBodyLimitMiddleware:
 
 
 def create_app() -> Any:
-    """Create the GrowthEvo product surface and versioned API."""
+    """Create the GrowthEvo product surface and stable API."""
     try:
         from fastapi import FastAPI, Header, HTTPException, Query
         from fastapi.middleware.cors import CORSMiddleware
@@ -150,7 +150,7 @@ def create_app() -> Any:
     product_state = ReferenceProductState()
     app = FastAPI(
         title="GrowthEvo Growth OS",
-        version="1.0",
+        version="stable",
         description="Agentic causal growth product API. Production side effects remain gated behind explicit connectors and approvals.",
         docs_url="/api/docs",
         redoc_url=None,
@@ -208,7 +208,7 @@ def create_app() -> Any:
         return {
             "status": "ok",
             "service": "growthevo-web",
-            "api": "v1",
+            "api": "stable",
             "mode": settings.mode,
             "environment": settings.environment,
         }
@@ -220,36 +220,35 @@ def create_app() -> Any:
             return JSONResponse(status_code=503, content={"status": "not_ready", **payload})
         return {"status": "ready", **payload}
 
-    @app.get("/api/v1/system/runtime", tags=["system"])
+    @app.get("/api/system/runtime", tags=["system"])
     def runtime() -> dict[str, object]:
         return settings.public_payload()
 
-    @app.get("/api/v1/system/connectors", tags=["system"])
+    @app.get("/api/system/connectors", tags=["system"])
     def connectors() -> list[dict[str, str]]:
         return settings.connector_states()
 
-    @app.get("/api/dashboard", tags=["compat"])
-    @app.get("/api/v1/dashboard", tags=["dashboard"])
+    @app.get("/api/dashboard", tags=["dashboard"])
     def dashboard() -> dict[str, Any]:
         return build_dashboard_payload(product_state)
 
-    @app.get("/api/capabilities", tags=["compat"])
+    @app.get("/api/capabilities", tags=["dashboard"])
     def capabilities() -> list[dict[str, Any]]:
         return build_dashboard_payload(product_state)["capabilities"]
 
-    @app.get("/api/evidence", tags=["compat"])
+    @app.get("/api/evidence", tags=["dashboard"])
     def evidence() -> list[dict[str, Any]]:
         return build_dashboard_payload(product_state)["evidence"]
 
-    @app.get("/api/v1/opportunities", tags=["causal"])
+    @app.get("/api/opportunities", tags=["causal"])
     def opportunity_list() -> list[dict[str, Any]]:
         return opportunities()
 
-    @app.get("/api/v1/campaigns", tags=["campaigns"])
+    @app.get("/api/campaigns", tags=["campaigns"])
     def campaign_list() -> list[dict[str, Any]]:
         return product_state.campaigns()
 
-    @app.post("/api/v1/campaigns/draft", tags=["campaigns"], status_code=201)
+    @app.post("/api/campaigns/draft", tags=["campaigns"], status_code=201)
     def campaign_draft(request: CampaignDraftRequest) -> dict[str, Any]:
         return product_state.create_campaign_draft(
             request.name,
@@ -259,15 +258,15 @@ def create_app() -> Any:
             request.candidate_action_ids,
         )
 
-    @app.get("/api/v1/experiments", tags=["experiments"])
+    @app.get("/api/experiments", tags=["experiments"])
     def experiment_list() -> list[dict[str, Any]]:
         return experiments()
 
-    @app.get("/api/v1/approvals", tags=["governance"])
+    @app.get("/api/approvals", tags=["governance"])
     def approval_list() -> list[dict[str, Any]]:
         return product_state.approvals()
 
-    @app.post("/api/v1/approvals/{approval_id}/decision", tags=["governance"])
+    @app.post("/api/approvals/{approval_id}/decision", tags=["governance"])
     def approval_decision(approval_id: str, request: ApprovalDecisionRequest) -> dict[str, Any]:
         try:
             result = product_state.decide_approval(approval_id, request.decision, request.note)
@@ -277,24 +276,24 @@ def create_app() -> Any:
             raise HTTPException(status_code=404, detail="approval not found")
         return result
 
-    @app.get("/api/v1/harness/runs", tags=["harness"])
+    @app.get("/api/harness/runs", tags=["harness"])
     def runs() -> list[dict[str, Any]]:
         return harness_runs()
 
-    @app.get("/api/v1/evolution/candidates", tags=["evolution"])
+    @app.get("/api/evolution/candidates", tags=["evolution"])
     def evolution() -> list[dict[str, Any]]:
         return evolution_candidates()
 
-    @app.post("/api/v1/agent/plan", tags=["agent"])
+    @app.post("/api/agent/plan", tags=["agent"])
     def plan(request: AgentPlanRequest) -> dict[str, Any]:
         return agent_plan(request.goal, request.budget_limit, request.primary_metric, request.guardrails)
 
-    @app.get("/api/v1/actions", tags=["decisioning"])
+    @app.get("/api/actions", tags=["decisioning"])
     def actions() -> list[dict[str, Any]]:
         return action_registry_payload()
 
-    @app.post("/api/v1/realtime/decision", tags=["decisioning"], include_in_schema=False)
-    @app.post("/api/v1/decide", tags=["decisioning"])
+    @app.post("/api/realtime/decision", tags=["decisioning"], include_in_schema=False)
+    @app.post("/api/decide", tags=["decisioning"])
     def decide(
         request: DecisionRequest,
         idempotency_key: str | None = Header(
@@ -319,7 +318,7 @@ def create_app() -> Any:
         except DecisionInputError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    @app.get("/api/v1/decisions/recent", tags=["decisioning"])
+    @app.get("/api/decisions/recent", tags=["decisioning"])
     def recent_decisions(limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, Any]]:
         return decision_engine.recent(limit)
 

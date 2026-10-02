@@ -6,8 +6,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from growthevo._version import __version__
-
 UTC = timezone.utc
 MAX_REFERENCE_CAMPAIGNS = 1_000
 
@@ -41,19 +39,19 @@ CAMPAIGNS = [
 ]
 
 EXPERIMENTS = [
-    {"id":"exp_208","name":"沉默用户召回","hypothesis":"轻量提醒对高支持度沉默会员产生正向增量活跃","primary_metric":"active_7d","assignment":"user_id","variants":["NO_TREATMENT","push_reminder_v4"],"allocation":"50/50 within 5% canary","maturity":"7d","status":"running","estimate":"+4.7pp","ci":"+3.2 ~ +6.1pp","guardrails":["unsubscribe_rate","complaint_rate"]},
+    {"id":"exp_208","name":"沉默用户召回","hypothesis":"轻量提醒对高支持度沉默会员产生正向增量活跃","primary_metric":"active_7d","assignment":"user_id","variants":["NO_TREATMENT","push_reminder"],"allocation":"50/50 within 5% canary","maturity":"7d","status":"running","estimate":"+4.7pp","ci":"+3.2 ~ +6.1pp","guardrails":["unsubscribe_rate","complaint_rate"]},
     {"id":"exp_511","name":"节日礼品推荐","hypothesis":"推荐型创意可以提升礼品购买增量利润","primary_metric":"incremental_profit","assignment":"user_id","variants":["NO_TREATMENT","creative_A","creative_B"],"allocation":"34/33/33","maturity":"3d","status":"analyzing","estimate":"-1.2%","ci":"-3.4 ~ +0.9%","guardrails":["return_rate"]},
 ]
 
 APPROVALS = [
-    {"id":"apr_281","title":"新用户首购计划扩大至 25%","campaign":"新用户首购提升计划","affected_users":186421,"budget":286000,"max_risk":"Push unsubscribe +0.08pp","incremental_value":724000,"evidence_tier":"A","uncertainty":"95% CI +5.9 ~ +10.7pp","agent_version":"growth-agent-0.3","harness_version":"harness-0.2","policy_version":"pv_42","status":"pending"},
-    {"id":"apr_404","title":"Creative Set #12 发布到 Email","campaign":"会员升级激励","affected_users":72881,"budget":62000,"max_risk":"brand claim review","incremental_value":134000,"evidence_tier":"B","uncertainty":"OPE SE 0.0041","agent_version":"growth-agent-0.3","harness_version":"harness-0.2","policy_version":"pv_37","status":"pending"},
+    {"id":"apr_281","title":"新用户首购计划扩大至 25%","campaign":"新用户首购提升计划","affected_users":186421,"budget":286000,"max_risk":"Push unsubscribe +0.08pp","incremental_value":724000,"evidence_tier":"A","uncertainty":"95% CI +5.9 ~ +10.7pp","agent_id":"growth_agent","harness_id":"growth_harness","policy_id":"policy_growth_safe","status":"pending"},
+    {"id":"apr_404","title":"Creative Set #12 发布到 Email","campaign":"会员升级激励","affected_users":72881,"budget":62000,"max_risk":"brand claim review","incremental_value":134000,"evidence_tier":"B","uncertainty":"OPE SE 0.0041","agent_id":"growth_agent","harness_id":"growth_harness","policy_id":"policy_growth_safe","status":"pending"},
 ]
 
 HARNESS_RUNS = [
-    {"id":"run_9081","task":"Create 5% canary for dormant users","agent_version":"growth-agent-0.3","harness_version":"harness-0.2","success":True,"policy":"pass","evidence":"A","tool_calls":8,"cost":.84,"latency_ms":8240,"outcome":"approval_requested"},
-    {"id":"run_9078","task":"Analyze coupon uplift decay","agent_version":"growth-agent-0.3","harness_version":"harness-0.2","success":True,"policy":"pass","evidence":"C","tool_calls":5,"cost":.42,"latency_ms":5120,"outcome":"experiment_draft"},
-    {"id":"run_9064","task":"Publish unreviewed claim","agent_version":"growth-agent-0.2","harness_version":"harness-0.2","success":False,"policy":"blocked","evidence":"D","tool_calls":3,"cost":.19,"latency_ms":2810,"outcome":"guardrail_block"},
+    {"id":"run_9081","task":"Create 5% canary for dormant users","agent_id":"growth_agent","harness_id":"growth_harness","success":True,"policy":"pass","evidence":"A","tool_calls":8,"cost":.84,"latency_ms":8240,"outcome":"approval_requested"},
+    {"id":"run_9078","task":"Analyze coupon uplift decay","agent_id":"growth_agent","harness_id":"growth_harness","success":True,"policy":"pass","evidence":"C","tool_calls":5,"cost":.42,"latency_ms":5120,"outcome":"experiment_draft"},
+    {"id":"run_9064","task":"Publish unreviewed claim","agent_id":"growth_agent","harness_id":"growth_harness","success":False,"policy":"blocked","evidence":"D","tool_calls":3,"cost":.19,"latency_ms":2810,"outcome":"guardrail_block"},
 ]
 EVOLUTION = [{"id":"EV-281","source_runs":387,"problem":"18% 的 Campaign Creation Run 过早创建 Audience，之后才发现 frequency eligibility 不满足。","candidate":"create_audience 前新增 check_eligibility_distribution skill。","offline_replay":{"task_success":"+6.4%","tool_calls":"-8.2%","policy_violation":"0%","cost":"-4.1%"},"shadow":"PASS","status":"ready_for_canary"}]
 AGENT_ACTIVITY = [
@@ -66,7 +64,7 @@ CAPABILITIES = [
     {"id":"harness","name":"Agent harness","detail":"Context, memory, tool, trace, eval and approval boundaries.","module":"growthevo.web"},
 ]
 EVIDENCE = [
-    {"id":"criteo","name":"Criteo Uplift v2.1","kind":"Locked targeting","winner":"S-Learner","commit":"7ac26a5aebde2c70e1b43264b89f08dddcff0245","metrics":[{"label":"Source rows","value":"13,979,592"},{"label":"Population increment","value":"+0.93791 pp"},{"label":"Selected top-10% increment","value":"+9.37910 pp"}]},
+    {"id":"criteo","name":"Criteo Uplift","kind":"Locked targeting","winner":"S-Learner","commit":"7ac26a5aebde2c70e1b43264b89f08dddcff0245","metrics":[{"label":"Source rows","value":"13,979,592"},{"label":"Population increment","value":"+0.93791 pp"},{"label":"Selected top-10% increment","value":"+9.37910 pp"}]},
     {"id":"obd","name":"Open Bandit Dataset","kind":"Locked OPE","winner":"IPS","commit":"7d538cea9698b5f0a48c585eed85e3ae526e5af6","metrics":[{"label":"Random-policy rows","value":"1,374,327"},{"label":"Final estimate","value":"0.00452954"},{"label":"Support coverage","value":"1.0000"}]},
 ]
 
@@ -107,7 +105,6 @@ class ReferenceProductState:
         return {
             "project": {
                 "name": "GrowthEvo",
-                "version": __version__,
                 "tagline": "因果驱动的增长操作系统",
                 "status": "operational-demo",
                 "surface": "growth-os",

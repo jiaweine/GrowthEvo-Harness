@@ -1,1 +1,1 @@
-{"expo":{"name":"GrowthEvo","slug":"growthevo-mobile","version":"0.1.0","orientation":"portrait","userInterfaceStyle":"light","splash":{"backgroundColor":"#F5F7FB"},"ios":{"supportsTablet":true,"bundleIdentifier":"ai.growthevo.mobile"},"android":{"package":"ai.growthevo.mobile"}}}
+{"expo":{"name":"GrowthEvo","slug":"growthevo-mobile","version":"1.0.0","orientation":"portrait","userInterfaceStyle":"light","splash":{"backgroundColor":"#F5F7FB"},"ios":{"supportsTablet":true,"bundleIdentifier":"ai.growthevo.mobile"},"android":{"package":"ai.growthevo.mobile"}}}

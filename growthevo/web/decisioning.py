@@ -15,7 +15,6 @@ from .schemas import DecisionRequest
 
 UTC = timezone.utc
 REFERENCE_POLICY_ID = "policy_growth_safe"
-REFERENCE_POLICY_VERSION = "pv_reference_2"
 
 
 class DecisionInputError(ValueError):
@@ -39,10 +38,10 @@ class ActionDefinition:
 
 ACTION_REGISTRY: dict[str, ActionDefinition] = {
     "NO_TREATMENT": ActionDefinition("NO_TREATMENT", "No treatment", "none", 0.0, "L0", evidence_tier="A"),
-    "free_shipping_v3": ActionDefinition("free_shipping_v3", "首单免邮", "web", 8.0, "L2", "cr_free_ship_281", "A"),
-    "coupon_10_v2": ActionDefinition("coupon_10_v2", "¥10 优惠券", "coupon", 10.0, "L3", "cr_coupon_104", "B"),
-    "push_reminder_v4": ActionDefinition("push_reminder_v4", "加购提醒", "push", 0.08, "L2", "cr_push_442", "A"),
-    "email_guide_v2": ActionDefinition("email_guide_v2", "产品指南 Email", "email", 0.03, "L1", "cr_email_090", "B"),
+    "free_shipping": ActionDefinition("free_shipping", "首单免邮", "web", 8.0, "L2", "cr_free_ship_281", "A"),
+    "coupon_10": ActionDefinition("coupon_10", "¥10 优惠券", "coupon", 10.0, "L3", "cr_coupon_104", "B"),
+    "push_reminder": ActionDefinition("push_reminder", "加购提醒", "push", 0.08, "L2", "cr_push_442", "A"),
+    "email_guide": ActionDefinition("email_guide", "产品指南 Email", "email", 0.03, "L1", "cr_email_090", "B"),
 }
 
 
@@ -148,10 +147,7 @@ class ReferenceDecisionEngine:
 
     @staticmethod
     def _assignment_draw(request: DecisionRequest) -> float:
-        material = (
-            f"{REFERENCE_POLICY_ID}:{REFERENCE_POLICY_VERSION}:"
-            f"{request.entity_id}:{request.placement}"
-        ).encode("utf-8")
+        material = f"{REFERENCE_POLICY_ID}:{request.entity_id}:{request.placement}".encode("utf-8")
         integer = int.from_bytes(hashlib.sha256(material).digest()[:8], "big")
         return integer / 2**64
 
@@ -204,7 +200,6 @@ class ReferenceDecisionEngine:
             "propensity": 1.0,
             "action_distribution": {"NO_TREATMENT": 1.0},
             "policy_id": REFERENCE_POLICY_ID,
-            "policy_version": REFERENCE_POLICY_VERSION,
             "policy_randomization": "guardrail-deterministic",
             "engine_mode": "reference-contract",
             "evidence_tier": "A",
@@ -233,11 +228,11 @@ class ReferenceDecisionEngine:
         for action in actions:
             if action.action_id == "NO_TREATMENT":
                 score = 0.25 + churn_risk * 0.8
-            elif action.action_id == "free_shipping_v3":
+            elif action.action_id == "free_shipping":
                 score = 0.35 + min(cart_value / 500.0, 0.8) + (0.35 if intent == "high" else 0) + (0.2 if new_user else 0)
-            elif action.action_id == "coupon_10_v2":
+            elif action.action_id == "coupon_10":
                 score = 0.28 + (0.25 if new_user else 0) + (0.25 if intent in {"medium", "high"} else 0)
-            elif action.action_id == "push_reminder_v4":
+            elif action.action_id == "push_reminder":
                 score = 0.18 + (0.65 if abandoned_cart else 0) - churn_risk * 0.45
             else:
                 score = 0.2 + (0.25 if intent == "medium" else 0) - churn_risk * 0.15
@@ -315,7 +310,6 @@ class ReferenceDecisionEngine:
             "action_distribution": probabilities,
             "assignment_draw": draw,
             "policy_id": REFERENCE_POLICY_ID,
-            "policy_version": REFERENCE_POLICY_VERSION,
             "policy_randomization": "stable-hash-softmax",
             "engine_mode": "reference-contract",
             "evidence_tier": chosen.evidence_tier,

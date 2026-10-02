@@ -12,10 +12,10 @@ GuardrailName = Annotated[str, Field(min_length=1, max_length=128)]
 KNOWN_ACTION_IDS = frozenset(
     {
         "NO_TREATMENT",
-        "free_shipping_v3",
-        "coupon_10_v2",
-        "push_reminder_v4",
-        "email_guide_v2",
+        "free_shipping",
+        "coupon_10",
+        "push_reminder",
+        "email_guide",
     }
 )
 
@@ -70,7 +70,7 @@ class CampaignDraftRequest(RequestModel):
     audience: str = Field(min_length=2, max_length=500)
     budget: float = Field(ge=0, allow_inf_nan=False)
     candidate_action_ids: list[ActionId] = Field(
-        default_factory=lambda: ["NO_TREATMENT", "free_shipping_v3"],
+        default_factory=lambda: ["NO_TREATMENT", "free_shipping"],
         max_length=64,
     )
 

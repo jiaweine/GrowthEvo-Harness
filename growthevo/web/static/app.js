@@ -19,7 +19,7 @@ render=async function guardedRender(){
  // reference workbench content may render. This prevents an unavailable runtime
  // from being visually overwritten by fixture content.
  if(route!=='dashboard'&&!state.dashboard){
-  try{state.dashboard=await api('/api/v1/dashboard')}
+  try{state.dashboard=await api('/api/dashboard')}
   catch(error){if(epoch===routeRenderEpoch)renderApiUnavailable(error);return}
   if(epoch!==routeRenderEpoch||route!==state.route)return;
  }
@@ -33,7 +33,7 @@ async function submitAgentPrompt(e){
  if(useDemo){toast('Agent 已接收指令（Demo 模式）');t.value='';return}
  const submit=$('#agent-form button[type="submit"]');if(submit)submit.disabled=true;
  try{
-  const result=await api('/api/v1/agent/plan',{method:'POST',body:JSON.stringify({goal,primary_metric:'incremental_profit',guardrails:[]})});
+  const result=await api('/api/agent/plan',{method:'POST',body:JSON.stringify({goal,primary_metric:'incremental_profit',guardrails:[]})});
   toast(`Agent Plan 已生成 · ${result.run_id||'proposal_ready'}`);t.value='';
  }catch(error){renderApiUnavailable(error)}finally{if(submit)submit.disabled=false}
 }
@@ -49,6 +49,6 @@ function active(){const parent=parentRoute(state.route);$$('[data-route]').forEa
 function go(route){if(route==='agent'){openAgent();return}state.route=route;location.hash=route;active();void render();$('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'instant'})}
 window.addEventListener('hashchange',()=>{state.route=(location.hash||'#dashboard').slice(1);active();void render()});
 function openAgent(){$('#agent-sidecar').classList.add('open')}
-function openCommand(){const items=[['campaignStudio','创建一个新活动','Goal → Audience → Evidence → Execution'],['opportunities','分析新用户增长机会','Opportunity Map · causal incrementality'],['experiments','打开实验中心','Assignment / Holdout / Guardrails'],['realtime','查看实时决策','Decision API / propensity / policy'],['approvals','查看待审批事项','Risk / evidence / versions'],['harness','打开 Agent Harness','Trace / tools / guardrails'],['evolution','打开 Evolution Lab','Replay → Shadow → Canary']];$('#command-modal').hidden=false;$('#command-input').focus();$('#command-results').innerHTML=items.map(x=>`<div class="command-result" data-command-route="${x[0]}"><strong>${esc(x[1])}</strong><div style="font-size:8px;color:#8b95a5;margin-top:2px">${esc(x[2])}</div></div>`).join('');$$('[data-command-route]').forEach(x=>x.onclick=()=>{$('#command-modal').hidden=true;go(x.dataset.commandRoute)})}
+function openCommand(){const items=[['campaignStudio','创建一个新活动','Goal → Audience → Evidence → Execution'],['opportunities','分析新用户增长机会','Opportunity Map · causal incrementality'],['experiments','打开实验中心','Assignment / Holdout / Guardrails'],['realtime','查看实时决策','Decision API / propensity / policy'],['approvals','查看待审批事项','Risk / evidence / identity'],['harness','打开 Agent Harness','Trace / tools / guardrails'],['evolution','打开 Evolution Lab','Replay → Shadow → Canary']];$('#command-modal').hidden=false;$('#command-input').focus();$('#command-results').innerHTML=items.map(x=>`<div class="command-result" data-command-route="${x[0]}"><strong>${esc(x[1])}</strong><div style="font-size:8px;color:#8b95a5;margin-top:2px">${esc(x[2])}</div></div>`).join('');$$('[data-command-route]').forEach(x=>x.onclick=()=>{$('#command-modal').hidden=true;go(x.dataset.commandRoute)})}
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));}
 document.addEventListener('DOMContentLoaded',init);

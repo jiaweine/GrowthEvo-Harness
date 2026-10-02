@@ -14,6 +14,7 @@ on:
       - "pyproject.toml"
       - "Dockerfile"
       - ".dockerignore"
+      - "docs/product_surface.md"
       - "docs/deployment_architecture.md"
       - "docs/performance_testing.md"
       - ".github/workflows/product-surface.yml"
@@ -32,6 +33,7 @@ on:
       - "pyproject.toml"
       - "Dockerfile"
       - ".dockerignore"
+      - "docs/product_surface.md"
       - "docs/deployment_architecture.md"
       - "docs/performance_testing.md"
       - ".github/workflows/product-surface.yml"
@@ -206,15 +208,12 @@ jobs:
           }
           assert_live_route opportunities 'Live API'
           assert_live_route experiments 'Live API'
-          assert_live_route realtime 'free_shipping_v3'
+          assert_live_route realtime 'free_shipping'
           assert_live_route harness 'run_9081'
           assert_live_route approvals 'apr_281'
           assert_live_route evolution 'EV-281'
           "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=5000 --screenshot=ui-screenshots/growthevo-api-realtime.png http://127.0.0.1:4174/#realtime
           test -s ui-screenshots/growthevo-api-realtime.png
-
-          # Kill the API and prove that strict API mode stays visibly unavailable
-          # instead of falling back to synthetic Demo/Reference Fixture content.
           docker rm -f "$API_PID" >/dev/null
           unavailable_out="/tmp/growthevo-api-unavailable.html"
           "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:4174/#dashboard" > "$unavailable_out"
