@@ -10,6 +10,7 @@ in unit tests.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import sys
@@ -28,6 +29,13 @@ REQUIRED_CHECKS = (
     "package",
     "obd-integration",
 )
+REQUIRED_RULE_TYPES = (
+    "pull_request",
+    "required_status_checks",
+    "deletion",
+    "non_fast_forward",
+)
+REQUIRED_MERGE_METHODS = frozenset({"merge", "squash", "rebase"})
 
 
 @dataclass(frozen=True)
@@ -50,7 +58,10 @@ class GovernanceAuditResult:
 
 def _rule_map(ruleset: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = {}
-    for rule in ruleset.get("rules", []):
+    rules = ruleset.get("rules")
+    if not isinstance(rules, list):
+        return out
+    for rule in rules:
         if not isinstance(rule, dict):
             continue
         rule_type = rule.get("type")
@@ -59,7 +70,17 @@ def _rule_map(ruleset: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     return out
 
 
+def _ref_pattern_matches(pattern: str, branch: str) -> bool:
+    explicit = f"refs/heads/{branch}"
+    if pattern in {"~DEFAULT_BRANCH", "~ALL", explicit}:
+        return True
+    if pattern.startswith("refs/heads/"):
+        return fnmatch.fnmatchcase(explicit, pattern)
+    return False
+
+
 def _targets_branch(ruleset: dict[str, Any], branch: str) -> bool:
+    """Return whether a valid ruleset condition applies to the audited branch."""
     if ruleset.get("target") != "branch":
         return False
     conditions = ruleset.get("conditions")
@@ -72,10 +93,29 @@ def _targets_branch(ruleset: dict[str, Any], branch: str) -> bool:
     excludes = ref_name.get("exclude", [])
     if not isinstance(includes, list) or not isinstance(excludes, list):
         return False
-    explicit = f"refs/heads/{branch}"
-    included = explicit in includes or "~DEFAULT_BRANCH" in includes
-    excluded = explicit in excludes or "~DEFAULT_BRANCH" in excludes
+    if not all(isinstance(item, str) for item in includes + excludes):
+        return False
+    included = any(_ref_pattern_matches(item, branch) for item in includes)
+    excluded = any(_ref_pattern_matches(item, branch) for item in excludes)
     return included and not excluded
+
+
+def _targets_only_branch(ruleset: dict[str, Any], branch: str) -> bool:
+    """Require the contract ruleset to target only main/default, not extra refs."""
+    if ruleset.get("target") != "branch":
+        return False
+    conditions = ruleset.get("conditions")
+    if not isinstance(conditions, dict):
+        return False
+    ref_name = conditions.get("ref_name")
+    if not isinstance(ref_name, dict):
+        return False
+    includes = ref_name.get("include")
+    excludes = ref_name.get("exclude")
+    if not isinstance(includes, list) or not isinstance(excludes, list):
+        return False
+    explicit = f"refs/heads/{branch}"
+    return len(includes) == 1 and includes[0] in {explicit, "~DEFAULT_BRANCH"} and excludes == []
 
 
 def _checks_match(rule: dict[str, Any]) -> bool:
@@ -104,26 +144,47 @@ def _checks_match(rule: dict[str, Any]) -> bool:
 
 def _pull_request_rule_ok(rule: dict[str, Any]) -> bool:
     params = rule.get("parameters")
-    return isinstance(params, dict) and params.get("required_approving_review_count") == 0
+    if not isinstance(params, dict):
+        return False
+
+    methods = params.get("allowed_merge_methods")
+    if not isinstance(methods, list) or len(methods) != len(REQUIRED_MERGE_METHODS):
+        return False
+    if not all(isinstance(method, str) for method in methods):
+        return False
+    if frozenset(methods) != REQUIRED_MERGE_METHODS:
+        return False
+
+    approving_count = params.get("required_approving_review_count")
+    if type(approving_count) is not int or approving_count != 0:
+        return False
+
+    return (
+        params.get("dismiss_stale_reviews_on_push") is False
+        and params.get("require_code_owner_review") is False
+        and params.get("require_last_push_approval") is False
+        and params.get("required_review_thread_resolution") is False
+    )
 
 
 def _ruleset_satisfies_contract(ruleset: dict[str, Any], branch: str) -> bool:
+    if not isinstance(ruleset.get("id"), int):
+        return False
     if ruleset.get("enforcement") != "active":
         return False
-    if not _targets_branch(ruleset, branch):
+    if not _targets_only_branch(ruleset, branch):
         return False
-    bypass = ruleset.get("bypass_actors", [])
-    if bypass not in ([], None):
+    if ruleset.get("bypass_actors") != []:
         return False
 
     rules = _rule_map(ruleset)
-    if not any(_pull_request_rule_ok(rule) for rule in rules.get("pull_request", [])):
+    if set(rules) != set(REQUIRED_RULE_TYPES):
         return False
-    if not any(_checks_match(rule) for rule in rules.get("required_status_checks", [])):
+    if any(len(rules[rule_type]) != 1 for rule_type in REQUIRED_RULE_TYPES):
         return False
-    if not rules.get("deletion"):
+    if not _pull_request_rule_ok(rules["pull_request"][0]):
         return False
-    if not rules.get("non_fast_forward"):
+    if not _checks_match(rules["required_status_checks"][0]):
         return False
     return True
 
@@ -140,34 +201,34 @@ def audit_governance(
         failures.append(f"branch API returned {branch_data.get('name')!r}, expected {branch!r}")
 
     ruleset_list = tuple(rulesets)
-    active_targeting = tuple(
-        int(ruleset["id"])
+    active_targeting_rulesets = tuple(
+        ruleset
         for ruleset in ruleset_list
         if isinstance(ruleset, dict)
-        and isinstance(ruleset.get("id"), int)
         and ruleset.get("enforcement") == "active"
         and _targets_branch(ruleset, branch)
     )
-    matched = tuple(
-        int(ruleset["id"])
-        for ruleset in ruleset_list
-        if isinstance(ruleset, dict)
-        and isinstance(ruleset.get("id"), int)
-        and _ruleset_satisfies_contract(ruleset, branch)
+    matched_rulesets = tuple(
+        ruleset
+        for ruleset in active_targeting_rulesets
+        if _ruleset_satisfies_contract(ruleset, branch)
     )
+    matched = tuple(int(ruleset["id"]) for ruleset in matched_rulesets)
 
     pending = False
-    if not matched:
-        if allow_unconfigured and not active_targeting:
-            pending = True
-        else:
-            branch_flag = branch_data.get("protected") is True
-            failures.append(
-                "no active branch ruleset exactly matches the GrowthEvo governance contract "
-                "(PR-only, zero approvals, six strict GitHub Actions checks, no bypass, "
-                "no deletion, no force-push); "
-                f"branch API protected={branch_flag}"
-            )
+    if allow_unconfigured and not active_targeting_rulesets:
+        pending = True
+    elif len(active_targeting_rulesets) != 1 or len(matched_rulesets) != 1:
+        branch_flag = branch_data.get("protected") is True
+        active_ids = [ruleset.get("id") for ruleset in active_targeting_rulesets]
+        failures.append(
+            "expected exactly one active branch ruleset targeting main and exactly matching "
+            "the GrowthEvo governance contract (PR-only; zero approvals; no code-owner or "
+            "last-push approval; merge/squash/rebase allowed; six strict GitHub Actions checks; "
+            "no bypass actors; block deletion and non-fast-forward updates); "
+            f"active targeting rulesets={active_ids!r}, matched={list(matched)!r}, "
+            f"branch API protected={branch_flag}"
+        )
 
     return GovernanceAuditResult(
         ok=not failures,
