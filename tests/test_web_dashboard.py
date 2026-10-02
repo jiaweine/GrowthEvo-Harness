@@ -8,7 +8,7 @@ def test_dashboard_payload_exposes_product_surface() -> None:
 
     assert payload["project"]["name"] == "GrowthEvo-Harness"
     assert payload["project"]["surface"] == "web-dashboard"
-    assert payload["summary"]["api_version"] == "v1"
+    assert payload["summary"]["api_contract"] == "stable"
     assert payload["summary"]["locked_evidence_sets"] == 2
 
 
