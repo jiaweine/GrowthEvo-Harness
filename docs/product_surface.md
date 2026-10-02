@@ -6,7 +6,7 @@ GrowthEvo turns the research harness into a runnable growth operating system wit
 
 - **Incrementality first.** Opportunities, experiments, campaigns, and realtime decisions distinguish observed behavior from causal lift.
 - **NO_TREATMENT is a first-class action.** Doing nothing is always allowed when evidence, consent, frequency, budget, or context quality is insufficient.
-- **Stable identities, not numbered generations.** Public routes, action IDs, policies, agents, and harnesses use semantic stable identifiers. Product evolution is represented by evidence and state transitions rather than `v1/v2/v3` labels.
+- **Stable identities, not numbered generations.** Public routes, action IDs, policies, agents, and harnesses use semantic stable identifiers. Product evolution is represented by evidence and state transitions rather than numbered release labels.
 - **Evidence before execution.** High-impact actions pass explicit support, uncertainty, guardrail, approval, Shadow, and Canary boundaries.
 - **No fake production state.** Demo mode may use synthetic fixtures; API/production mode fails visibly when the backend is unavailable.
 
