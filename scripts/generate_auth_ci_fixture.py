@@ -157,6 +157,14 @@ def main() -> int:
         )
         (output / filename).write_text(token, encoding="utf-8")
 
+    unknown_kid_token = jwt.encode(
+        _claims(),
+        signing_key,
+        algorithm="RS256",
+        headers={"kid": "unknown-kid"},
+    )
+    (output / "unknown-kid.jwt").write_text(unknown_kid_token, encoding="utf-8")
+
     return 0
 
 
