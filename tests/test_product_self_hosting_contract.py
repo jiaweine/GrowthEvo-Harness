@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import subprocess
 
 
@@ -84,3 +85,17 @@ def test_self_hosting_runbook_preserves_production_boundary() -> None:
     assert "GROWTHEVO_AUTH_AUDIENCE" in runbook
     assert "bash scripts/backup_postgres.sh" in runbook
     assert "bash scripts/restore_postgres.sh" in runbook
+
+
+def test_public_product_identity_does_not_publish_numbered_generations() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert "![Version]" not in readme
+    assert "img.shields.io/badge/version-" not in readme
+    assert re.search(r"\bGrowthEvo(?:-Harness)?\s+v\d", readme, flags=re.IGNORECASE) is None
+    assert "product identity stays generation-neutral" in changelog
+
+    # Upstream dataset/evidence identities such as Criteo Uplift v2.1 are allowed and
+    # must remain intact because they are not GrowthEvo product generations.
+    assert "Criteo Uplift v2.1" in readme
