@@ -47,3 +47,12 @@ def test_dependabot_does_not_cross_expo_sdk_57_major_boundaries() -> None:
     ):
         assert f'dependency-name: "{dependency}"' in dependabot
         assert f'- "{boundary}"' in dependabot
+
+
+def test_mobile_ci_asks_expo_to_validate_the_installed_dependency_matrix() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "product-surface.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Validate Expo SDK dependency compatibility" in workflow
+    assert "./node_modules/.bin/expo install --check" in workflow
