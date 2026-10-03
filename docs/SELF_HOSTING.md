@@ -13,6 +13,7 @@ This runbook provides a small, production-shaped deployment for a personal Growt
 - Existing backup destinations are never overwritten implicitly.
 - Restore is destructive by design and requires an explicit confirmation environment variable.
 - Restore checksum is mandatory, and the archive is validated before the API is stopped or the database is modified.
+- If restore fails after the API has been stopped, the API remains stopped instead of serving a partially restored database.
 
 ## Start the stack
 
@@ -71,7 +72,7 @@ GROWTHEVO_RESTORE_CONFIRM=YES bash scripts/restore_postgres.sh backups/pre-chang
 
 The matching `.sha256` file is required. Restore fails before any destructive action if the checksum file is missing, malformed, points at a different dump path, or does not match the dump bytes. The PostgreSQL custom-format archive is also parsed with `pg_restore --list` before the API is stopped or database objects are changed.
 
-If the API service was running, the script stops it only after those checks pass, performs the restore, and only reports success after the API becomes ready again.
+If the API service was running, the script stops it only after those checks pass. A successful restore restarts the API and requires readiness before reporting success. If the restore command fails, or the restored API cannot become ready, the API remains stopped so the operator can inspect and recover the database without serving partial state.
 
 ## Upgrade safely
 
