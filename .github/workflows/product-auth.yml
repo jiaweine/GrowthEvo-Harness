@@ -210,6 +210,12 @@ jobs:
             -H "Authorization: Bearer $UNKNOWN_KID_TOKEN" \
             http://127.0.0.1:8770/api/dashboard)"
           test "$unavailable_status" = "503"
+          unavailable_repeat_status="$(curl --silent \
+            --output auth-reports/idp-unavailable-repeat.json \
+            --write-out '%{http_code}' \
+            -H "Authorization: Bearer $UNKNOWN_KID_TOKEN" \
+            http://127.0.0.1:8770/api/dashboard)"
+          test "$unavailable_repeat_status" = "503"
 
           python - <<'PY'
           import json
@@ -219,6 +225,9 @@ jobs:
           runtime = json.loads(Path("auth-reports/runtime.json").read_text())
           no_auth = json.loads(Path("auth-reports/no-auth.json").read_text())
           unavailable = json.loads(Path("auth-reports/idp-unavailable.json").read_text())
+          unavailable_repeat = json.loads(
+              Path("auth-reports/idp-unavailable-repeat.json").read_text()
+          )
 
           assert ready["status"] == "ready"
           assert runtime["ready"] is True
@@ -231,9 +240,11 @@ jobs:
               "healthy": True,
           }
           assert no_auth == {"detail": "valid bearer token required"}
-          assert unavailable["detail"] == (
+          expected_unavailable_detail = (
               "identity provider is temporarily unavailable; business API is fail-closed"
           )
+          assert unavailable["detail"] == expected_unavailable_detail
+          assert unavailable_repeat["detail"] == expected_unavailable_detail
           PY
 
           {
@@ -246,7 +257,7 @@ jobs:
             echo '- Valid RS256 token: business API 200'
             echo '- Wrong audience / issuer / expired token: 401'
             echo '- Duplicate Authorization headers: 401'
-            echo '- Unknown key while IdP is unavailable: 503 fail-closed'
+            echo '- Repeated unknown key while IdP is unavailable: 503 fail-closed'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload auth reports
         if: always()
