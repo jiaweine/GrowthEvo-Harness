@@ -65,6 +65,9 @@ def test_backup_and_restore_helpers_are_guarded_and_parse_as_bash() -> None:
     assert "--clean" in restore
     assert "--if-exists" in restore
     assert "--exit-on-error" in restore
+    assert "API remains stopped to avoid serving a partially restored database" in restore
+    assert "database restored, but API did not become ready; API has been stopped" in restore
+    assert "trap - ERR" in restore
     assert restore.index("pg_restore --list") < restore.index("docker compose stop api")
 
     assert POSTGRES_IMAGE in recovery
@@ -94,6 +97,7 @@ def test_self_hosting_runbook_preserves_production_boundary() -> None:
     assert "bash scripts/restore_postgres.sh" in runbook
     assert "checksum is mandatory" in normalized
     assert "archive is validated before the api is stopped" in normalized
+    assert "api remains stopped" in normalized
 
 
 def test_public_product_identity_does_not_publish_numbered_generations() -> None:
