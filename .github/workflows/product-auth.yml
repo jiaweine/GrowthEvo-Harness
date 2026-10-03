@@ -124,7 +124,7 @@ jobs:
           curl --fail --silent --cacert auth-fixture/ca.pem \
             https://localhost:9443/jwks.json >/dev/null
 
-          docker run --rm -d \
+          docker run -d \
             --name growthevo-auth-ci \
             --add-host=host.docker.internal:host-gateway \
             -p 8770:8765 \
@@ -143,11 +143,18 @@ jobs:
               >auth-reports/ready.json; then
               break
             fi
+            if [ "$(docker inspect -f '{{.State.Running}}' growthevo-auth-ci 2>/dev/null || true)" = "false" ]; then
+              break
+            fi
             sleep 0.25
           done
           if ! curl --fail --silent http://127.0.0.1:8770/api/ready \
             >auth-reports/ready.json; then
+            docker inspect growthevo-auth-ci \
+              --format 'status={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}' || true
             docker logs growthevo-auth-ci || true
+            echo '--- local JWKS server log ---' >&2
+            cat auth-fixture/server.log >&2 || true
             exit 1
           fi
           curl --fail --silent http://127.0.0.1:8770/api/system/runtime \
