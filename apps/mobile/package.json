@@ -12,12 +12,12 @@
   },
   "dependencies": {
     "expo": "~57.0.10",
-    "react": "19.2.3",
+    "react": "19.3.0",
     "react-native": "0.86.2",
     "react-native-safe-area-context": "~5.7.0"
   },
   "devDependencies": {
-    "@types/react": "~19.2.2",
+    "@types/react": "~19.3.0",
     "typescript": "~6.0.3"
   }
 }
