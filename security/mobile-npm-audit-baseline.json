@@ -1,0 +1,54 @@
+{
+  "reviewed_at": "2026-10-04",
+  "scope": "apps/mobile locked npm graph for Expo SDK 57",
+  "max_vulnerability_counts": {
+    "critical": 0,
+    "high": 16,
+    "moderate": 7,
+    "low": 0,
+    "info": 0,
+    "total": 23
+  },
+  "allowed_root_advisories": {
+    "GHSA-vfj7-8cjw-p6xm": {
+      "package": "braces",
+      "severity": "high",
+      "status": "upstream-no-patched-release"
+    },
+    "GHSA-86w9-cpqp-85rv": {
+      "package": "node-forge",
+      "severity": "high",
+      "status": "upstream-latest-still-affected"
+    },
+    "GHSA-w5hq-g745-h8pq": {
+      "package": "uuid",
+      "severity": "moderate",
+      "status": "upstream-xcode-fix-not-yet-released"
+    }
+  },
+  "allowed_affected_packages": [
+    "@expo/cli",
+    "@expo/code-signing-certificates",
+    "@expo/config",
+    "@expo/config-plugins",
+    "@expo/inline-modules",
+    "@expo/local-build-cache-provider",
+    "@expo/metro",
+    "@expo/metro-config",
+    "@expo/metro-file-map",
+    "@expo/prebuild-config",
+    "@react-native/community-cli-plugin",
+    "@react-native/virtualized-lists",
+    "braces",
+    "expo",
+    "metro",
+    "metro-config",
+    "metro-file-map",
+    "metro-transform-worker",
+    "micromatch",
+    "node-forge",
+    "react-native",
+    "uuid",
+    "xcode"
+  ]
+}
