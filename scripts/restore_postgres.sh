@@ -12,14 +12,40 @@ if [ "${GROWTHEVO_RESTORE_CONFIRM:-}" != "YES" ]; then
 fi
 
 checksum="${backup}.sha256"
-if [ -f "$checksum" ]; then
-  sha256sum --check "$checksum"
-else
-  echo "warning: no checksum file found at $checksum" >&2
+if [ ! -f "$checksum" ]; then
+  echo "checksum is required for restore: $checksum" >&2
+  exit 1
+fi
+
+line_count="$(wc -l < "$checksum" | tr -d ' ')"
+if [ "$line_count" -ne 1 ]; then
+  echo "checksum file must contain exactly one entry" >&2
+  exit 1
+fi
+
+read -r expected_hash recorded_path < "$checksum"
+if [[ ! "$expected_hash" =~ ^[0-9a-fA-F]{64}$ ]]; then
+  echo "checksum file contains an invalid SHA-256 digest" >&2
+  exit 1
+fi
+if [ "$recorded_path" != "$backup" ]; then
+  echo "checksum entry does not match requested backup: $recorded_path" >&2
+  exit 1
+fi
+actual_hash="$(sha256sum "$backup" | awk '{print $1}')"
+if [ "${actual_hash,,}" != "${expected_hash,,}" ]; then
+  echo "backup checksum mismatch" >&2
+  exit 1
 fi
 
 if ! docker compose ps --status running --services | grep -Fxq postgres; then
   echo "GrowthEvo PostgreSQL service is not running" >&2
+  exit 1
+fi
+
+# Validate the custom-format archive before stopping the API or changing the database.
+if ! docker compose exec -T postgres pg_restore --list < "$backup" >/dev/null; then
+  echo "backup archive is not a readable PostgreSQL custom-format dump" >&2
   exit 1
 fi
 
