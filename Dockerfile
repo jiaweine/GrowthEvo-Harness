@@ -15,7 +15,8 @@ COPY growthevo ./growthevo
 # setuptools/wheel resolver would otherwise sit outside the runtime lock.
 RUN python -m pip install --disable-pip-version-check \
     --constraint constraints/web-container-py313.txt \
-    fastapi==0.141.1 uvicorn==0.54.0
+    fastapi==0.141.1 uvicorn==0.54.0 \
+    psycopg==3.3.6 psycopg-binary==3.3.6 psycopg-pool==3.3.3
 
 RUN useradd --create-home --uid 10001 growthevo && chown -R growthevo:growthevo /app
 USER growthevo

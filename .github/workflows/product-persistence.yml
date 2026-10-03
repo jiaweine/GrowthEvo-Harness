@@ -1,0 +1,312 @@
+name: Product Persistence CI
+
+on:
+  pull_request:
+    paths:
+      - "growthevo/web/**"
+      - "constraints/web-container-py313.txt"
+      - "tests/test_product_postgres_persistence.py"
+      - "scripts/stress_product.py"
+      - "pyproject.toml"
+      - "Dockerfile"
+      - "docs/durable_persistence.md"
+      - ".github/workflows/product-persistence.yml"
+  push:
+    branches: [main]
+    paths:
+      - "growthevo/web/**"
+      - "constraints/web-container-py313.txt"
+      - "tests/test_product_postgres_persistence.py"
+      - "scripts/stress_product.py"
+      - "pyproject.toml"
+      - "Dockerfile"
+      - "docs/durable_persistence.md"
+      - ".github/workflows/product-persistence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-persistence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-product:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.11@sha256:e31e3d5327d1806f6177827c9710643e4f35f7ab3f14d26d05332753d3e95ee0
+        env:
+          POSTGRES_USER: growthevo
+          POSTGRES_PASSWORD: growthevo-ci
+          POSTGRES_DB: growthevo_ci
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U growthevo -d growthevo_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/web-container-py313.txt
+      - name: Install production-aligned persistence dependencies
+        run: python -m pip install --constraint constraints/web-container-py313.txt -e '.[web,dev]'
+      - name: Test PostgreSQL migrations, restart recovery, and multi-app atomicity
+        env:
+          GROWTHEVO_TEST_DATABASE_URL: postgresql://growthevo:growthevo-ci@127.0.0.1:55432/growthevo_ci
+        run: pytest tests/test_product_postgres_persistence.py
+      - name: Build production container
+        run: docker build -t growthevo-api:persistence-ci .
+      - name: Stress durable API and verify process restart recovery
+        shell: bash
+        env:
+          HOST_DATABASE_URL: postgresql://growthevo:growthevo-ci@127.0.0.1:55432/growthevo_ci
+          CONTAINER_DATABASE_URL: postgresql://growthevo:growthevo-ci@host.docker.internal:55432/growthevo_ci
+        run: |
+          set -euo pipefail
+          mkdir -p persistence-reports
+          cleanup() {
+            docker rm -f growthevo-db-ci-a growthevo-db-ci-b >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          start_api() {
+            name="$1"
+            port="$2"
+            docker run --rm -d \
+              --name "$name" \
+              --add-host=host.docker.internal:host-gateway \
+              -p "${port}:8765" \
+              -e GROWTHEVO_MODE=api \
+              -e GROWTHEVO_ENV=persistence-ci \
+              -e GROWTHEVO_DATABASE_URL="$CONTAINER_DATABASE_URL" \
+              growthevo-api:persistence-ci >/dev/null
+            for attempt in $(seq 1 40); do
+              if curl --fail --silent "http://127.0.0.1:${port}/api/ready" >/dev/null; then
+                return 0
+              fi
+              sleep 0.5
+            done
+            docker logs "$name" || true
+            return 1
+          }
+
+          start_api growthevo-db-ci-a 8766
+          curl --fail --silent http://127.0.0.1:8766/api/system/runtime | tee persistence-reports/runtime.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("persistence-reports/runtime.json").read_text())
+          persistence = payload["persistence"]
+          assert persistence["backend"] == "postgresql"
+          assert persistence["active"] is True
+          assert persistence["healthy"] is True
+          assert payload["ready"] is True
+          PY
+
+          python scripts/stress_product.py \
+            --base-url http://127.0.0.1:8766 \
+            --profile quick \
+            --json-out persistence-reports/product-stress-postgres.json \
+            --markdown-out persistence-reports/product-stress-postgres.md
+          cat persistence-reports/product-stress-postgres.md >> "$GITHUB_STEP_SUMMARY"
+
+          python - <<'PY'
+          import json
+          import urllib.request
+          from pathlib import Path
+
+          base = "http://127.0.0.1:8766"
+
+          def post(path, payload, headers=None):
+              data = json.dumps(payload).encode()
+              request = urllib.request.Request(
+                  base + path,
+                  data=data,
+                  method="POST",
+                  headers={"Content-Type": "application/json", **(headers or {})},
+              )
+              with urllib.request.urlopen(request, timeout=10) as response:
+                  return response.status, json.load(response)
+
+          campaign_status, campaign = post(
+              "/api/campaigns/draft",
+              {
+                  "name": "Container restart durability check",
+                  "goal": "Verify durable state after API process restart",
+                  "audience": "container-restart-audience",
+                  "budget": 2400,
+                  "candidate_action_ids": ["NO_TREATMENT", "free_shipping"],
+              },
+          )
+          assert campaign_status == 201
+          decision_body = {
+              "entity_id": "container-restart-user",
+              "placement": "checkout_banner",
+              "context": {
+                  "cart_value": 360,
+                  "session_intent": "high",
+                  "new_user": True,
+                  "abandoned_cart": False,
+                  "churn_risk": 0.03,
+              },
+              "candidate_action_ids": ["NO_TREATMENT", "free_shipping", "coupon_10"],
+              "consent_state": True,
+              "frequency_remaining": 2,
+              "budget_remaining": 50,
+              "context_freshness_seconds": 4,
+          }
+          decision_status, decision = post(
+              "/api/decide",
+              decision_body,
+              {"Idempotency-Key": "container-restart-key"},
+          )
+          assert decision_status == 200
+          Path("persistence-reports/restart-state.json").write_text(
+              json.dumps(
+                  {
+                      "campaign_id": campaign["id"],
+                      "decision_id": decision["decision_id"],
+                      "decision_body": decision_body,
+                  },
+                  ensure_ascii=False,
+                  indent=2,
+              )
+          )
+          PY
+
+          docker rm -f growthevo-db-ci-a >/dev/null
+          start_api growthevo-db-ci-a 8766
+          start_api growthevo-db-ci-b 8767
+
+          python - <<'PY'
+          from concurrent.futures import ThreadPoolExecutor
+          import json
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          state = json.loads(Path("persistence-reports/restart-state.json").read_text())
+          bases = ["http://127.0.0.1:8766", "http://127.0.0.1:8767"]
+
+          def request(base, path, *, method="GET", payload=None, headers=None):
+              data = None if payload is None else json.dumps(payload).encode()
+              req = urllib.request.Request(
+                  base + path,
+                  data=data,
+                  method=method,
+                  headers={"Content-Type": "application/json", **(headers or {})},
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=15) as response:
+                      return response.status, json.load(response)
+              except urllib.error.HTTPError as exc:
+                  return exc.code, json.loads(exc.read().decode())
+
+          status, campaigns = request(bases[1], "/api/campaigns")
+          assert status == 200
+          assert any(item["id"] == state["campaign_id"] for item in campaigns)
+
+          status, replay = request(
+              bases[1],
+              "/api/decide",
+              method="POST",
+              payload=state["decision_body"],
+              headers={"Idempotency-Key": "container-restart-key"},
+          )
+          assert status == 200
+          assert replay["decision_id"] == state["decision_id"]
+
+          status, recent = request(bases[0], "/api/decisions/recent?limit=100")
+          assert status == 200
+          assert any(item["decision_id"] == state["decision_id"] for item in recent)
+
+          shared_body = dict(state["decision_body"])
+          shared_body["entity_id"] = "multi-replica-idempotency-user"
+
+          def same_key(index):
+              status, payload = request(
+                  bases[index % 2],
+                  "/api/decide",
+                  method="POST",
+                  payload=shared_body,
+                  headers={"Idempotency-Key": "multi-replica-shared-key"},
+              )
+              assert status == 200
+              return payload["decision_id"]
+
+          with ThreadPoolExecutor(max_workers=32) as executor:
+              decision_ids = list(executor.map(same_key, range(128)))
+          assert len(set(decision_ids)) == 1
+
+          conflicting_body = dict(shared_body)
+          conflicting_body["entity_id"] = "multi-replica-conflict-user"
+          status, _ = request(
+              bases[1],
+              "/api/decide",
+              method="POST",
+              payload=conflicting_body,
+              headers={"Idempotency-Key": "multi-replica-shared-key"},
+          )
+          assert status == 409
+
+          def create_campaign(index):
+              status, payload = request(
+                  bases[index % 2],
+                  "/api/campaigns/draft",
+                  method="POST",
+                  payload={
+                      "name": f"Replica campaign {index}",
+                      "goal": "Exercise concurrent durable campaign writes",
+                      "audience": f"replica-audience-{index}",
+                      "budget": 1000 + index,
+                      "candidate_action_ids": ["NO_TREATMENT", "free_shipping"],
+                  },
+              )
+              assert status == 201
+              return payload["id"]
+
+          with ThreadPoolExecutor(max_workers=24) as executor:
+              campaign_ids = list(executor.map(create_campaign, range(64)))
+          assert len(set(campaign_ids)) == 64
+          status, campaigns = request(bases[1], "/api/campaigns")
+          assert status == 200
+          visible = {item["id"] for item in campaigns}
+          assert set(campaign_ids) <= visible
+
+          report = {
+              "restart_campaign_recovered": True,
+              "restart_decision_recovered": True,
+              "same_key_requests": 128,
+              "same_key_unique_decision_ids": len(set(decision_ids)),
+              "parallel_campaign_writes": 64,
+              "parallel_campaign_unique_ids": len(set(campaign_ids)),
+          }
+          Path("persistence-reports/persistence-concurrency.json").write_text(
+              json.dumps(report, indent=2)
+          )
+          print(json.dumps(report, indent=2))
+          PY
+
+          {
+            echo '### Durable PostgreSQL verification'
+            echo
+            echo '- API process restart recovery: PASS'
+            echo '- Cross-replica idempotency: 128 requests → 1 decision ID'
+            echo '- Cross-replica concurrent Campaign writes: 64/64 unique and visible'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload persistence reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: growthevo-postgres-persistence-reports
+          path: persistence-reports/*
+          if-no-files-found: warn

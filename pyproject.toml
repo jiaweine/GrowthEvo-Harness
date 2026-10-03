@@ -71,6 +71,7 @@ llm = [
 web = [
   "fastapi>=0.115,<1.0",
   "uvicorn>=0.30,<1.0",
+  "psycopg[binary,pool]>=3.3,<4.0",
 ]
 attestation-sigstore = [
   "sigstore==4.5.0",
