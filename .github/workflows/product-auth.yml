@@ -136,6 +136,7 @@ jobs:
             -e GROWTHEVO_AUTH_ISSUER=https://issuer.example.test/growthevo \
             -e GROWTHEVO_AUTH_JWKS_URL=https://host.docker.internal:9443/jwks.json \
             -e GROWTHEVO_AUTH_AUDIENCE=growthevo-ci \
+            -e GROWTHEVO_CORS_ORIGINS=https://client.example.test \
             growthevo-api:auth-ci >/dev/null
 
           for attempt in $(seq 1 50); do
@@ -159,6 +160,19 @@ jobs:
           fi
           curl --fail --silent http://127.0.0.1:8770/api/system/runtime \
             >auth-reports/runtime.json
+
+          preflight_status="$(curl --silent \
+            --dump-header auth-reports/preflight.headers \
+            --output auth-reports/preflight.body \
+            --write-out '%{http_code}' \
+            -X OPTIONS \
+            -H 'Origin: https://client.example.test' \
+            -H 'Access-Control-Request-Method: GET' \
+            -H 'Access-Control-Request-Headers: Authorization' \
+            http://127.0.0.1:8770/api/dashboard)"
+          test "$preflight_status" = "200"
+          grep -qi '^access-control-allow-origin: https://client.example.test' auth-reports/preflight.headers
+          grep -qi '^access-control-allow-headers:.*Authorization' auth-reports/preflight.headers
 
           no_auth_status="$(curl --silent --dump-header auth-reports/no-auth.headers \
             --output auth-reports/no-auth.json --write-out '%{http_code}' \
@@ -186,6 +200,17 @@ jobs:
             http://127.0.0.1:8770/api/dashboard)"
           test "$duplicate_status" = "401"
 
+          kill "$JWKS_SERVER_PID"
+          wait "$JWKS_SERVER_PID" 2>/dev/null || true
+          JWKS_SERVER_PID=""
+          UNKNOWN_KID_TOKEN="$(cat auth-fixture/unknown-kid.jwt)"
+          unavailable_status="$(curl --silent \
+            --output auth-reports/idp-unavailable.json \
+            --write-out '%{http_code}' \
+            -H "Authorization: Bearer $UNKNOWN_KID_TOKEN" \
+            http://127.0.0.1:8770/api/dashboard)"
+          test "$unavailable_status" = "503"
+
           python - <<'PY'
           import json
           from pathlib import Path
@@ -193,6 +218,7 @@ jobs:
           ready = json.loads(Path("auth-reports/ready.json").read_text())
           runtime = json.loads(Path("auth-reports/runtime.json").read_text())
           no_auth = json.loads(Path("auth-reports/no-auth.json").read_text())
+          unavailable = json.loads(Path("auth-reports/idp-unavailable.json").read_text())
 
           assert ready["status"] == "ready"
           assert runtime["ready"] is True
@@ -205,6 +231,9 @@ jobs:
               "healthy": True,
           }
           assert no_auth == {"detail": "valid bearer token required"}
+          assert unavailable["detail"] == (
+              "identity provider is temporarily unavailable; business API is fail-closed"
+          )
           PY
 
           {
@@ -212,10 +241,12 @@ jobs:
             echo
             echo '- PostgreSQL + OIDC/JWKS readiness: PASS'
             echo '- Anonymous system probes: PASS'
+            echo '- Browser CORS preflight with Authorization: PASS'
             echo '- Missing Bearer token: 401 + WWW-Authenticate'
             echo '- Valid RS256 token: business API 200'
             echo '- Wrong audience / issuer / expired token: 401'
             echo '- Duplicate Authorization headers: 401'
+            echo '- Unknown key while IdP is unavailable: 503 fail-closed'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload auth reports
         if: always()
