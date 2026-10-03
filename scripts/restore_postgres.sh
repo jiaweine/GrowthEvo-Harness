@@ -55,12 +55,14 @@ if docker compose ps --status running --services | grep -Fxq api; then
   docker compose stop api >/dev/null
 fi
 
-restart_api() {
-  if [ "$api_was_running" = true ]; then
-    docker compose start api >/dev/null 2>&1 || true
+restore_failed() {
+  status=$?
+  if [ "$status" -ne 0 ] && [ "$api_was_running" = true ]; then
+    echo "restore failed; API remains stopped to avoid serving a partially restored database" >&2
   fi
+  exit "$status"
 }
-trap restart_api EXIT
+trap restore_failed ERR
 
 cat "$backup" | docker compose exec -T postgres sh -ceu '
   exec pg_restore \
@@ -73,19 +75,20 @@ cat "$backup" | docker compose exec -T postgres sh -ceu '
     --exit-on-error
 '
 
+trap - ERR
+
 if [ "$api_was_running" = true ]; then
   docker compose start api >/dev/null
   for _ in $(seq 1 40); do
     if docker compose exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/ready', timeout=3)" >/dev/null 2>&1; then
-      trap - EXIT
       echo "restore complete; API is ready"
       exit 0
     fi
     sleep 0.5
   done
-  echo "database restored, but API did not become ready" >&2
+  docker compose stop api >/dev/null 2>&1 || true
+  echo "database restored, but API did not become ready; API has been stopped" >&2
   exit 1
 fi
 
-trap - EXIT
 echo "restore complete"
