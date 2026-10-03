@@ -18,6 +18,16 @@ SCANNED = [
     ROOT / ".github" / "workflows" / "product-surface.yml",
 ]
 
+# Source/test/script path names are GrowthEvo-owned implementation identities and
+# must not encode product generations. Benchmark/evidence paths are excluded on
+# purpose because their version tokens are immutable external/protocol identities.
+INTERNAL_PATH_ROOTS = [
+    ROOT / "growthevo",
+    ROOT / "apps",
+    ROOT / "scripts",
+    ROOT / "tests",
+]
+
 FORBIDDEN = {
     "versioned public API path": re.compile(r"/api/v\d+\b", re.IGNORECASE),
     "public numbered product label": re.compile(r"\bv\d+(?:\.\d+){1,2}\b", re.IGNORECASE),
@@ -27,12 +37,18 @@ FORBIDDEN = {
     "numbered agent/harness generation": re.compile(r"\b(?:growth-agent|agent-growth|agent-creative|agent-operator|harness)-\d+(?:\.\d+)*(?:-[a-z0-9]+)?\b", re.IGNORECASE),
 }
 
+NUMBERED_INTERNAL_PATH = re.compile(r"(?:^|[_-])v\d+(?:[._-]|$)", re.IGNORECASE)
+
 
 def _files() -> list[Path]:
     files: list[Path] = []
     for target in SCANNED:
         if target.is_dir():
-            files.extend(path for path in target.rglob("*") if path.is_file() and path.suffix in {".py", ".js", ".html", ".md", ".json"})
+            files.extend(
+                path
+                for path in target.rglob("*")
+                if path.is_file() and path.suffix in {".py", ".js", ".html", ".md", ".json"}
+            )
         elif target.exists():
             files.append(target)
     return sorted(set(files))
@@ -45,5 +61,19 @@ def test_product_surface_keeps_one_stable_public_identity() -> None:
         for label, pattern in FORBIDDEN.items():
             for match in pattern.finditer(text):
                 line = text.count("\n", 0, match.start()) + 1
-                failures.append(f"{path.relative_to(ROOT)}:{line}: {label}: {match.group(0)!r}")
+                failures.append(
+                    f"{path.relative_to(ROOT)}:{line}: {label}: {match.group(0)!r}"
+                )
     assert not failures, "\n" + "\n".join(failures)
+
+
+def test_growth_evo_owned_paths_do_not_encode_numbered_generations() -> None:
+    failures: list[str] = []
+    for root in INTERNAL_PATH_ROOTS:
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(ROOT)
+            if NUMBERED_INTERNAL_PATH.search(relative.as_posix()):
+                failures.append(relative.as_posix())
+    assert not failures, "numbered GrowthEvo implementation paths:\n" + "\n".join(failures)
