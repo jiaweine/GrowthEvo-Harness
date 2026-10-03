@@ -53,17 +53,23 @@ def test_backup_and_restore_helpers_are_guarded_and_parse_as_bash() -> None:
     assert "--format=custom" in backup
     assert "sha256sum" in backup
     assert ".partial" in backup
+    assert "refusing to overwrite" in backup
 
     assert 'GROWTHEVO_RESTORE_CONFIRM:-' in restore
     assert '!= "YES"' in restore
-    assert "sha256sum --check" in restore
+    assert "checksum is required for restore" in restore
+    assert "checksum file must contain exactly one entry" in restore
+    assert "backup checksum mismatch" in restore
+    assert "pg_restore --list" in restore
     assert "docker compose stop api" in restore
     assert "--clean" in restore
     assert "--if-exists" in restore
     assert "--exit-on-error" in restore
+    assert restore.index("pg_restore --list") < restore.index("docker compose stop api")
 
     assert POSTGRES_IMAGE in recovery
     assert "pg_dump" in recovery
+    assert "pg_restore --list" in recovery
     assert "pg_restore" in recovery
     assert "createdb" in recovery
     assert "recovered-campaigns.json" in recovery
@@ -86,6 +92,8 @@ def test_self_hosting_runbook_preserves_production_boundary() -> None:
     assert "GROWTHEVO_AUTH_AUDIENCE" in runbook
     assert "bash scripts/backup_postgres.sh" in runbook
     assert "bash scripts/restore_postgres.sh" in runbook
+    assert "checksum is mandatory" in normalized
+    assert "archive is validated before the api is stopped" in normalized
 
 
 def test_public_product_identity_does_not_publish_numbered_generations() -> None:
