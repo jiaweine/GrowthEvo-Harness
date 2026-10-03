@@ -2,20 +2,9 @@ name: CodeQL
 
 on:
   pull_request:
-    paths:
-      - "growthevo/**"
-      - "apps/mobile/**"
-      - "scripts/**"
-      - "pyproject.toml"
-      - ".github/workflows/codeql.yml"
+    branches: [main]
   push:
     branches: [main]
-    paths:
-      - "growthevo/**"
-      - "apps/mobile/**"
-      - "scripts/**"
-      - "pyproject.toml"
-      - ".github/workflows/codeql.yml"
   schedule:
     - cron: "23 4 * * 1"
 
@@ -28,8 +17,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.route.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Route CodeQL gate
+        id: route
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "pull_request" || "$EVENT_NAME" == "push" ]]; then
+            RUN_GATE="$(python3 tools/ci_changed_paths.py --profile codeql --base "$BASE_SHA" --head "$HEAD_SHA")"
+          else
+            RUN_GATE=true
+          fi
+          echo "run=$RUN_GATE" >> "$GITHUB_OUTPUT"
+          echo "CodeQL heavy validation: $RUN_GATE"
+
   analyze:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     strategy:
@@ -48,3 +63,25 @@ jobs:
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4, 2026-09-24
         with:
           category: "/language:${{ matrix.language }}"
+
+  required:
+    name: codeql-required
+    if: always()
+    needs: [changes, analyze]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce CodeQL routing result
+        shell: bash
+        env:
+          ROUTE_RESULT: ${{ needs.changes.result }}
+          RUN_GATE: ${{ needs.changes.outputs.run }}
+          ANALYZE_RESULT: ${{ needs.analyze.result }}
+          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          set -euo pipefail
+          test "$ROUTE_RESULT" = "success"
+          if [[ "$RUN_GATE" == "true" && "$IS_FORK_PR" != "true" ]]; then
+            test "$ANALYZE_RESULT" = "success"
+          else
+            [[ "$ANALYZE_RESULT" == "success" || "$ANALYZE_RESULT" == "skipped" ]]
+          fi
