@@ -29,13 +29,21 @@ def test_compose_uses_pinned_postgres_and_private_api_defaults() -> None:
 
 def test_self_host_environment_example_is_fail_closed_by_default() -> None:
     env = (ROOT / ".env.self-host.example").read_text(encoding="utf-8")
+    values = {}
+    for line in env.splitlines():
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key] = value
 
-    assert "GROWTHEVO_MODE=api" in env
-    assert "GROWTHEVO_API_BIND=127.0.0.1" in env
-    assert "GROWTHEVO_AUTH_ISSUER=" in env
-    assert "GROWTHEVO_AUTH_JWKS_URL=" in env
-    assert "GROWTHEVO_AUTH_AUDIENCE=" in env
-    assert "replace-with-a-long-random-password" in env
+    assert values["GROWTHEVO_MODE"] == "api"
+    assert values["GROWTHEVO_API_BIND"] == "127.0.0.1"
+    assert values["GROWTHEVO_POSTGRES_PASSWORD"] == ""
+    assert values["GROWTHEVO_DATABASE_URL"] == ""
+    assert values["GROWTHEVO_AUTH_ISSUER"] == ""
+    assert values["GROWTHEVO_AUTH_JWKS_URL"] == ""
+    assert values["GROWTHEVO_AUTH_AUDIENCE"] == ""
+    assert "replace-with-a-long-random-password" not in env
 
 
 def test_backup_and_restore_helpers_are_guarded_and_parse_as_bash() -> None:
