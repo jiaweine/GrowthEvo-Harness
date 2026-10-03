@@ -22,7 +22,7 @@ def test_pages_production_deploy_is_main_only_and_least_privilege() -> None:
     # must be reported as pending rather than turning every main build red.
     assert '"$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/pages"' in workflow
     assert 'if [[ "$STATUS" == "404" ]]' in workflow
-    assert "GitHub Pages deployment pending" in workflow
+    assert "GrowthEvo Pages deployment pending" in workflow
     assert "Settings → Pages → Build and deployment → Source → GitHub Actions" in workflow
     assert 'BUILD_TYPE' in workflow
     assert '"workflow"' in workflow
