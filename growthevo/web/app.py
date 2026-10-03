@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import replace
 import json
 import os
@@ -180,6 +181,14 @@ def create_app() -> Any:
         decision_engine = ReferenceDecisionEngine()
         product_state = ReferenceProductState()
 
+    @asynccontextmanager
+    async def lifespan(_: Any):
+        try:
+            yield
+        finally:
+            if persistence_store is not None:
+                persistence_store.close()
+
     app = FastAPI(
         title="GrowthEvo Growth OS",
         version="stable",
@@ -187,13 +196,12 @@ def create_app() -> Any:
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/openapi.json",
+        lifespan=lifespan,
     )
     app.state.decision_engine = decision_engine
     app.state.product_state = product_state
     app.state.persistence_store = persistence_store
     app.state.runtime_settings = settings
-    if persistence_store is not None:
-        app.add_event_handler("shutdown", persistence_store.close)
 
     def persistence_healthy() -> bool:
         if persistence_store is None:
