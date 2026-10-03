@@ -35,6 +35,9 @@ test -s "$backup"
 sha256sum "$backup" > "$checksum"
 sha256sum --check "$checksum"
 
+# Exercise the same non-destructive archive preflight required by the operator restore helper.
+cat "$backup" | docker run --rm -i --network host "$POSTGRES_IMAGE" pg_restore --list >/dev/null
+
 PGPASSWORD="$DB_PASSWORD" docker run --rm --network host \
   -e PGPASSWORD="$DB_PASSWORD" "$POSTGRES_IMAGE" \
   dropdb --if-exists --force -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" "$RESTORE_DB" >/dev/null
@@ -84,6 +87,7 @@ PY
   echo
   echo '- custom-format pg_dump: PASS'
   echo '- SHA-256 integrity check: PASS'
+  echo '- archive readability preflight: PASS'
   echo '- restore into a fresh database: PASS'
   echo '- restored API readiness: PASS'
   echo '- restored Campaign and Decision state: PASS'
