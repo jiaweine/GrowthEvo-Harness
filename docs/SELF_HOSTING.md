@@ -45,12 +45,12 @@ Production browser origins must use HTTPS. Do not expose port 8765 directly to t
 ## Backup
 
 ```bash
-./scripts/backup_postgres.sh
+bash scripts/backup_postgres.sh
 # Or choose the destination explicitly:
-./scripts/backup_postgres.sh backups/pre-change.dump
+bash scripts/backup_postgres.sh backups/pre-change.dump
 ```
 
-Each successful backup produces both a PostgreSQL custom-format dump and a matching `.sha256` file. Keep backups outside the application host as well; a backup stored only beside the live volume is not a disaster-recovery copy.
+Each successful backup produces both a PostgreSQL custom-format dump and a matching `.sha256` file. The repository ignores `backups/` so a database dump is not accidentally committed. Keep backups outside the application host as well; a backup stored only beside the live volume is not a disaster-recovery copy.
 
 A reasonable personal-project policy is:
 
@@ -64,7 +64,7 @@ A reasonable personal-project policy is:
 Stop external writers first. Then run:
 
 ```bash
-GROWTHEVO_RESTORE_CONFIRM=YES ./scripts/restore_postgres.sh backups/pre-change.dump
+GROWTHEVO_RESTORE_CONFIRM=YES bash scripts/restore_postgres.sh backups/pre-change.dump
 ```
 
 If the API service was running, the script stops it before restore and only reports success after the API becomes ready again. If a checksum file exists beside the dump, it is verified before any destructive operation.
@@ -72,7 +72,7 @@ If the API service was running, the script stops it before restore and only repo
 ## Upgrade safely
 
 ```bash
-./scripts/backup_postgres.sh backups/pre-upgrade.dump
+bash scripts/backup_postgres.sh backups/pre-upgrade.dump
 docker compose build --pull=false
 docker compose up -d
 docker compose ps
