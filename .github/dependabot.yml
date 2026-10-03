@@ -34,3 +34,20 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "chore(mobile-deps)"
+    # Expo SDK 57 is intentionally kept on its official React/RN/toolchain
+    # compatibility line. Patch updates inside these supported lines remain
+    # eligible; crossing a boundary below requires an intentional Expo SDK
+    # migration with native/runtime validation rather than an isolated bump.
+    ignore:
+      - dependency-name: "react"
+        versions:
+          - ">=19.3.0"
+      - dependency-name: "@types/react"
+        versions:
+          - ">=19.3.0"
+      - dependency-name: "react-native"
+        versions:
+          - ">=0.87.0"
+      - dependency-name: "typescript"
+        versions:
+          - ">=7.0.0"
