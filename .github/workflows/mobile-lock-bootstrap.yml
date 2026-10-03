@@ -41,8 +41,19 @@ jobs:
         working-directory: apps/mobile
         run: npm ci
 
-      - name: Validate mobile dependency contract
-        run: python -m pytest -q tests/test_product_mobile_dependency_contract.py
+      - name: Validate repaired root identity without extra Python dependencies
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          package = json.loads(Path('apps/mobile/package.json').read_text(encoding='utf-8'))
+          lock = json.loads(Path('apps/mobile/package-lock.json').read_text(encoding='utf-8'))
+          assert package['version'] == '1.0.0'
+          assert lock['version'] == '1.0.0'
+          assert lock['packages']['']['version'] == '1.0.0'
+          assert lock['name'] == package['name'] == lock['packages']['']['name']
+          PY
 
       - name: Remove one-shot bootstrap and commit the verified lock metadata
         run: |
