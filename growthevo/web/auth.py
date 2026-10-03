@@ -103,6 +103,8 @@ class OidcJwksAuthenticator:
         self._keys: dict[str, Any] = {}
         self._expires_monotonic = 0.0
         self._last_unknown_kid_refresh_monotonic = float("-inf")
+        self._unknown_kid_refresh_in_progress = False
+        self._last_unknown_kid_refresh_unavailable = False
         try:
             import jwt
         except ImportError as exc:  # pragma: no cover - guarded by the web extra/container lock
@@ -200,6 +202,8 @@ class OidcJwksAuthenticator:
             if key is not None:
                 return key
             now = time.monotonic()
+            if self._unknown_kid_refresh_in_progress:
+                raise AuthenticationUnavailable("could not refresh configured JWKS")
             may_refresh = (
                 now - self._last_unknown_kid_refresh_monotonic
                 >= self._unknown_kid_refresh_cooldown_seconds
@@ -208,9 +212,26 @@ class OidcJwksAuthenticator:
                 # Claim this refresh slot before releasing the lock so concurrent
                 # attacker-controlled unknown kids cannot trigger parallel fetches.
                 self._last_unknown_kid_refresh_monotonic = now
+                self._unknown_kid_refresh_in_progress = True
+                self._last_unknown_kid_refresh_unavailable = False
+            elif self._last_unknown_kid_refresh_unavailable:
+                # A refresh already failed inside the cooldown window. Preserve
+                # outage semantics for subsequent unknown kids instead of changing
+                # the same IdP incident from 503 to a misleading credential 401.
+                raise AuthenticationUnavailable("could not refresh configured JWKS")
         if may_refresh:
-            self._refresh(force=True)
+            try:
+                self._refresh(force=True)
+            except Exception as exc:
+                with self._lock:
+                    self._unknown_kid_refresh_in_progress = False
+                    self._last_unknown_kid_refresh_unavailable = True
+                if isinstance(exc, AuthenticationUnavailable):
+                    raise
+                raise AuthenticationUnavailable("could not refresh configured JWKS") from exc
             with self._lock:
+                self._unknown_kid_refresh_in_progress = False
+                self._last_unknown_kid_refresh_unavailable = False
                 key = self._keys.get(kid)
             if key is not None:
                 return key
