@@ -2,42 +2,9 @@ name: Product Surface CI
 
 on:
   pull_request:
-    paths:
-      - "growthevo/web/**"
-      - "apps/mobile/**"
-      - "scripts/build_pages.py"
-      - "scripts/stress_product.py"
-      - "scripts/stress_decision_semantics.py"
-      - "constraints/web-container-py313.txt"
-      - "tests/test_web_dashboard.py"
-      - "tests/test_product_*.py"
-      - "pyproject.toml"
-      - "Dockerfile"
-      - ".dockerignore"
-      - "docs/product_surface.md"
-      - "docs/deployment_architecture.md"
-      - "docs/performance_testing.md"
-      - ".github/workflows/product-surface.yml"
-      - ".github/workflows/deploy-pages.yml"
+    branches: [main]
   push:
     branches: [main]
-    paths:
-      - "growthevo/web/**"
-      - "apps/mobile/**"
-      - "scripts/build_pages.py"
-      - "scripts/stress_product.py"
-      - "scripts/stress_decision_semantics.py"
-      - "constraints/web-container-py313.txt"
-      - "tests/test_web_dashboard.py"
-      - "tests/test_product_*.py"
-      - "pyproject.toml"
-      - "Dockerfile"
-      - ".dockerignore"
-      - "docs/product_surface.md"
-      - "docs/deployment_architecture.md"
-      - "docs/performance_testing.md"
-      - ".github/workflows/product-surface.yml"
-      - ".github/workflows/deploy-pages.yml"
 
 permissions:
   contents: read

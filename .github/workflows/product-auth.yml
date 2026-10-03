@@ -2,30 +2,9 @@ name: Product Auth CI
 
 on:
   pull_request:
-    paths:
-      - "growthevo/web/**"
-      - "constraints/web-container-py313.txt"
-      - "tests/test_product_oidc_auth.py"
-      - "tests/test_product_configuration.py"
-      - "tests/test_product_container_runtime_install.py"
-      - "scripts/generate_auth_ci_fixture.py"
-      - "pyproject.toml"
-      - "Dockerfile"
-      - "docs/authentication.md"
-      - ".github/workflows/product-auth.yml"
+    branches: [main]
   push:
     branches: [main]
-    paths:
-      - "growthevo/web/**"
-      - "constraints/web-container-py313.txt"
-      - "tests/test_product_oidc_auth.py"
-      - "tests/test_product_configuration.py"
-      - "tests/test_product_container_runtime_install.py"
-      - "scripts/generate_auth_ci_fixture.py"
-      - "pyproject.toml"
-      - "Dockerfile"
-      - "docs/authentication.md"
-      - ".github/workflows/product-auth.yml"
   workflow_dispatch:
 
 permissions:

@@ -28,6 +28,14 @@ REQUIRED_CHECKS = (
     "test (3.14)",
     "package",
     "obd-integration",
+    "oidc-jwks-production",
+    "postgres-product",
+    "stress",
+    "web-product",
+    "mobile",
+    "codeql-required",
+    "real-slsa-build-provenance",
+    "real-pypi-provenance",
 )
 REQUIRED_RULE_TYPES = (
     "pull_request",
@@ -224,8 +232,8 @@ def audit_governance(
         failures.append(
             "expected exactly one active branch ruleset targeting main and exactly matching "
             "the GrowthEvo governance contract (PR-only; zero approvals; no code-owner or "
-            "last-push approval; merge/squash/rebase allowed; six strict GitHub Actions checks; "
-            "no bypass actors; block deletion and non-fast-forward updates); "
+            "last-push approval; merge/squash/rebase allowed; fourteen strict GitHub Actions "
+            "checks; no bypass actors; block deletion and non-fast-forward updates); "
             f"active targeting rulesets={active_ids!r}, matched={list(matched)!r}, "
             f"branch API protected={branch_flag}"
         )

@@ -2,26 +2,9 @@ name: Product Persistence CI
 
 on:
   pull_request:
-    paths:
-      - "growthevo/web/**"
-      - "constraints/web-container-py313.txt"
-      - "tests/test_product_postgres_persistence.py"
-      - "scripts/stress_product.py"
-      - "pyproject.toml"
-      - "Dockerfile"
-      - "docs/durable_persistence.md"
-      - ".github/workflows/product-persistence.yml"
+    branches: [main]
   push:
     branches: [main]
-    paths:
-      - "growthevo/web/**"
-      - "constraints/web-container-py313.txt"
-      - "tests/test_product_postgres_persistence.py"
-      - "scripts/stress_product.py"
-      - "pyproject.toml"
-      - "Dockerfile"
-      - "docs/durable_persistence.md"
-      - ".github/workflows/product-persistence.yml"
   workflow_dispatch:
 
 permissions:

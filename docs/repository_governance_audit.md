@@ -18,17 +18,29 @@ The pull-request rule must preserve the solo-maintainer workflow without creatin
 - last-push approval requirement = `false`;
 - review-thread resolution requirement = `false`.
 
-The required-status-check rule must enforce:
+The required-status-check rule must enforce strict/up-to-date checks and exactly these GitHub Actions contexts:
 
-- strict/up-to-date required status checks;
-- exactly these GitHub Actions checks:
+- core/runtime evidence:
   - `test (3.11)`
   - `test (3.12)`
   - `test (3.13)`
   - `test (3.14)`
   - `package`
   - `obd-integration`
-- each required check must be bound to GitHub Actions integration id `15368`.
+- production product evidence:
+  - `oidc-jwks-production`
+  - `postgres-product`
+  - `stress`
+  - `web-product`
+  - `mobile`
+- security and supply-chain evidence:
+  - `codeql-required`
+  - `real-slsa-build-provenance`
+  - `real-pypi-provenance`
+
+All fourteen required checks are bound to GitHub Actions integration id `15368`. The CodeQL workflow exposes the stable `codeql-required` GitHub Actions context instead of depending on GitHub Advanced Security's separately generated `CodeQL` summary check, whose app/integration identity is different.
+
+The production Auth, Persistence, Stress, and Surface workflows intentionally run on every pull request targeting `main`. Required GitHub checks must not rely on workflow-level `paths` filtering: a workflow skipped by path filtering may leave a required context pending indefinitely. CodeQL keeps a lightweight in-workflow path router but always emits the final `codeql-required` context; routing failure or a required internal scan failure makes that aggregator fail closed.
 
 The remaining two rules must block branch deletion and force pushes / non-fast-forward updates.
 
@@ -68,9 +80,10 @@ Scheduled runs use the bootstrap exception tied to issue #63: while #63 is open 
 
 1. Create the active `main` ruleset using an administration-capable GitHub account/token.
 2. Confirm the rulesets API returns exactly one active ruleset targeting only `main` / `~DEFAULT_BRANCH`, with no bypass actors and the exact four rule types above.
-3. Confirm its pull-request parameters preserve zero-approval solo maintenance and its six required checks are strict and bound to GitHub Actions integration id `15368`.
+3. Confirm its pull-request parameters preserve zero-approval solo maintenance and its fourteen required checks are strict and bound to GitHub Actions integration id `15368`.
 4. Treat `GET /repos/jiaweine/GrowthEvo-Harness/branches/main` reporting `protected: true` as additional confirmation when available, not as a substitute for the required ruleset.
 5. Trigger `Repository Governance Audit` manually and require a green result.
-6. Open a normal code PR and confirm the six checks are required.
-7. Confirm direct push, branch deletion, and force-push attempts are rejected for non-bypass actors.
-8. Only then close issue #63.
+6. Open a normal code PR and confirm all fourteen required contexts are present and enforced.
+7. Open or inspect a documentation-only PR and confirm required contexts still resolve rather than remaining pending because of workflow-level path filters.
+8. Confirm direct push, branch deletion, and force-push attempts are rejected for non-bypass actors.
+9. Only then close issue #63.
