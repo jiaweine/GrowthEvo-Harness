@@ -287,10 +287,12 @@ def create_app() -> Any:
     @app.middleware("http")
     async def runtime_headers(request: Any, call_next: Any) -> Any:
         path = request.url.path
+        method = request.method.upper()
         is_api = path == "/api" or path.startswith("/api/")
         is_production_business_api = (
             settings.production
             and is_api
+            and method != "OPTIONS"
             and path not in PRODUCTION_SYSTEM_PATHS
         )
 
@@ -304,7 +306,7 @@ def create_app() -> Any:
                 },
             )
         elif is_production_business_api:
-            from .auth import AuthenticationError
+            from .auth import AuthenticationError, AuthenticationUnavailable
 
             raw_headers = request.scope.get("headers", [])
             authorization_count = sum(
@@ -318,6 +320,15 @@ def create_app() -> Any:
                 )
                 request.state.auth_claims = claims
                 response = await call_next(request)
+            except AuthenticationUnavailable:
+                response = JSONResponse(
+                    status_code=503,
+                    content={
+                        "detail": "identity provider is temporarily unavailable; business API is fail-closed",
+                        "mode": settings.mode,
+                        "environment": settings.environment,
+                    },
+                )
             except AuthenticationError:
                 response = JSONResponse(
                     status_code=401,
