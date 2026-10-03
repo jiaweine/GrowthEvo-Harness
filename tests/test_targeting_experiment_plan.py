@@ -11,8 +11,11 @@ from growthevo.bench.targeting_experiment_plan import load_targeting_experiment_
 _FINGERPRINT = "0123456789abcdef0123456789abcdef01234567"
 
 
-def _v2_plan() -> dict[str, object]:
+def _current_plan() -> dict[str, object]:
     return {
+        # These schema identifiers are immutable evidence-protocol identities, not
+        # GrowthEvo product generations. They remain versioned for byte-contract
+        # compatibility with already accepted benchmark artifacts.
         "schema_version": "growthevo.targeting-experiment-plan.v2",
         "benchmark": "criteo-targeting-full-evidence",
         "dataset": "criteo-uplift-v2.1",
@@ -32,7 +35,7 @@ def _v2_plan() -> dict[str, object]:
 
 
 def _manifest() -> dict[str, object]:
-    plan = _v2_plan()
+    plan = _current_plan()
     return {
         "schema_version": "growthevo.targeting-export.v2",
         "dataset_source": plan["dataset_source"],
@@ -55,8 +58,8 @@ def _load(tmp_path: Path, payload: dict[str, object]):
     return load_targeting_experiment_plan(path)
 
 
-def test_v2_plan_binds_training_split_propensity_and_candidate_config(tmp_path: Path) -> None:
-    plan = _load(tmp_path, _v2_plan())
+def test_plan_binds_training_split_propensity_and_candidate_config(tmp_path: Path) -> None:
+    plan = _load(tmp_path, _current_plan())
 
     assert plan.training_fraction == pytest.approx(0.5)
     assert plan.validation_fraction == pytest.approx(0.25)
@@ -72,27 +75,27 @@ def test_v2_plan_binds_training_split_propensity_and_candidate_config(tmp_path: 
     plan.validate_export_manifest(_manifest())
 
 
-def test_v2_plan_requires_a_nonempty_final_holdout(tmp_path: Path) -> None:
-    payload = _v2_plan()
+def test_plan_requires_a_nonempty_final_holdout(tmp_path: Path) -> None:
+    payload = _current_plan()
     payload["training_fraction"] = 0.75
     with pytest.raises(ValueError, match="leave a holdout"):
         _load(tmp_path, payload)
 
 
-def test_v2_plan_rejects_bool_split_seed_and_noncanonical_fingerprint(tmp_path: Path) -> None:
-    payload = _v2_plan()
+def test_plan_rejects_bool_split_seed_and_noncanonical_fingerprint(tmp_path: Path) -> None:
+    payload = _current_plan()
     payload["split_seed"] = True
     with pytest.raises(ValueError, match="split_seed.*JSON integer"):
         _load(tmp_path, payload)
 
-    payload = _v2_plan()
+    payload = _current_plan()
     payload["candidate_config_fingerprint"] = "not-a-digest"
     with pytest.raises(ValueError, match="40-character lowercase hex"):
         _load(tmp_path, payload)
 
 
-def test_v2_manifest_drift_fails_closed(tmp_path: Path) -> None:
-    plan = _load(tmp_path, _v2_plan())
+def test_manifest_drift_fails_closed(tmp_path: Path) -> None:
+    plan = _load(tmp_path, _current_plan())
 
     with pytest.raises(ValueError, match="training_fraction"):
         plan.validate_export_manifest({**_manifest(), "training_fraction": 0.4})
@@ -106,7 +109,7 @@ def test_v2_manifest_drift_fails_closed(tmp_path: Path) -> None:
         )
 
 
-def test_v1_plan_remains_byte_contract_compatible(tmp_path: Path) -> None:
+def test_legacy_plan_remains_byte_contract_compatible(tmp_path: Path) -> None:
     payload = {
         "schema_version": "growthevo.targeting-experiment-plan.v1",
         "benchmark": "legacy-targeting-fixture",

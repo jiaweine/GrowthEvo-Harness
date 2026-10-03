@@ -1,6 +1,6 @@
 # GrowthEvo-Harness · Implementation Status
 
-GrowthEvo-Harness provides an integrated causal decision stack for incremental user growth, combining causal effect estimation, constrained policy improvement, off-policy evaluation, evidence-governed model selection, long-horizon risk analysis, and trajectory credit assignment.
+GrowthEvo-Harness provides an integrated causal decision and product runtime for incremental user growth. The implementation combines causal effect estimation, constrained policy improvement, off-policy evaluation, locked evidence, guarded LLM proposals, durable product state, production authentication, browser/mobile product surfaces, and self-host recovery.
 
 ## Current capability snapshot
 
@@ -18,7 +18,14 @@ GrowthEvo-Harness provides an integrated causal decision stack for incremental u
 | **Benchmark bridges** | Criteo Uplift, Open Bandit Dataset, KuaiRand, and GrowthAgentBench |
 | **Optional LLM proposals** | Provider adapters, guarded semantic proposals, shadow candidate factory, model+harness fingerprints |
 | **Causal LLM evaluation** | Typed evidence tiers, validation-only candidate selection, deferred one-shot holdout |
-| **Online promotion** | In-memory randomized canary controllers, continuous safety, frozen CUPED, planned sequential success and terminal rollback |
+| **Online promotion** | Reference randomized canary controllers, continuous safety, frozen CUPED, planned sequential success, rollback and authority evidence |
+| **Product API** | Stable `/api/*` FastAPI contract, strict failure behavior, realtime decisions, campaigns, approvals, harness/evolution and decision logs |
+| **Durable state** | PostgreSQL-backed decision/idempotency/Campaign/Approval state with migrations, restart recovery and multi-replica concurrency checks |
+| **Production authentication** | Explicit OIDC/JWKS trust contract with signed bearer verification, issuer/audience/expiry validation and fail-closed IdP outage handling |
+| **Web / PWA** | Responsive Growth OS UI, real-browser API integration, strict outage UI, installable PWA shell |
+| **Mobile** | Expo / React Native companion app with official Expo compatibility check, TypeScript gate and production HTTPS transport |
+| **Self-hosting** | Pinned Docker Compose runtime, loopback API default, guarded PostgreSQL backup/restore and clean-database recovery CI |
+| **Security / supply chain** | CodeQL gate, Sigstore authority verification, SLSA build provenance, PyPI PEP 740 provenance |
 
 ## Runtime and decision contracts
 
@@ -26,18 +33,34 @@ GrowthEvo-Harness provides an integrated causal decision stack for incremental u
 - Hierarchical planning separates semantic intent from numeric action selection.
 - `NO_TREATMENT` / holdout is a first-class action.
 - Legal-action gates cover consent, budget, offer limits, fatigue, churn risk, and frequency caps.
-- The event layer uses append-only hash-chained records for decision and evaluation provenance.
-- Harness evolution operates through bounded, reviewable proposal coordinates.
+- Realtime assignment records the probability distribution actually used to sample the served action.
+- Idempotency conflicts are request-fingerprint aware and durable across app instances when PostgreSQL is active.
+- Production readiness requires durable PostgreSQL and active authentication; configuration strings alone cannot make the service ready.
+- Demo data appears only in explicit Demo Workspace mode and never silently replaces a failed live API.
+
+## Product runtime and operations
+
+The product runtime now has a durable operational path rather than only in-memory UI fixtures:
+
+- Campaign, Approval, Decision and idempotency state can live in PostgreSQL;
+- restart and two-replica concurrency are verified in CI;
+- bounded expired-idempotency cleanup prevents indefinite key accumulation;
+- production requests require valid signed bearer credentials;
+- JWKS redirect, malformed key material and IdP outage paths fail closed;
+- browser CORS preflight remains usable while authenticated business requests stay protected;
+- the self-host stack uses pinned PostgreSQL and application images;
+- backup and restore helpers require integrity metadata and refuse unsafe recovery paths;
+- a failed restore leaves the API stopped instead of automatically serving possible partial state.
+
+The algorithmic online-promotion controllers remain reference control components. Their canary state and real-world outcome collection are not claimed to be a complete external campaign execution platform. Durable product API state and durable causal-promotion execution are separate concerns.
 
 ## Optional LLM and online promotion
 
-The guarded proposal layer supports OpenAI, Anthropic, and Gemini through optional SDK adapters. It proposes only semantic growth options; the default runtime planner, numeric policy, legal gates, and existing evidence contracts remain authoritative.
+The guarded proposal layer supports OpenAI, Anthropic, and Gemini through optional SDK adapters. It proposes semantic growth options; the numeric policy, legal gates, evidence contracts, and promotion authority remain authoritative.
 
-The locked shadow runner binds typed causal evidence to exact model+harness identities, freezes one validation winner, and accesses final holdout evidence afterward. Diagnostic Tier-C/D results cannot create promotable online candidates.
+The locked shadow runner binds typed causal evidence to exact model+harness identities, freezes one validation winner, and accesses final holdout evidence afterward. Diagnostic lower-tier results cannot create promotable online candidates.
 
-The online controllers provide stable randomized routing, one outcome per analysis unit, continuous safety monitoring, and hashed aggregate audit events. The advanced controller adds registered first-exposure stages, frozen CUPED, and planned primary-success looks. Promotion requires primary and safety gates at the same planned look; the final sample budget ends in promotion or rollback. Invalid metric mappings or unrepresentable adjusted statistics are rejected before state changes.
-
-These components have synthetic end-to-end coverage from the actual guarded provider adapter and shadow candidate factory through locked evidence into online promotion, null-result rollback, harm rollback, and diagnostic-evidence rejection. They are in-memory reference components: durable execution, serialized ingestion, production data collection, and real model promotion evidence remain integration responsibilities.
+The online controllers provide stable randomized routing, one outcome per analysis unit, continuous safety monitoring, and hashed aggregate audit events. Advanced inference supports registered first-exposure stages, frozen CUPED and planned primary-success looks. Promotion requires primary and safety gates at the same planned look; invalid mappings or unrepresentable statistics are rejected before state changes.
 
 ## Causal learning and serving
 
@@ -70,18 +93,11 @@ The OPE panel includes:
 
 ## Locked evidence governance
 
-GrowthEvo provides executable locked-evaluation contracts for both OPE and randomized targeting. Experiment plans freeze statistically material choices before validation, realized manifests record the actual generated configuration, and final artifacts bind the resulting evidence to source identity and code identity.
+GrowthEvo provides executable locked-evaluation contracts for both OPE and randomized targeting. Experiment plans freeze statistically material choices before validation, realized manifests record the actual generated configuration, and final artifacts bind evidence to source and code identity.
 
-The evidence layer includes:
+The evidence layer includes stable validation/holdout identities, predeclared candidate sets, validation-only selection, frozen final candidates, experiment-plan and realized-manifest fingerprints, code provenance and compact accepted evidence bundles.
 
-- stable validation/holdout identities;
-- predeclared candidate sets and evidence gates;
-- validation-only selection;
-- a frozen final candidate;
-- final-holdout evidence fingerprints;
-- experiment-plan and realized-manifest fingerprints;
-- code commit provenance;
-- persisted compact evidence bundles.
+Schema identifiers in already accepted evidence remain immutable even when they contain numbered protocol tokens. Those tokens are evidence-contract identities, not GrowthEvo product generations.
 
 ## Real-world evidence status
 
@@ -93,50 +109,45 @@ The evidence layer includes:
 | **GrowthAgentBench** | CI-reproducible synthetic evidence | CATE, policy-regret, support, safety, and trajectory regression checks |
 | **KuaiRand** | Sequential integration path | offline-RL transition export and planner-sequence / credit experiments |
 
-Full accepted evidence is stored under:
+Accepted evidence remains under `benchmarks/` with its original source/protocol identities intact.
 
-- `benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/`
-- `benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/`
+## CI-reproducible gates
 
-## CI-reproducible algorithmic gates
+The merge path currently verifies:
 
-GrowthAgentBench provides deterministic regression coverage for the implementation stack. Current repository gates include:
+- Python 3.11-3.14;
+- package build/install;
+- OBD integration;
+- OIDC/JWKS production container;
+- PostgreSQL persistence and recovery;
+- product stress and concurrency semantics;
+- real-browser Web/PWA behavior;
+- Expo compatibility and mobile type checking;
+- CodeQL;
+- SLSA Build Provenance;
+- PyPI PEP 740 provenance;
+- stable GrowthEvo product/implementation identity.
 
-| Property | Gate |
-| --- | ---: |
-| CATE RMSE | `< 0.03` |
-| Propensity overlap | coverage `> 0.95` |
-| Learned CATE policy | oracle regret `< 0.015` |
-| Low-support optimistic treatment | support-aware action control |
-| Unsafe expected cost | `NO_TREATMENT` fallback |
-| Dynamics boundary | GAE isolation across declared discontinuities |
+Core stress additionally checks large-batch CATE/OPE/Safe-PI workloads and numerical invariants.
 
-## Extension ecosystem
+## Deployment boundary
 
-The runtime is intentionally backend-neutral at the heavy training layer. Stable contracts allow research or production integrations such as:
+Two repository-hosted administrator actions are still external to code:
 
-- causal forests, EconML, CausalML, gradient-boosted, or neural CATE backends;
-- BC, IQL, CQL, Decision Transformer, and other sequential offline-RL trainers;
-- PPO / GRPO / Agent-RL planner post-training systems;
-- calibrated production world models and shadow/canary deployment infrastructure;
-- CRM, ads, messaging, and MCP-compatible execution adapters.
+- issue #63: activate the audited `main` ruleset with the required CI evidence gates;
+- issue #137: enable GitHub Pages with GitHub Actions as the publishing source and verify a real deployment.
 
-This keeps the core causal, evidence, constraint, and evaluation contracts stable while allowing specialized training stacks to evolve independently.
-
-## Evidence standard
-
-Project-facing results are backed by one of three evidence classes:
-
-1. executable runtime or algorithm code with deterministic regression tests;
-2. reproducible pre-registered locked benchmark artifacts with source, split, model, and evidence provenance;
-3. deployment evidence for production-facing claims.
-
-This separation keeps implementation evidence, public benchmark evidence, and deployment evidence clear and independently auditable.
+External product providers, real customer data, real model credentials and real promotion evidence remain deployment-owned. The repository does not fabricate those states.
 
 ## Related documentation
 
+- `docs/PROJECT_COMPLETION.md`
+- `docs/SELF_HOSTING.md`
+- `docs/repository_governance_audit.md`
 - `docs/FRONTIER_ALGORITHM_STACK.md`
 - `docs/REAL_WORLD_BENCHMARKS.md`
 - `docs/OBD_ISOLATED_EXPORT.md`
 - `docs/LOCKED_OPE_RUN.md`
 - `docs/LOCKED_TARGETING_RUN.md`
+- `docs/deployment_architecture.md`
+- `docs/performance_testing.md`
