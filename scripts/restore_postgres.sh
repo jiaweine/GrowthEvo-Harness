@@ -57,6 +57,7 @@ fi
 
 restore_failed() {
   status=$?
+  trap - ERR
   if [ "$status" -ne 0 ] && [ "$api_was_running" = true ]; then
     echo "restore failed; API remains stopped to avoid serving a partially restored database" >&2
   fi
