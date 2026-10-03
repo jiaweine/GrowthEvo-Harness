@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 JWKS_MAX_BYTES = 256_000
 JWT_MAX_BYTES = 16_384
 JWKS_CACHE_TTL_SECONDS = 300.0
+JWKS_UNKNOWN_KID_REFRESH_COOLDOWN_SECONDS = 30.0
 JWT_LEEWAY_SECONDS = 30
 _ALLOWED_ALGORITHMS = ("RS256",)
 
@@ -20,6 +21,10 @@ class AuthConfigurationError(RuntimeError):
 
 class AuthenticationError(RuntimeError):
     """A bearer credential cannot be accepted."""
+
+
+class AuthenticationUnavailable(RuntimeError):
+    """The configured identity provider is temporarily unavailable."""
 
 
 def _validated_url(value: str, *, label: str, require_https: bool) -> str:
@@ -49,8 +54,9 @@ class OidcJwksAuthenticator:
 
     The accepted JWT algorithm is fixed in code instead of being inferred from
     attacker-controlled token headers. Unknown key ids trigger at most one JWKS
-    refresh, which supports normal issuer key rotation without turning every
-    request into a remote identity-provider dependency.
+    refresh per cooldown window, which supports normal issuer key rotation while
+    preventing attacker-controlled kid values from turning every request into a
+    remote identity-provider dependency.
     """
 
     backend = "oidc-jwks"
@@ -64,12 +70,15 @@ class OidcJwksAuthenticator:
         require_https: bool,
         cache_ttl_seconds: float = JWKS_CACHE_TTL_SECONDS,
         timeout_seconds: float = 5.0,
+        unknown_kid_refresh_cooldown_seconds: float = JWKS_UNKNOWN_KID_REFRESH_COOLDOWN_SECONDS,
         fetcher: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
         if cache_ttl_seconds <= 0:
             raise AuthConfigurationError("JWKS cache TTL must be positive")
         if timeout_seconds <= 0:
             raise AuthConfigurationError("JWKS timeout must be positive")
+        if unknown_kid_refresh_cooldown_seconds < 0:
+            raise AuthConfigurationError("unknown-kid JWKS refresh cooldown must not be negative")
         self.issuer = _validated_url(
             issuer,
             label="GROWTHEVO_AUTH_ISSUER",
@@ -86,10 +95,14 @@ class OidcJwksAuthenticator:
         self._require_https = require_https
         self._cache_ttl_seconds = float(cache_ttl_seconds)
         self._timeout_seconds = float(timeout_seconds)
+        self._unknown_kid_refresh_cooldown_seconds = float(
+            unknown_kid_refresh_cooldown_seconds
+        )
         self._fetcher = fetcher or self._fetch_jwks
         self._lock = threading.RLock()
         self._keys: dict[str, Any] = {}
         self._expires_monotonic = 0.0
+        self._last_unknown_kid_refresh_monotonic = float("-inf")
         try:
             import jwt
         except ImportError as exc:  # pragma: no cover - guarded by the web extra/container lock
@@ -110,13 +123,15 @@ class OidcJwksAuthenticator:
         try:
             with urlopen(request, timeout=self._timeout_seconds) as response:
                 final_url = response.geturl()
-                if self._require_https and urlparse(final_url).scheme != "https":
-                    raise AuthConfigurationError("JWKS redirect downgraded from https")
+                # Do not transfer JWKS trust through redirects. Even HTTPS-to-HTTPS
+                # redirects can move key retrieval to a different origin or path.
+                if final_url != url:
+                    raise AuthConfigurationError("configured JWKS URL must not redirect")
                 body = response.read(JWKS_MAX_BYTES + 1)
         except AuthConfigurationError:
             raise
         except Exception as exc:
-            raise AuthConfigurationError("could not fetch configured JWKS") from exc
+            raise AuthenticationUnavailable("could not fetch configured JWKS") from exc
         if len(body) > JWKS_MAX_BYTES:
             raise AuthConfigurationError("configured JWKS exceeds size limit")
         try:
@@ -182,16 +197,24 @@ class OidcJwksAuthenticator:
         self._refresh()
         with self._lock:
             key = self._keys.get(kid)
-        if key is not None:
-            return key
-        # A previously unseen kid can be a normal issuer key rotation. Refresh
-        # exactly once, then fail closed if the issuer still does not publish it.
-        self._refresh(force=True)
-        with self._lock:
-            key = self._keys.get(kid)
-        if key is None:
-            raise AuthenticationError("invalid bearer token")
-        return key
+            if key is not None:
+                return key
+            now = time.monotonic()
+            may_refresh = (
+                now - self._last_unknown_kid_refresh_monotonic
+                >= self._unknown_kid_refresh_cooldown_seconds
+            )
+            if may_refresh:
+                # Claim this refresh slot before releasing the lock so concurrent
+                # attacker-controlled unknown kids cannot trigger parallel fetches.
+                self._last_unknown_kid_refresh_monotonic = now
+        if may_refresh:
+            self._refresh(force=True)
+            with self._lock:
+                key = self._keys.get(kid)
+            if key is not None:
+                return key
+        raise AuthenticationError("invalid bearer token")
 
     def verify(self, token: str) -> dict[str, Any]:
         compact = token.strip()
