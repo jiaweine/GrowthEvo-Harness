@@ -12,6 +12,7 @@ from growthevo.web import auth as auth_module
 from growthevo.web.auth import (
     AuthConfigurationError,
     AuthenticationError,
+    AuthenticationUnavailable,
     OidcJwksAuthenticator,
 )
 
@@ -133,6 +134,42 @@ def test_repeated_unknown_kid_is_rate_limited_within_refresh_cooldown() -> None:
     # One bootstrap plus one forced rotation refresh. Further attacker-controlled
     # unknown key ids inside the cooldown do not create additional IdP traffic.
     assert calls == [JWKS_URL, JWKS_URL]
+
+
+def test_failed_unknown_kid_refresh_stays_unavailable_during_cooldown() -> None:
+    private_key, jwk = _key("primary")
+    calls: list[str] = []
+
+    def fetcher(url: str):
+        calls.append(url)
+        if len(calls) == 1:
+            return {"keys": [jwk]}
+        raise AuthenticationUnavailable("identity provider offline")
+
+    auth = _auth(jwk, fetcher=fetcher)
+    for kid in ("unknown-one", "unknown-two"):
+        with pytest.raises(AuthenticationUnavailable):
+            auth.verify(_token(private_key, kid))
+
+    # Bootstrap plus one failed forced refresh. The second request preserves 503
+    # semantics without creating another outbound request during the cooldown.
+    assert calls == [JWKS_URL, JWKS_URL]
+
+
+def test_malformed_rotation_jwks_is_treated_as_runtime_unavailability() -> None:
+    private_key, jwk = _key("primary")
+    calls = 0
+
+    def fetcher(_: str):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return {"keys": [jwk]}
+        return {"keys": "not-a-list"}
+
+    auth = _auth(jwk, fetcher=fetcher)
+    with pytest.raises(AuthenticationUnavailable):
+        auth.verify(_token(private_key, "unknown-kid"))
 
 
 def test_unknown_kid_can_succeed_after_normal_key_rotation() -> None:
