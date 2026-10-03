@@ -241,6 +241,14 @@ def test_required_checks_track_ci_matrix_and_documented_contract() -> None:
     expected = tuple(f"test ({version})" for version in versions) + (
         "package",
         "obd-integration",
+        "oidc-jwks-production",
+        "postgres-product",
+        "stress",
+        "web-product",
+        "mobile",
+        "codeql-required",
+        "real-slsa-build-provenance",
+        "real-pypi-provenance",
     )
     assert MODULE.REQUIRED_CHECKS == expected
 
