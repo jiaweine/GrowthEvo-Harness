@@ -1,0 +1,64 @@
+name: Mobile npm non-breaking fix audit
+
+on:
+  push:
+    branches:
+      - audit/mobile-npm-nonbreaking-fix
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.repository == 'jiaweine/GrowthEvo-Harness' && github.ref == 'refs/heads/audit/mobile-npm-nonbreaking-fix'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Checkout audit branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22.13'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install exact baseline lock
+        run: npm ci --no-audit --no-fund
+
+      - name: Apply only npm's non-force audit fix
+        run: npm audit fix --package-lock-only --no-audit --no-fund
+
+      - name: Show package and lock changes
+        working-directory: .
+        run: |
+          git diff -- apps/mobile/package.json apps/mobile/package-lock.json || true
+
+      - name: Reinstall proposed lock and validate SDK compatibility
+        run: |
+          rm -rf node_modules
+          npm ci --no-audit --no-fund
+          ./node_modules/.bin/expo install --check
+          npm run typecheck
+
+      - name: Measure advisories after non-breaking fix
+        shell: bash
+        run: |
+          npm audit --omit=dev --json > /tmp/runtime-audit.json || true
+          npm audit --json > /tmp/full-audit.json || true
+          node - <<'NODE'
+          const fs = require('fs');
+          for (const [label, file] of [['runtime','/tmp/runtime-audit.json'],['full','/tmp/full-audit.json']]) {
+            const data = JSON.parse(fs.readFileSync(file,'utf8'));
+            console.log(`=== ${label} ===`);
+            console.log(JSON.stringify({
+              metadata: data.metadata?.vulnerabilities || {},
+              packages: Object.entries(data.vulnerabilities || {})
+                .map(([name,v]) => ({name,severity:v.severity,direct:Boolean(v.isDirect),fixAvailable:v.fixAvailable}))
+                .sort((a,b)=>a.name.localeCompare(b.name))
+            }, null, 2));
+          }
+          NODE
