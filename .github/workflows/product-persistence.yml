@@ -335,6 +335,9 @@ jobs:
             echo '- Cross-replica concurrent Campaign writes: 64/64 unique and visible'
             echo '- Production with healthy PostgreSQL but inactive auth: ready 503 + business API 503'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify PostgreSQL backup and clean restore
+        shell: bash
+        run: bash scripts/verify_postgres_recovery.sh
       - name: Upload persistence reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

@@ -1,6 +1,6 @@
 # Changelog
 
-Notable GrowthEvo-Harness changes are recorded here. The current development line is tracked under **Unreleased** until its release version is tagged.
+Notable GrowthEvo-Harness changes are recorded here. The current development line is tracked under **Unreleased** until a release snapshot is cut.
 
 ## Unreleased
 
@@ -65,9 +65,9 @@ Notable GrowthEvo-Harness changes are recorded here. The current development lin
 - Redesigned the repository README around project positioning, capabilities, locked evidence, reproducibility, and implementation structure.
 - Refreshed implementation status, architecture, algorithm, frontier, and benchmark documentation to match the current mainline stack.
 - Replaced decorative arrow-flow diagrams with tables and numbered execution stages across public-facing documentation.
-- Added locked evaluation schemas, Open Bandit export documentation, research rerun policy, development-cohort governance, Python support policy, and evidence-acceptance documentation.
+- Added locked evaluation schemas, Open Bandit export documentation, research rerun policy, development-cohort governance, Python support policy, evidence-acceptance documentation, and the self-hosting recovery runbook.
 - Standardized explicit metric units, evidence identities, and benchmark-selection terminology across project-facing docs.
 
 ## Release-note discipline
 
-When a release version is chosen, move the relevant **Unreleased** entries into a dated version section. Historical locked-evidence values remain tied to their evidence commits and persisted artifact directories.
+When a release snapshot is cut, move the relevant **Unreleased** entries into a dated section. GrowthEvo product identity stays generation-neutral: do not introduce numbered product-generation labels into UI or public product positioning. Historical locked-evidence values and upstream dataset names remain tied to their evidence commits and persisted artifact directories.

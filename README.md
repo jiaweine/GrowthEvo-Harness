@@ -8,7 +8,6 @@
 
 [![CI](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-![Version](https://img.shields.io/badge/version-0.1.0-111827)
 ![Causal RL](https://img.shields.io/badge/Causal-Reinforcement%20Learning-7C3AED)
 ![OPE](https://img.shields.io/badge/OPE-Cross--Fitted%20%CE%B2*--IPS%20%7C%20DR-0891B2)
 ![Evidence](https://img.shields.io/badge/Evidence-Pre--Registered%20%7C%20Locked-059669)
@@ -469,6 +468,7 @@ benchmarks/ope/results/
 | Randomized online canary | [`docs/online_canary_promotion.md`](docs/online_canary_promotion.md) |
 | High-power sequential promotion | [`docs/high_power_sequential_causal.md`](docs/high_power_sequential_causal.md) |
 | Project completion boundary | [`docs/PROJECT_COMPLETION.md`](docs/PROJECT_COMPLETION.md) |
+| Self-hosting and disaster recovery | [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) |
 | Repository governance audit | [`docs/repository_governance_audit.md`](docs/repository_governance_audit.md) |
 | Release readiness checklist | [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) |
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
