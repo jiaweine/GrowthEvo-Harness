@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
-from tools.ci_changed_paths import PROFILES, changed_paths, matches_profile
+MODULE_PATH = Path(__file__).resolve().parents[1] / "tools" / "ci_changed_paths.py"
+SPEC = importlib.util.spec_from_file_location("ci_changed_paths", MODULE_PATH)
+assert SPEC is not None and SPEC.loader is not None
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
+
+PROFILES = MODULE.PROFILES
+changed_paths = MODULE.changed_paths
+matches_profile = MODULE.matches_profile
 
 
 def test_each_profile_tracks_its_workflow_and_shared_matcher() -> None:
