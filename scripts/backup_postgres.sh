@@ -5,12 +5,19 @@ umask 077
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 out="${1:-backups/growthevo-${stamp}.dump}"
+checksum="${out}.sha256"
 mkdir -p "$(dirname "$out")"
 tmp="${out}.partial"
-rm -f "$tmp"
+checksum_tmp="${checksum}.partial"
 
+if [ -e "$out" ] || [ -e "$checksum" ]; then
+  echo "backup destination already exists; refusing to overwrite: $out" >&2
+  exit 1
+fi
+
+rm -f "$tmp" "$checksum_tmp"
 cleanup() {
-  rm -f "$tmp"
+  rm -f "$tmp" "$checksum_tmp"
 }
 trap cleanup EXIT
 
@@ -33,7 +40,10 @@ if [ ! -s "$tmp" ]; then
   exit 1
 fi
 
+digest="$(sha256sum "$tmp" | awk '{print $1}')"
+printf '%s  %s\n' "$digest" "$out" > "$checksum_tmp"
+
 mv "$tmp" "$out"
-sha256sum "$out" > "${out}.sha256"
+mv "$checksum_tmp" "$checksum"
 trap - EXIT
-printf 'backup: %s\nchecksum: %s\n' "$out" "${out}.sha256"
+printf 'backup: %s\nchecksum: %s\n' "$out" "$checksum"
