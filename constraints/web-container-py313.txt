@@ -3,20 +3,24 @@
 # These versions are the dependency graph exercised by the production-container
 # CI. Keep this file separate from the research/evidence pins in pyproject.toml:
 # updates here should be deliberate runtime maintenance and must pass Product
-# Surface + Product Stress + Product Persistence before landing.
+# Surface + Product Stress + Product Persistence + Product Auth before landing.
 
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
+cffi==2.1.1
 click==8.5.0
+cryptography==50.0.2
 fastapi==0.141.1
 h11==0.16.0
 idna==3.20
 psycopg==3.3.6
 psycopg-binary==3.3.6
 psycopg-pool==3.3.3
+pycparser==3.0
 pydantic==2.13.5
 pydantic-core==2.46.5
+PyJWT==2.15.1
 starlette==1.7.0
 typing-extensions==4.16.0
 typing-inspection==0.4.4

@@ -149,7 +149,29 @@ def create_app() -> Any:
         raise RuntimeError("GrowthEvo web dependencies are not installed. Install: pip install -e '.[web]'") from exc
 
     settings = RuntimeSettings.from_env()
+    authenticator: Any | None = None
     persistence_store: Any | None = None
+
+    # Authentication activation requires the complete generic OIDC/JWKS contract.
+    # Partial settings remain visible as configured_not_active and production stays
+    # fail-closed. Complete settings are fail-fast: the JWKS must be reachable and
+    # contain a usable RS256 signing key before the adapter becomes active.
+    auth_issuer = os.getenv("GROWTHEVO_AUTH_ISSUER", "").strip()
+    auth_jwks_url = os.getenv("GROWTHEVO_AUTH_JWKS_URL", "").strip()
+    auth_audience = os.getenv("GROWTHEVO_AUTH_AUDIENCE", "").strip()
+    if auth_issuer and auth_jwks_url and auth_audience and not settings.synthetic_data:
+        from .auth import OidcJwksAuthenticator
+
+        try:
+            authenticator = OidcJwksAuthenticator(
+                issuer=auth_issuer,
+                jwks_url=auth_jwks_url,
+                audience=auth_audience,
+                require_https=settings.production,
+            )
+        except Exception as exc:
+            raise RuntimeError("configured OIDC/JWKS authentication could not be initialized") from exc
+        settings = replace(settings, auth_backend=authenticator.backend)
 
     # Demo mode never reaches an external database even if a generic DATABASE_URL
     # leaks into the environment. API/production mode treats a configured database
@@ -201,6 +223,7 @@ def create_app() -> Any:
     app.state.decision_engine = decision_engine
     app.state.product_state = product_state
     app.state.persistence_store = persistence_store
+    app.state.authenticator = authenticator
     app.state.runtime_settings = settings
 
     def persistence_healthy() -> bool:
@@ -211,22 +234,40 @@ def create_app() -> Any:
         except Exception:
             return False
 
+    def authentication_healthy() -> bool:
+        if authenticator is None:
+            return True
+        try:
+            return bool(authenticator.healthy())
+        except Exception:
+            return False
+
     def runtime_ready() -> bool:
-        return settings.ready and persistence_healthy()
+        return settings.ready and persistence_healthy() and authentication_healthy()
 
     def runtime_payload() -> dict[str, object]:
         payload = settings.public_payload()
-        if persistence_store is None:
-            return payload
-        healthy = persistence_healthy()
-        payload["ready"] = bool(settings.ready and healthy)
-        persistence = dict(payload["persistence"])
-        persistence["healthy"] = healthy
-        payload["persistence"] = persistence
+        persistence_ok = persistence_healthy()
+        authentication_ok = authentication_healthy()
+        payload["ready"] = bool(settings.ready and persistence_ok and authentication_ok)
         connectors = [dict(item) for item in payload["connectors"]]
-        for connector in connectors:
-            if connector.get("id") == "persistence":
-                connector["state"] = "connected" if healthy else "error"
+
+        if persistence_store is not None:
+            persistence = dict(payload["persistence"])
+            persistence["healthy"] = persistence_ok
+            payload["persistence"] = persistence
+            for connector in connectors:
+                if connector.get("id") == "persistence":
+                    connector["state"] = "connected" if persistence_ok else "error"
+
+        if authenticator is not None:
+            authentication = dict(payload["authentication"])
+            authentication["healthy"] = authentication_ok
+            payload["authentication"] = authentication
+            for connector in connectors:
+                if connector.get("id") == "authentication":
+                    connector["state"] = "connected" if authentication_ok else "error"
+
         payload["connectors"] = connectors
         return payload
 
@@ -240,20 +281,20 @@ def create_app() -> Any:
             allow_origins=list(settings.cors_origins),
             allow_credentials=False,
             allow_methods=["GET", "POST", "OPTIONS"],
-            allow_headers=["Content-Type", "Idempotency-Key"],
+            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
         )
 
     @app.middleware("http")
     async def runtime_headers(request: Any, call_next: Any) -> Any:
         path = request.url.path
         is_api = path == "/api" or path.startswith("/api/")
-
-        if (
+        is_production_business_api = (
             settings.production
-            and not runtime_ready()
             and is_api
             and path not in PRODUCTION_SYSTEM_PATHS
-        ):
+        )
+
+        if is_production_business_api and not runtime_ready():
             response = JSONResponse(
                 status_code=503,
                 content={
@@ -262,6 +303,27 @@ def create_app() -> Any:
                     "environment": settings.environment,
                 },
             )
+        elif is_production_business_api:
+            from .auth import AuthenticationError
+
+            raw_headers = request.scope.get("headers", [])
+            authorization_count = sum(
+                1 for name, _ in raw_headers if name.lower() == b"authorization"
+            )
+            try:
+                if authorization_count != 1 or authenticator is None:
+                    raise AuthenticationError("authentication required")
+                claims = authenticator.authenticate_authorization_header(
+                    request.headers.get("authorization")
+                )
+                request.state.auth_claims = claims
+                response = await call_next(request)
+            except AuthenticationError:
+                response = JSONResponse(
+                    status_code=401,
+                    content={"detail": "valid bearer token required"},
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
         else:
             response = await call_next(request)
 

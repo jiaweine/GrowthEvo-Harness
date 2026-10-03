@@ -74,8 +74,8 @@ class RuntimeSettings:
     Credential/configuration presence is deliberately distinct from an active
     adapter. Production readiness requires both durable persistence and an
     authentication boundary to be initialized successfully. This prevents a
-    future database adapter from accidentally making a public unauthenticated
-    runtime appear production-ready merely because connection settings exist.
+    public unauthenticated runtime from appearing production-ready merely because
+    database or identity settings are present.
     """
 
     mode: str
@@ -105,9 +105,9 @@ class RuntimeSettings:
             require_https=raw_mode == "production",
         )
 
-        # No durable persistence or authentication adapter is wired into this
-        # branch yet. Keep activation explicit instead of inferring it from URLs,
-        # issuer metadata, or public client keys.
+        # Adapter activation is explicit. Presence of public identity metadata or
+        # database URLs only marks a connector configured; create_app replaces the
+        # backend after the corresponding boundary initializes successfully.
         persistence_backend = "reference-memory"
         auth_backend = "none"
         return cls(
@@ -118,6 +118,7 @@ class RuntimeSettings:
             auth_configured=_configured(
                 "GROWTHEVO_AUTH_ISSUER",
                 "GROWTHEVO_AUTH_JWKS_URL",
+                "GROWTHEVO_AUTH_AUDIENCE",
                 "SUPABASE_URL",
             ),
             object_store_configured=_configured(
