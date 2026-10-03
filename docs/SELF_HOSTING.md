@@ -19,14 +19,14 @@ This runbook provides a small, production-shaped deployment for a personal Growt
 
 ```bash
 cp .env.self-host.example .env
-# Replace the example database password before continuing.
+# Fill GROWTHEVO_POSTGRES_PASSWORD and GROWTHEVO_DATABASE_URL before continuing.
 docker compose config --quiet
 docker compose up -d --build
 docker compose ps
 curl --fail http://127.0.0.1:8765/api/ready
 ```
 
-The default `.env.self-host.example` uses `GROWTHEVO_MODE=api`. This is intentionally not presented as a production identity boundary.
+The environment template intentionally leaves the database password and connection URL blank. Docker Compose therefore fails fast until you provide them. The default runtime uses `GROWTHEVO_MODE=api`; this is intentionally not presented as a production identity boundary.
 
 ## Enable production mode
 
