@@ -9,8 +9,10 @@ This runbook provides a small, production-shaped deployment for a personal Growt
 - The API binds to `127.0.0.1` by default; put a TLS reverse proxy in front of it before exposing it publicly.
 - `api` mode is a durable reference runtime for validation and private use.
 - `production` mode remains fail-closed until both PostgreSQL and OIDC/JWKS authentication are active.
-- Backup files are created atomically with a SHA-256 checksum.
+- Backup files are published only after a non-empty custom-format dump and SHA-256 integrity metadata are produced.
+- Existing backup destinations are never overwritten implicitly.
 - Restore is destructive by design and requires an explicit confirmation environment variable.
+- Restore checksum is mandatory, and the archive is validated before the API is stopped or the database is modified.
 
 ## Start the stack
 
@@ -50,7 +52,7 @@ bash scripts/backup_postgres.sh
 bash scripts/backup_postgres.sh backups/pre-change.dump
 ```
 
-Each successful backup produces both a PostgreSQL custom-format dump and a matching `.sha256` file. The repository ignores `backups/` so a database dump is not accidentally committed. Keep backups outside the application host as well; a backup stored only beside the live volume is not a disaster-recovery copy.
+Each successful backup produces both a PostgreSQL custom-format dump and a matching `.sha256` file. If either destination already exists, the backup helper refuses to overwrite it; choose a new path instead. The repository ignores `backups/` so a database dump is not accidentally committed. Keep backups outside the application host as well; a backup stored only beside the live volume is not a disaster-recovery copy.
 
 A reasonable personal-project policy is:
 
@@ -67,7 +69,9 @@ Stop external writers first. Then run:
 GROWTHEVO_RESTORE_CONFIRM=YES bash scripts/restore_postgres.sh backups/pre-change.dump
 ```
 
-If the API service was running, the script stops it before restore and only reports success after the API becomes ready again. If a checksum file exists beside the dump, it is verified before any destructive operation.
+The matching `.sha256` file is required. Restore fails before any destructive action if the checksum file is missing, malformed, points at a different dump path, or does not match the dump bytes. The PostgreSQL custom-format archive is also parsed with `pg_restore --list` before the API is stopped or database objects are changed.
+
+If the API service was running, the script stops it only after those checks pass, performs the restore, and only reports success after the API becomes ready again.
 
 ## Upgrade safely
 
@@ -90,7 +94,7 @@ curl --fail http://127.0.0.1:8765/api/ready
 curl --fail http://127.0.0.1:8765/api/system/runtime
 ```
 
-Then confirm that a known Campaign and a known recent Decision are visible. The repository persistence CI performs the equivalent recovery check automatically against a fresh restored PostgreSQL database.
+Then confirm that a known Campaign and a known recent Decision are visible. The repository persistence CI performs the equivalent recovery check automatically against a fresh restored PostgreSQL database, including dump integrity, archive readability, restored API readiness, and recovered Campaign/Decision state.
 
 ## Boundaries
 
