@@ -1,0 +1,64 @@
+name: Mobile npm security audit after RN alignment
+
+on:
+  push:
+    branches:
+      - audit/mobile-npm-security-rn0863
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.repository == 'jiaweine/GrowthEvo-Harness' && github.ref == 'refs/heads/audit/mobile-npm-security-rn0863'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout audit branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install exact mobile lock
+        working-directory: apps/mobile
+        run: npm ci
+
+      - name: Capture runtime and full audit reports
+        working-directory: apps/mobile
+        shell: bash
+        run: |
+          mkdir -p ../../audit-reports
+          npm audit --omit=dev --json > ../../audit-reports/runtime-audit.json || true
+          npm audit --json > ../../audit-reports/full-audit.json || true
+          node - <<'NODE'
+          const fs = require('fs');
+          for (const [label, file] of [
+            ['runtime', '../../audit-reports/runtime-audit.json'],
+            ['full', '../../audit-reports/full-audit.json'],
+          ]) {
+            const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const rows = Object.entries(data.vulnerabilities || {})
+              .map(([name, v]) => ({
+                name,
+                severity: v.severity,
+                direct: Boolean(v.isDirect),
+                fixAvailable: v.fixAvailable,
+                via: (v.via || []).map(x => typeof x === 'string' ? x : `${x.source}:${x.title}`),
+              }))
+              .sort((a, b) => a.name.localeCompare(b.name));
+            console.log(`=== ${label} audit ===`);
+            console.log(JSON.stringify({metadata: data.metadata?.vulnerabilities || {}, vulnerabilities: rows}, null, 2));
+          }
+          NODE
+
+      - name: Upload raw npm audit reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mobile-npm-security-audit-rn0863
+          path: audit-reports/*.json
+          if-no-files-found: error
