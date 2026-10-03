@@ -8,6 +8,7 @@ import pytest
 jwt = pytest.importorskip("jwt")
 rsa = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.rsa")
 
+from growthevo.web import auth as auth_module
 from growthevo.web.auth import (
     AuthConfigurationError,
     AuthenticationError,
@@ -116,6 +117,24 @@ def test_unknown_kid_refreshes_once_then_rejects() -> None:
     assert calls == [JWKS_URL, JWKS_URL]
 
 
+def test_repeated_unknown_kid_is_rate_limited_within_refresh_cooldown() -> None:
+    private_key, jwk = _key("primary")
+    calls: list[str] = []
+
+    def fetcher(url: str):
+        calls.append(url)
+        return {"keys": [jwk]}
+
+    auth = _auth(jwk, fetcher=fetcher)
+    for kid in ("unknown-one", "unknown-two", "unknown-one"):
+        with pytest.raises(AuthenticationError, match="invalid bearer token"):
+            auth.verify(_token(private_key, kid))
+
+    # One bootstrap plus one forced rotation refresh. Further attacker-controlled
+    # unknown key ids inside the cooldown do not create additional IdP traffic.
+    assert calls == [JWKS_URL, JWKS_URL]
+
+
 def test_unknown_kid_can_succeed_after_normal_key_rotation() -> None:
     _, old_jwk = _key("old")
     new_private_key, new_jwk = _key("new")
@@ -131,6 +150,39 @@ def test_unknown_kid_can_succeed_after_normal_key_rotation() -> None:
 
     assert claims["sub"] == "user-ci-123"
     assert calls == 2
+
+
+def test_jwks_redirect_is_rejected_even_when_redirect_target_is_https(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, jwk = _key("primary")
+
+    class RedirectedResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def geturl(self) -> str:
+            return "https://attacker.example.test/jwks.json"
+
+        def read(self, _: int) -> bytes:
+            return json.dumps({"keys": [jwk]}).encode("utf-8")
+
+    monkeypatch.setattr(
+        auth_module,
+        "urlopen",
+        lambda request, timeout: RedirectedResponse(),
+    )
+
+    with pytest.raises(AuthConfigurationError, match="must not redirect"):
+        OidcJwksAuthenticator(
+            issuer=ISSUER,
+            jwks_url=JWKS_URL,
+            audience=AUDIENCE,
+            require_https=True,
+        )
 
 
 def test_malformed_authorization_header_is_rejected() -> None:
