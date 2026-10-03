@@ -77,8 +77,9 @@ def test_database_backups_are_gitignored() -> None:
 
 def test_self_hosting_runbook_preserves_production_boundary() -> None:
     runbook = (ROOT / "docs" / "SELF_HOSTING.md").read_text(encoding="utf-8")
+    normalized = runbook.replace("`", "").lower()
 
-    assert "production mode remains fail-closed" in runbook
+    assert "production mode remains fail-closed" in normalized
     assert "GROWTHEVO_MODE=production" in runbook
     assert "GROWTHEVO_AUTH_ISSUER" in runbook
     assert "GROWTHEVO_AUTH_JWKS_URL" in runbook
