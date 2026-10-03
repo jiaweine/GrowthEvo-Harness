@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from dataclasses import replace
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -146,8 +149,46 @@ def create_app() -> Any:
         raise RuntimeError("GrowthEvo web dependencies are not installed. Install: pip install -e '.[web]'") from exc
 
     settings = RuntimeSettings.from_env()
-    decision_engine = ReferenceDecisionEngine()
-    product_state = ReferenceProductState()
+    persistence_store: Any | None = None
+
+    # Demo mode never reaches an external database even if a generic DATABASE_URL
+    # leaks into the environment. API/production mode treats a configured database
+    # as explicit intent: initialization must succeed or startup fails instead of
+    # silently dropping back to process-local state.
+    if settings.database_configured and not settings.synthetic_data:
+        from .persistence import (
+            PersistentReferenceDecisionEngine,
+            PostgresProductState,
+            PostgresStore,
+        )
+
+        database_url = (
+            os.getenv("GROWTHEVO_DATABASE_URL")
+            or os.getenv("DATABASE_URL")
+            or ""
+        ).strip()
+        try:
+            persistence_store = PostgresStore(
+                database_url,
+                seed_reference=not settings.production,
+            )
+        except Exception as exc:
+            raise RuntimeError("configured PostgreSQL persistence could not be initialized") from exc
+        settings = replace(settings, persistence_backend=persistence_store.backend)
+        decision_engine = PersistentReferenceDecisionEngine(persistence_store)
+        product_state = PostgresProductState(persistence_store)
+    else:
+        decision_engine = ReferenceDecisionEngine()
+        product_state = ReferenceProductState()
+
+    @asynccontextmanager
+    async def lifespan(_: Any):
+        try:
+            yield
+        finally:
+            if persistence_store is not None:
+                persistence_store.close()
+
     app = FastAPI(
         title="GrowthEvo Growth OS",
         version="stable",
@@ -155,9 +196,39 @@ def create_app() -> Any:
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/openapi.json",
+        lifespan=lifespan,
     )
     app.state.decision_engine = decision_engine
     app.state.product_state = product_state
+    app.state.persistence_store = persistence_store
+    app.state.runtime_settings = settings
+
+    def persistence_healthy() -> bool:
+        if persistence_store is None:
+            return True
+        try:
+            return bool(persistence_store.healthy())
+        except Exception:
+            return False
+
+    def runtime_ready() -> bool:
+        return settings.ready and persistence_healthy()
+
+    def runtime_payload() -> dict[str, object]:
+        payload = settings.public_payload()
+        if persistence_store is None:
+            return payload
+        healthy = persistence_healthy()
+        payload["ready"] = bool(settings.ready and healthy)
+        persistence = dict(payload["persistence"])
+        persistence["healthy"] = healthy
+        payload["persistence"] = persistence
+        connectors = [dict(item) for item in payload["connectors"]]
+        for connector in connectors:
+            if connector.get("id") == "persistence":
+                connector["state"] = "connected" if healthy else "error"
+        payload["connectors"] = connectors
+        return payload
 
     # Add the byte/header limiter before CORS so Starlette's middleware stacking
     # leaves CORS outside it. Rejections therefore retain the exact configured
@@ -179,7 +250,7 @@ def create_app() -> Any:
 
         if (
             settings.production
-            and not settings.ready
+            and not runtime_ready()
             and is_api
             and path not in PRODUCTION_SYSTEM_PATHS
         ):
@@ -215,18 +286,19 @@ def create_app() -> Any:
 
     @app.get("/api/ready", tags=["system"])
     def readiness() -> Any:
-        payload = settings.public_payload()
-        if not settings.ready:
+        payload = runtime_payload()
+        if not payload["ready"]:
             return JSONResponse(status_code=503, content={"status": "not_ready", **payload})
         return {"status": "ready", **payload}
 
     @app.get("/api/system/runtime", tags=["system"])
     def runtime() -> dict[str, object]:
-        return settings.public_payload()
+        return runtime_payload()
 
     @app.get("/api/system/connectors", tags=["system"])
     def connectors() -> list[dict[str, str]]:
-        return settings.connector_states()
+        payload = runtime_payload()
+        return payload["connectors"]  # type: ignore[return-value]
 
     @app.get("/api/dashboard", tags=["dashboard"])
     def dashboard() -> dict[str, Any]:

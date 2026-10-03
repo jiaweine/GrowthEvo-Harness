@@ -1,9 +1,9 @@
 # GrowthEvo Web container runtime lock for Python 3.13.
 #
 # These versions are the dependency graph exercised by the production-container
-# CI on 2026-09-29. Keep this file separate from the research/evidence pins in
-# pyproject.toml: updates here should be deliberate runtime maintenance and must
-# pass Product Surface + Product Stress before landing.
+# CI. Keep this file separate from the research/evidence pins in pyproject.toml:
+# updates here should be deliberate runtime maintenance and must pass Product
+# Surface + Product Stress + Product Persistence before landing.
 
 annotated-doc==0.0.5
 annotated-types==0.8.0
@@ -12,6 +12,9 @@ click==8.5.0
 fastapi==0.141.1
 h11==0.16.0
 idna==3.20
+psycopg==3.3.6
+psycopg-binary==3.3.6
+psycopg-pool==3.3.3
 pydantic==2.13.5
 pydantic-core==2.46.5
 starlette==1.7.0
