@@ -48,6 +48,7 @@ def main() -> int:
     now = datetime.now(timezone.utc)
     ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "GrowthEvo CI Root CA")])
+    ca_subject_key_id = x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key())
     ca_cert = (
         x509.CertificateBuilder()
         .subject_name(ca_name)
@@ -57,6 +58,11 @@ def main() -> int:
         .not_valid_before(now - timedelta(days=1))
         .not_valid_after(now + timedelta(days=2))
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(ca_subject_key_id, critical=False)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
+            critical=False,
+        )
         .sign(ca_key, hashes.SHA256())
     )
 
@@ -82,6 +88,14 @@ def main() -> int:
         )
         .add_extension(
             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
+            critical=False,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(tls_key.public_key()),
+            critical=False,
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
             critical=False,
         )
         .sign(ca_key, hashes.SHA256())
