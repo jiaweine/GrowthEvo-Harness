@@ -40,11 +40,13 @@ def test_self_host_environment_example_is_fail_closed_by_default() -> None:
 def test_backup_and_restore_helpers_are_guarded_and_parse_as_bash() -> None:
     backup_path = ROOT / "scripts" / "backup_postgres.sh"
     restore_path = ROOT / "scripts" / "restore_postgres.sh"
+    recovery_path = ROOT / "scripts" / "verify_postgres_recovery.sh"
     backup = backup_path.read_text(encoding="utf-8")
     restore = restore_path.read_text(encoding="utf-8")
+    recovery = recovery_path.read_text(encoding="utf-8")
 
-    subprocess.run(["bash", "-n", str(backup_path)], check=True)
-    subprocess.run(["bash", "-n", str(restore_path)], check=True)
+    for path in (backup_path, restore_path, recovery_path):
+        subprocess.run(["bash", "-n", str(path)], check=True)
 
     assert "set -Eeuo pipefail" in backup
     assert "--format=custom" in backup
@@ -59,6 +61,18 @@ def test_backup_and_restore_helpers_are_guarded_and_parse_as_bash() -> None:
     assert "--if-exists" in restore
     assert "--exit-on-error" in restore
 
+    assert POSTGRES_IMAGE in recovery
+    assert "pg_dump" in recovery
+    assert "pg_restore" in recovery
+    assert "createdb" in recovery
+    assert "recovered-campaigns.json" in recovery
+    assert "recovered-decisions.json" in recovery
+
+
+def test_database_backups_are_gitignored() -> None:
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "backups/" in gitignore
+
 
 def test_self_hosting_runbook_preserves_production_boundary() -> None:
     runbook = (ROOT / "docs" / "SELF_HOSTING.md").read_text(encoding="utf-8")
@@ -68,5 +82,5 @@ def test_self_hosting_runbook_preserves_production_boundary() -> None:
     assert "GROWTHEVO_AUTH_ISSUER" in runbook
     assert "GROWTHEVO_AUTH_JWKS_URL" in runbook
     assert "GROWTHEVO_AUTH_AUDIENCE" in runbook
-    assert "./scripts/backup_postgres.sh" in runbook
-    assert "./scripts/restore_postgres.sh" in runbook
+    assert "bash scripts/backup_postgres.sh" in runbook
+    assert "bash scripts/restore_postgres.sh" in runbook
