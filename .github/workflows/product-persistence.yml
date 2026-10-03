@@ -59,13 +59,13 @@ jobs:
             constraints/web-container-py313.txt
       - name: Install production-aligned persistence dependencies
         run: python -m pip install --constraint constraints/web-container-py313.txt -e '.[web,dev]'
-      - name: Test PostgreSQL migrations, restart recovery, and multi-app atomicity
+      - name: Test PostgreSQL migrations, restart recovery, multi-app atomicity, and TTL cleanup
         env:
           GROWTHEVO_TEST_DATABASE_URL: postgresql://growthevo:growthevo-ci@127.0.0.1:55432/growthevo_ci
         run: pytest tests/test_product_postgres_persistence.py
       - name: Build production container
         run: docker build -t growthevo-api:persistence-ci .
-      - name: Stress durable API and verify process restart recovery
+      - name: Stress durable API, verify restart recovery, replicas, and production gate
         shell: bash
         env:
           HOST_DATABASE_URL: postgresql://growthevo:growthevo-ci@127.0.0.1:55432/growthevo_ci
@@ -74,7 +74,7 @@ jobs:
           set -euo pipefail
           mkdir -p persistence-reports
           cleanup() {
-            docker rm -f growthevo-db-ci-a growthevo-db-ci-b >/dev/null 2>&1 || true
+            docker rm -f growthevo-db-ci-a growthevo-db-ci-b growthevo-db-ci-prod >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
 
@@ -96,6 +96,27 @@ jobs:
               sleep 0.5
             done
             docker logs "$name" || true
+            return 1
+          }
+
+          start_production_api() {
+            docker run --rm -d \
+              --name growthevo-db-ci-prod \
+              --add-host=host.docker.internal:host-gateway \
+              -p "8768:8765" \
+              -e GROWTHEVO_MODE=production \
+              -e GROWTHEVO_ENV=persistence-ci-production \
+              -e GROWTHEVO_DATABASE_URL="$CONTAINER_DATABASE_URL" \
+              growthevo-api:persistence-ci >/dev/null
+            for attempt in $(seq 1 40); do
+              status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+                http://127.0.0.1:8768/api/system/runtime || true)"
+              if [ "$status" = "200" ]; then
+                return 0
+              fi
+              sleep 0.5
+            done
+            docker logs growthevo-db-ci-prod || true
             return 1
           }
 
@@ -296,12 +317,40 @@ jobs:
           print(json.dumps(report, indent=2))
           PY
 
+          start_production_api
+          ready_status="$(curl --silent --output persistence-reports/production-ready.json \
+            --write-out '%{http_code}' http://127.0.0.1:8768/api/ready)"
+          dashboard_status="$(curl --silent --output persistence-reports/production-dashboard.json \
+            --write-out '%{http_code}' http://127.0.0.1:8768/api/dashboard)"
+          test "$ready_status" = "503"
+          test "$dashboard_status" = "503"
+          curl --fail --silent http://127.0.0.1:8768/api/system/runtime \
+            | tee persistence-reports/production-runtime.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          runtime = json.loads(Path("persistence-reports/production-runtime.json").read_text())
+          ready = json.loads(Path("persistence-reports/production-ready.json").read_text())
+          dashboard = json.loads(Path("persistence-reports/production-dashboard.json").read_text())
+
+          assert runtime["mode"] == "production"
+          assert runtime["persistence"]["backend"] == "postgresql"
+          assert runtime["persistence"]["active"] is True
+          assert runtime["persistence"]["healthy"] is True
+          assert runtime["authentication"]["active"] is False
+          assert runtime["ready"] is False
+          assert ready["status"] == "not_ready"
+          assert dashboard["detail"] == "production runtime is not ready; business APIs are fail-closed"
+          PY
+
           {
             echo '### Durable PostgreSQL verification'
             echo
             echo '- API process restart recovery: PASS'
             echo '- Cross-replica idempotency: 128 requests → 1 decision ID'
             echo '- Cross-replica concurrent Campaign writes: 64/64 unique and visible'
+            echo '- Production with healthy PostgreSQL but inactive auth: ready 503 + business API 503'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload persistence reports
         if: always()

@@ -16,6 +16,7 @@ from .product_data import (
 
 UTC = timezone.utc
 IDEMPOTENCY_RETENTION = timedelta(days=7)
+IDEMPOTENCY_CLEANUP_BATCH = 256
 
 _DURABLE_CORE_STATEMENTS = (
     """
@@ -195,6 +196,36 @@ class PostgresStore:
                     (payload["id"], payload["status"], self._jsonb(payload)),
                 )
 
+    @staticmethod
+    def _cleanup_expired_idempotency(
+        conn: Any,
+        *,
+        limit: int = IDEMPOTENCY_CLEANUP_BATCH,
+    ) -> int:
+        """Delete a bounded batch of expired idempotency rows without replica pileups."""
+        if limit <= 0:
+            return 0
+        row = conn.execute(
+            """
+            WITH expired AS (
+                SELECT ctid
+                FROM growthevo_idempotency
+                WHERE expires_at <= now()
+                ORDER BY expires_at ASC
+                LIMIT %s
+                FOR UPDATE SKIP LOCKED
+            ), deleted AS (
+                DELETE FROM growthevo_idempotency AS target
+                USING expired
+                WHERE target.ctid = expired.ctid
+                RETURNING 1
+            )
+            SELECT count(*) AS deleted FROM deleted
+            """,
+            (limit,),
+        ).fetchone()
+        return 0 if row is None else int(row["deleted"])
+
     def campaigns(self) -> list[dict[str, Any]]:
         with self._pool.connection() as conn:
             rows = conn.execute(
@@ -291,6 +322,7 @@ class PostgresStore:
 
     def get_idempotent(self, idempotency_key: str) -> tuple[str, dict[str, Any]] | None:
         with self._pool.connection() as conn:
+            self._cleanup_expired_idempotency(conn)
             conn.execute(
                 "DELETE FROM growthevo_idempotency WHERE idempotency_key = %s AND expires_at <= now()",
                 (idempotency_key,),
@@ -319,6 +351,7 @@ class PostgresStore:
             if idempotency_key:
                 if request_fingerprint is None:
                     raise RuntimeError("idempotent decisions require a request fingerprint")
+                self._cleanup_expired_idempotency(conn)
                 conn.execute(
                     "DELETE FROM growthevo_idempotency WHERE idempotency_key = %s AND expires_at <= now()",
                     (idempotency_key,),

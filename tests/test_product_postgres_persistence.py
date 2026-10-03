@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import os
 from typing import Any
 
@@ -47,6 +48,17 @@ def _database_counts() -> dict[str, int]:
         ).fetchone()
     assert row is not None
     return {key: int(value) for key, value in row.items()}
+
+
+def _expired_idempotency_count() -> int:
+    import psycopg
+
+    with psycopg.connect(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "SELECT count(*) FROM growthevo_idempotency WHERE expires_at <= now()"
+        ).fetchone()
+    assert row is not None
+    return int(row[0])
 
 
 def _decision_request(entity_id: str = "postgres-restart-user") -> Any:
@@ -199,6 +211,77 @@ def test_postgres_idempotency_and_approval_are_atomic_across_pools() -> None:
     counts = _database_counts()
     assert counts["decisions"] == 1
     assert counts["idempotency"] == 1
+
+
+def test_expired_idempotency_cleanup_is_bounded_and_eventual() -> None:
+    import psycopg
+    from psycopg.types.json import Jsonb
+
+    from growthevo.web.persistence import IDEMPOTENCY_CLEANUP_BATCH
+
+    _reset_database()
+    store = _store(seed_reference=False)
+    expired_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    live_until = datetime.now(timezone.utc) + timedelta(hours=1)
+    try:
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO growthevo_idempotency (
+                        idempotency_key,
+                        request_fingerprint,
+                        decision_id,
+                        payload,
+                        expires_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    [
+                        (
+                            f"expired-{index:04d}",
+                            f"fingerprint-{index:04d}",
+                            f"decision-{index:04d}",
+                            Jsonb({"decision_id": f"decision-{index:04d}"}),
+                            expired_at,
+                        )
+                        for index in range(IDEMPOTENCY_CLEANUP_BATCH + 44)
+                    ],
+                )
+                cur.execute(
+                    """
+                    INSERT INTO growthevo_idempotency (
+                        idempotency_key,
+                        request_fingerprint,
+                        decision_id,
+                        payload,
+                        expires_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        "live-key",
+                        "live-fingerprint",
+                        "live-decision",
+                        Jsonb({"decision_id": "live-decision"}),
+                        live_until,
+                    ),
+                )
+
+        assert _expired_idempotency_count() == IDEMPOTENCY_CLEANUP_BATCH + 44
+        entry = store.get_idempotent("live-key")
+        assert entry == ("live-fingerprint", {"decision_id": "live-decision"})
+        assert _expired_idempotency_count() == 44
+
+        # A later ordinary idempotency lookup drains the next bounded batch;
+        # no cron or unbounded DELETE is required for eventual reclamation.
+        entry = store.get_idempotent("live-key")
+        assert entry == ("live-fingerprint", {"decision_id": "live-decision"})
+        assert _expired_idempotency_count() == 0
+    finally:
+        store.close()
+
+    assert _database_counts()["idempotency"] == 1
 
 
 def test_production_postgres_is_durable_but_auth_stays_a_separate_gate(
