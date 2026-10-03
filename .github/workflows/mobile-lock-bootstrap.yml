@@ -1,0 +1,55 @@
+name: Mobile lock metadata bootstrap
+
+on:
+  push:
+    branches:
+      - chore/mobile-sdk57-compatibility
+
+permissions:
+  contents: write
+
+jobs:
+  repair-lock-metadata:
+    if: github.repository == 'jiaweine/GrowthEvo-Harness' && github.ref == 'refs/heads/chore/mobile-sdk57-compatibility'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: chore/mobile-sdk57-compatibility
+
+      - name: Repair only the mobile root package identity
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/mobile/package-lock.json')
+          lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
+          boundary = next(i for i, line in enumerate(lines) if '"node_modules/' in line)
+          indexes = [
+              i for i, line in enumerate(lines[:boundary])
+              if '"version": "0.1.0"' in line
+          ]
+          if len(indexes) != 2:
+              raise SystemExit(f'expected exactly two root 0.1.0 identities before node_modules, got {indexes}')
+          for i in indexes:
+              lines[i] = lines[i].replace('"version": "0.1.0"', '"version": "1.0.0"')
+          path.write_text(''.join(lines), encoding='utf-8')
+          PY
+
+      - name: Validate locked mobile install
+        working-directory: apps/mobile
+        run: npm ci
+
+      - name: Validate mobile dependency contract
+        run: python -m pytest -q tests/test_product_mobile_dependency_contract.py
+
+      - name: Remove one-shot bootstrap and commit the verified lock metadata
+        run: |
+          git rm .github/workflows/mobile-lock-bootstrap.yml
+          git add apps/mobile/package-lock.json
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(mobile): align lock metadata with first product identity'
+          git push origin HEAD:chore/mobile-sdk57-compatibility
