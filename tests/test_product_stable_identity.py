@@ -20,6 +20,7 @@ SCANNED = [
 
 FORBIDDEN = {
     "versioned public API path": re.compile(r"/api/v\d+\b", re.IGNORECASE),
+    "public numbered product label": re.compile(r"\bv\d+(?:\.\d+){1,2}\b", re.IGNORECASE),
     "numbered product identity field": re.compile(r"\b(?:policy|agent|harness)_version\b", re.IGNORECASE),
     "numbered action identity": re.compile(r"\b(?:free_shipping|coupon_10|push_reminder|email_guide|member_reminder|reactivation_card)_v\d+\b", re.IGNORECASE),
     "numbered policy shorthand": re.compile(r"\bpv_\d+\b", re.IGNORECASE),
