@@ -1,0 +1,270 @@
+name: Product Auth CI
+
+on:
+  pull_request:
+    paths:
+      - "growthevo/web/**"
+      - "constraints/web-container-py313.txt"
+      - "tests/test_product_oidc_auth.py"
+      - "tests/test_product_configuration.py"
+      - "tests/test_product_container_runtime_install.py"
+      - "scripts/generate_auth_ci_fixture.py"
+      - "pyproject.toml"
+      - "Dockerfile"
+      - "docs/authentication.md"
+      - ".github/workflows/product-auth.yml"
+  push:
+    branches: [main]
+    paths:
+      - "growthevo/web/**"
+      - "constraints/web-container-py313.txt"
+      - "tests/test_product_oidc_auth.py"
+      - "tests/test_product_configuration.py"
+      - "tests/test_product_container_runtime_install.py"
+      - "scripts/generate_auth_ci_fixture.py"
+      - "pyproject.toml"
+      - "Dockerfile"
+      - "docs/authentication.md"
+      - ".github/workflows/product-auth.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-auth-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  oidc-jwks-production:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.11@sha256:e31e3d5327d1806f6177827c9710643e4f35f7ab3f14d26d05332753d3e95ee0
+        env:
+          POSTGRES_USER: growthevo
+          POSTGRES_PASSWORD: growthevo-ci
+          POSTGRES_DB: growthevo_ci
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U growthevo -d growthevo_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/web-container-py313.txt
+      - name: Install production-aligned auth dependencies
+        run: python -m pip install --constraint constraints/web-container-py313.txt -e '.[web,dev]'
+      - name: Test OIDC/JWKS verification semantics
+        run: pytest tests/test_product_oidc_auth.py tests/test_product_configuration.py tests/test_product_container_runtime_install.py
+      - name: Generate local TLS identity fixture
+        run: python scripts/generate_auth_ci_fixture.py auth-fixture
+      - name: Build production container
+        run: docker build -t growthevo-api:auth-ci .
+      - name: Verify real production Bearer boundary
+        shell: bash
+        env:
+          CONTAINER_DATABASE_URL: postgresql://growthevo:growthevo-ci@host.docker.internal:55432/growthevo_ci
+        run: |
+          set -euo pipefail
+          mkdir -p auth-reports
+          JWKS_SERVER_PID=""
+          cleanup() {
+            docker rm -f growthevo-auth-ci >/dev/null 2>&1 || true
+            if [ -n "$JWKS_SERVER_PID" ]; then
+              kill "$JWKS_SERVER_PID" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          python - <<'PY' >auth-fixture/server.log 2>&1 &
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from pathlib import Path
+          import ssl
+
+          jwks = Path("auth-fixture/jwks.json").read_bytes()
+
+          class Handler(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  if self.path != "/jwks.json":
+                      self.send_error(404)
+                      return
+                  self.send_response(200)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(jwks)))
+                  self.end_headers()
+                  self.wfile.write(jwks)
+
+              def log_message(self, format, *args):
+                  return
+
+          server = ThreadingHTTPServer(("0.0.0.0", 9443), Handler)
+          context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+          context.load_cert_chain("auth-fixture/tls-cert.pem", "auth-fixture/tls-key.pem")
+          server.socket = context.wrap_socket(server.socket, server_side=True)
+          server.serve_forever()
+          PY
+          JWKS_SERVER_PID=$!
+
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent --cacert auth-fixture/ca.pem \
+              https://localhost:9443/jwks.json >/dev/null; then
+              break
+            fi
+            sleep 0.25
+          done
+          curl --fail --silent --cacert auth-fixture/ca.pem \
+            https://localhost:9443/jwks.json >/dev/null
+
+          docker run -d \
+            --name growthevo-auth-ci \
+            --add-host=host.docker.internal:host-gateway \
+            -p 8770:8765 \
+            -v "$PWD/auth-fixture/ca.pem:/tmp/growthevo-ci-ca.pem:ro" \
+            -e SSL_CERT_FILE=/tmp/growthevo-ci-ca.pem \
+            -e GROWTHEVO_MODE=production \
+            -e GROWTHEVO_ENV=auth-ci \
+            -e GROWTHEVO_DATABASE_URL="$CONTAINER_DATABASE_URL" \
+            -e GROWTHEVO_AUTH_ISSUER=https://issuer.example.test/growthevo \
+            -e GROWTHEVO_AUTH_JWKS_URL=https://host.docker.internal:9443/jwks.json \
+            -e GROWTHEVO_AUTH_AUDIENCE=growthevo-ci \
+            -e GROWTHEVO_CORS_ORIGINS=https://client.example.test \
+            growthevo-api:auth-ci >/dev/null
+
+          for attempt in $(seq 1 50); do
+            if curl --fail --silent http://127.0.0.1:8770/api/ready \
+              >auth-reports/ready.json; then
+              break
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' growthevo-auth-ci 2>/dev/null || true)" = "false" ]; then
+              break
+            fi
+            sleep 0.25
+          done
+          if ! curl --fail --silent http://127.0.0.1:8770/api/ready \
+            >auth-reports/ready.json; then
+            docker inspect growthevo-auth-ci \
+              --format 'status={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}' || true
+            docker logs growthevo-auth-ci || true
+            echo '--- local JWKS server log ---' >&2
+            cat auth-fixture/server.log >&2 || true
+            exit 1
+          fi
+          curl --fail --silent http://127.0.0.1:8770/api/system/runtime \
+            >auth-reports/runtime.json
+
+          preflight_status="$(curl --silent \
+            --dump-header auth-reports/preflight.headers \
+            --output auth-reports/preflight.body \
+            --write-out '%{http_code}' \
+            -X OPTIONS \
+            -H 'Origin: https://client.example.test' \
+            -H 'Access-Control-Request-Method: GET' \
+            -H 'Access-Control-Request-Headers: Authorization' \
+            http://127.0.0.1:8770/api/dashboard)"
+          test "$preflight_status" = "200"
+          grep -qi '^access-control-allow-origin: https://client.example.test' auth-reports/preflight.headers
+          grep -qi '^access-control-allow-headers:.*Authorization' auth-reports/preflight.headers
+
+          no_auth_status="$(curl --silent --dump-header auth-reports/no-auth.headers \
+            --output auth-reports/no-auth.json --write-out '%{http_code}' \
+            http://127.0.0.1:8770/api/dashboard)"
+          test "$no_auth_status" = "401"
+          grep -qi '^www-authenticate: Bearer' auth-reports/no-auth.headers
+
+          VALID_TOKEN="$(cat auth-fixture/valid.jwt)"
+          valid_status="$(curl --silent --output auth-reports/valid.json \
+            --write-out '%{http_code}' -H "Authorization: Bearer $VALID_TOKEN" \
+            http://127.0.0.1:8770/api/dashboard)"
+          test "$valid_status" = "200"
+
+          for token_file in wrong-audience.jwt wrong-issuer.jwt expired.jwt; do
+            TOKEN="$(cat "auth-fixture/$token_file")"
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              -H "Authorization: Bearer $TOKEN" \
+              http://127.0.0.1:8770/api/dashboard)"
+            test "$status" = "401"
+          done
+
+          duplicate_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            -H "Authorization: Bearer $VALID_TOKEN" \
+            -H "Authorization: Bearer $VALID_TOKEN" \
+            http://127.0.0.1:8770/api/dashboard)"
+          test "$duplicate_status" = "401"
+
+          kill "$JWKS_SERVER_PID"
+          wait "$JWKS_SERVER_PID" 2>/dev/null || true
+          JWKS_SERVER_PID=""
+          UNKNOWN_KID_TOKEN="$(cat auth-fixture/unknown-kid.jwt)"
+          unavailable_status="$(curl --silent \
+            --output auth-reports/idp-unavailable.json \
+            --write-out '%{http_code}' \
+            -H "Authorization: Bearer $UNKNOWN_KID_TOKEN" \
+            http://127.0.0.1:8770/api/dashboard)"
+          test "$unavailable_status" = "503"
+          unavailable_repeat_status="$(curl --silent \
+            --output auth-reports/idp-unavailable-repeat.json \
+            --write-out '%{http_code}' \
+            -H "Authorization: Bearer $UNKNOWN_KID_TOKEN" \
+            http://127.0.0.1:8770/api/dashboard)"
+          test "$unavailable_repeat_status" = "503"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          ready = json.loads(Path("auth-reports/ready.json").read_text())
+          runtime = json.loads(Path("auth-reports/runtime.json").read_text())
+          no_auth = json.loads(Path("auth-reports/no-auth.json").read_text())
+          unavailable = json.loads(Path("auth-reports/idp-unavailable.json").read_text())
+          unavailable_repeat = json.loads(
+              Path("auth-reports/idp-unavailable-repeat.json").read_text()
+          )
+
+          assert ready["status"] == "ready"
+          assert runtime["ready"] is True
+          assert runtime["persistence"]["active"] is True
+          assert runtime["persistence"]["healthy"] is True
+          assert runtime["authentication"] == {
+              "configured": True,
+              "active": True,
+              "backend": "oidc-jwks",
+              "healthy": True,
+          }
+          assert no_auth == {"detail": "valid bearer token required"}
+          expected_unavailable_detail = (
+              "identity provider is temporarily unavailable; business API is fail-closed"
+          )
+          assert unavailable["detail"] == expected_unavailable_detail
+          assert unavailable_repeat["detail"] == expected_unavailable_detail
+          PY
+
+          {
+            echo '### Production OIDC/JWKS verification'
+            echo
+            echo '- PostgreSQL + OIDC/JWKS readiness: PASS'
+            echo '- Anonymous system probes: PASS'
+            echo '- Browser CORS preflight with Authorization: PASS'
+            echo '- Missing Bearer token: 401 + WWW-Authenticate'
+            echo '- Valid RS256 token: business API 200'
+            echo '- Wrong audience / issuer / expired token: 401'
+            echo '- Duplicate Authorization headers: 401'
+            echo '- Repeated unknown key while IdP is unavailable: 503 fail-closed'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload auth reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: growthevo-auth-reports
+          path: |
+            auth-reports/*
+            auth-fixture/server.log
+          if-no-files-found: warn
