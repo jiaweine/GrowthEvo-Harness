@@ -87,7 +87,7 @@ version = {attr = "growthevo._version.__version__"}
 include = ["growthevo*"]
 
 [tool.setuptools.package-data]
-"growthevo.web" = ["static/*.html", "static/*.css", "static/*.js"]
+"growthevo.web" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

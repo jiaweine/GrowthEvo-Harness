@@ -1,83 +1,96 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="GrowthEvo evidence and capability dashboard">
-  <title>GrowthEvo · Evidence Console</title>
-  <link rel="stylesheet" href="/assets/styles.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#111827" />
+  <meta name="description" content="GrowthEvo — AI 原生因果增长执行平台" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="stylesheet" href="./assets/styles.css" />
+  <title>GrowthEvo · 因果增长操作系统</title>
 </head>
 <body>
-  <div class="ambient ambient-a"></div>
-  <div class="ambient ambient-b"></div>
-
-  <header class="topbar">
-    <a class="brand" href="/" aria-label="GrowthEvo home">
-      <span class="brand-mark">G</span>
-      <span>GrowthEvo</span>
-    </a>
-    <nav>
-      <a href="#evidence">Evidence</a>
-      <a href="#capabilities">Capabilities</a>
-      <a href="#architecture">Architecture</a>
-      <a class="api-link" href="/api/docs">API docs</a>
-    </nav>
-  </header>
-
-  <main>
-    <section class="hero">
-      <div class="eyebrow"><span class="pulse"></span> Evidence console · local product surface</div>
-      <h1>Make incremental decisions<br><span>with evidence attached.</span></h1>
-      <p id="tagline">Loading the GrowthEvo decision stack…</p>
-      <div class="hero-actions">
-        <a class="primary" href="#evidence">Explore locked evidence</a>
-        <a class="secondary" href="/api/dashboard">View JSON</a>
+  <div id="app" class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="主导航">
+      <div class="brand-block">
+        <div class="brand-name">GrowthEvo</div>
+        <div class="brand-subtitle">因果驱动的增长操作系统</div>
       </div>
-      <div class="status-row">
-        <div><span class="label">Service</span><strong id="service-status">Connecting</strong></div>
-        <div><span class="label">Version</span><strong id="version">—</strong></div>
-        <div><span class="label">API</span><strong id="api-version">—</strong></div>
-      </div>
-    </section>
-
-    <section class="section" id="evidence">
-      <div class="section-heading">
-        <div>
-          <span class="kicker">Locked real-world evidence</span>
-          <h2>Results that carry provenance.</h2>
+      <nav id="main-nav" class="nav-list"></nav>
+      <div class="sidebar-bottom">
+        <div class="workspace-card">
+          <div class="avatar avatar-blue">✦</div>
+          <div class="workspace-copy"><strong>Acme 电商</strong><span>Enterprise Plan</span></div>
+          <span class="chev">⌄</span>
         </div>
-        <p>Validation selection is frozen before final holdout. The UI surfaces the accepted headline evidence without changing the underlying research protocol.</p>
-      </div>
-      <div class="evidence-grid" id="evidence-grid" aria-live="polite"></div>
-    </section>
-
-    <section class="section" id="capabilities">
-      <div class="section-heading">
-        <div>
-          <span class="kicker">Decision stack</span>
-          <h2>From causal effects to governed action.</h2>
+        <div class="user-card">
+          <div class="avatar avatar-photo">李</div>
+          <div class="workspace-copy"><strong>李明</strong><span>增长负责人</span></div>
         </div>
-        <p>Each capability maps back to an existing GrowthEvo module, keeping the product layer thin and auditable.</p>
+        <button class="collapse-btn"><span>‹</span> 收起</button>
       </div>
-      <div class="capability-grid" id="capability-grid"></div>
-    </section>
+    </aside>
 
-    <section class="section" id="architecture">
-      <div class="section-heading">
-        <div>
-          <span class="kicker">Architecture</span>
-          <h2>A product shell around the research core.</h2>
+    <main class="main-column">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobile-menu" aria-label="打开导航">☰</button>
+        <button class="command-search" id="command-open" aria-label="打开命令面板">
+          <span class="search-icon" id="search-icon"></span>
+          <span class="search-placeholder">搜索用户、活动、实验、创意或向 AI 提问...</span>
+          <kbd>⌘ K</kbd>
+        </button>
+        <div class="top-actions">
+          <button class="top-filter">2024-12-01 → 2024-12-31</button>
+          <button class="top-filter">全部渠道 <span class="down">⌄</span></button>
+          <button class="bell" aria-label="通知"><span id="bell-icon"></span><i></i></button>
+          <div class="top-avatar">L</div>
         </div>
+      </header>
+
+      <section class="content" id="view"></section>
+      <footer class="statusbar">
+        <div><span class="brand-foot">GrowthEvo</span><span class="divider-v"></span><span>From Insight to Impact.</span></div>
+        <div class="status-right"><span><i class="dot green"></i>系统运行正常</span><span>▣ 决策延迟 48 ms</span><span><i class="dot gray"></i>数据更新 5 分钟前</span></div>
+      </footer>
+    </main>
+
+    <aside class="agent-sidecar" id="agent-sidecar" aria-label="Growth Agent">
+      <div class="agent-head">
+        <div class="agent-title"><span class="agent-logo">✦</span><strong>Growth Agent</strong><span class="online-dot"></span><span class="online-text">在线</span></div>
+        <button class="mode-btn">切换模式⌄</button>
       </div>
-      <div class="architecture" id="architecture-stack"></div>
-    </section>
-  </main>
+      <div class="agent-body" id="agent-body"></div>
+      <form class="agent-composer" id="agent-form">
+        <textarea id="agent-input" rows="2" placeholder="继续提问，或输入指令..."></textarea>
+        <div class="composer-tools"><button type="button" aria-label="附件">⌕</button><button type="button" aria-label="语音">♩</button><button class="send" type="submit" aria-label="发送">➤</button></div>
+      </form>
+      <div class="agent-achievement" id="agent-achievement"></div>
+      <div class="agent-banner">
+        <div class="banner-overlay"></div>
+        <div class="banner-copy"><strong>让每一次触达，<br/>都创造真实的增长</strong><span>数据 × 因果 × AI × 执行</span></div>
+        <button class="video-btn"><span>▶</span> 观看产品介绍 · 2 分钟</button>
+      </div>
+    </aside>
 
-  <footer>
-    <span>GrowthEvo-Harness</span>
-    <span>FastAPI · bundled UI · read-only evidence surface</span>
-  </footer>
+    <nav class="mobile-tabs" id="mobile-tabs"></nav>
+  </div>
 
-  <script src="/assets/app.js" defer></script>
+  <div class="command-modal" id="command-modal" hidden>
+    <div class="command-panel">
+      <div class="command-input"><span id="command-search-icon"></span><input id="command-input" placeholder="搜索，或输入自然语言指令"/><kbd>Esc</kbd></div>
+      <div class="command-results" id="command-results"></div>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="./assets/config.js"></script>
+  <script src="./assets/data.js" defer></script>
+  <script src="./assets/runtime-ui.js" defer></script>
+  <script src="./assets/product-data.js" defer></script>
+  <script src="./assets/product-advanced-data.js" defer></script>
+  <script src="./assets/views.js" defer></script>
+  <script src="./assets/dashboard-page.js" defer></script>
+  <script src="./assets/pages.js" defer></script>
+  <script src="./assets/live-pages.js" defer></script>
+  <script src="./assets/app.js" defer></script>
 </body>
 </html>

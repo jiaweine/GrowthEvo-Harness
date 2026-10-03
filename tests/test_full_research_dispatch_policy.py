@@ -49,3 +49,15 @@ def test_dispatch_guard_records_auditable_github_run_identity() -> None:
     assert 'SCHEMA_VERSION = "growthevo.research-dispatch.v1"' in script
     assert '"experiment_reason": reason' in script
     assert '"commit_is_trusted_ref_ancestor": True' in script
+
+
+def test_dispatch_guard_requires_pr_head_and_exact_landed_main_ci() -> None:
+    script = (ROOT / "scripts" / "verify_research_dispatch.py").read_text(encoding="utf-8")
+    assert 'event="pull_request"' in script
+    assert 'identity="reviewed PR head"' in script
+    assert 'event="push"' in script
+    assert 'identity="landed main commit"' in script
+    assert '"reviewed_ci_verified": True' in script
+    assert '"landed_main_ci_commit_sha": expected_sha' in script
+    assert '"landed_main_ci_event": "push"' in script
+    assert '"landed_main_ci_verified": True' in script

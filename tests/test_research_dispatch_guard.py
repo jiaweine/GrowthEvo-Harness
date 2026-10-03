@@ -77,6 +77,14 @@ def test_reviewed_historical_main_commit_is_allowed_and_persisted(
     for name, value in _env(first).items():
         monkeypatch.setenv(name, value)
 
+    reviewed_jobs = [
+        {"name": name, "job_id": index, "status": "completed", "conclusion": "success"}
+        for index, name in enumerate(GUARD._REQUIRED_CI_JOBS, start=1)
+    ]
+    landed_jobs = [
+        {"name": name, "job_id": 100 + index, "status": "completed", "conclusion": "success"}
+        for index, name in enumerate(GUARD._REQUIRED_CI_JOBS, start=1)
+    ]
     review = {
         "reviewed_pull_request_number": 80,
         "reviewed_pull_request_url": "https://github.com/example/GrowthEvo-Harness/pull/80",
@@ -87,11 +95,16 @@ def test_reviewed_historical_main_commit_is_allowed_and_persisted(
         "reviewed_ci_workflow_path": ".github/workflows/ci.yml",
         "reviewed_ci_run_id": 246,
         "reviewed_ci_run_attempt": 1,
-        "reviewed_ci_jobs": [
-            {"name": name, "job_id": index, "status": "completed", "conclusion": "success"}
-            for index, name in enumerate(GUARD._REQUIRED_CI_JOBS, start=1)
-        ],
+        "reviewed_ci_jobs": reviewed_jobs,
         "reviewed_ci_verified": True,
+        "landed_main_ci_workflow_name": "GrowthEvo CI",
+        "landed_main_ci_workflow_path": ".github/workflows/ci.yml",
+        "landed_main_ci_commit_sha": first,
+        "landed_main_ci_event": "push",
+        "landed_main_ci_run_id": 346,
+        "landed_main_ci_run_attempt": 1,
+        "landed_main_ci_jobs": landed_jobs,
+        "landed_main_ci_verified": True,
     }
     monkeypatch.setattr(
         GUARD,
@@ -117,6 +130,10 @@ def test_reviewed_historical_main_commit_is_allowed_and_persisted(
     assert payload["reviewed_pull_request_number"] == 80
     assert payload["reviewed_ci_run_id"] == 246
     assert payload["reviewed_ci_verified"] is True
+    assert payload["landed_main_ci_commit_sha"] == first
+    assert payload["landed_main_ci_event"] == "push"
+    assert payload["landed_main_ci_run_id"] == 346
+    assert payload["landed_main_ci_verified"] is True
 
 
 def test_unmerged_feature_commit_is_rejected(tmp_path: Path) -> None:

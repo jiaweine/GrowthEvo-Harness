@@ -1,0 +1,251 @@
+name: Product Surface CI
+
+on:
+  pull_request:
+    paths:
+      - "growthevo/web/**"
+      - "apps/mobile/**"
+      - "scripts/build_pages.py"
+      - "scripts/stress_product.py"
+      - "scripts/stress_decision_semantics.py"
+      - "constraints/web-container-py313.txt"
+      - "tests/test_web_dashboard.py"
+      - "tests/test_product_*.py"
+      - "pyproject.toml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docs/product_surface.md"
+      - "docs/deployment_architecture.md"
+      - "docs/performance_testing.md"
+      - ".github/workflows/product-surface.yml"
+      - ".github/workflows/deploy-pages.yml"
+  push:
+    branches: [main]
+    paths:
+      - "growthevo/web/**"
+      - "apps/mobile/**"
+      - "scripts/build_pages.py"
+      - "scripts/stress_product.py"
+      - "scripts/stress_decision_semantics.py"
+      - "constraints/web-container-py313.txt"
+      - "tests/test_web_dashboard.py"
+      - "tests/test_product_*.py"
+      - "pyproject.toml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docs/product_surface.md"
+      - "docs/deployment_architecture.md"
+      - "docs/performance_testing.md"
+      - ".github/workflows/product-surface.yml"
+      - ".github/workflows/deploy-pages.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-surface-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-product:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/web-container-py313.txt
+      - name: Install production-aligned web product dependencies
+        run: python -m pip install --constraint constraints/web-container-py313.txt -e '.[web,dev]'
+      - name: Run web product tests
+        run: pytest tests/test_web_dashboard.py tests/test_product_*.py
+      - name: Check browser JavaScript syntax
+        run: |
+          for file in growthevo/web/static/*.js; do node --check "$file"; done
+      - name: Build production container
+        run: docker build -t growthevo-api:ci .
+      - name: Smoke and stress the same production container
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -d --name growthevo-api-ci -p 8765:8765 \
+            -e GROWTHEVO_MODE=api \
+            -e GROWTHEVO_ENV=ci \
+            growthevo-api:ci
+          trap 'docker rm -f growthevo-api-ci >/dev/null 2>&1 || true' EXIT
+          READY=0
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8765/api/ready >/dev/null; then
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$READY" != "1" ]]; then
+            docker logs growthevo-api-ci || true
+            echo "GrowthEvo CI container never became ready" >&2
+            exit 1
+          fi
+          curl --fail --silent http://127.0.0.1:8765/api/health | python -m json.tool
+          curl --fail --silent http://127.0.0.1:8765/api/ready | python -m json.tool
+          mkdir -p stress-reports
+          set +e
+          python scripts/stress_product.py \
+            --base-url http://127.0.0.1:8765 \
+            --profile ci \
+            --json-out stress-reports/product-stress.json \
+            --markdown-out stress-reports/product-stress.md
+          STATUS=$?
+          set -e
+          if [[ -f stress-reports/product-stress.md ]]; then
+            cat stress-reports/product-stress.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ "$STATUS" != "0" ]]; then
+            echo "CI pressure test failed; container log follows:" >&2
+            docker logs growthevo-api-ci || true
+            if [[ -f stress-reports/product-stress.json ]]; then
+              cat stress-reports/product-stress.json >&2
+            fi
+            exit "$STATUS"
+          fi
+          python scripts/stress_decision_semantics.py \
+            --base-url http://127.0.0.1:8765 \
+            --profile ci \
+            > stress-reports/decision-semantics.json
+          cat stress-reports/decision-semantics.json
+      - name: Upload product stress report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: growthevo-product-stress-report
+          path: stress-reports/*
+          if-no-files-found: warn
+      - name: Build GitHub Pages demo artifact
+        run: python scripts/build_pages.py --output _site
+      - name: Check Pages artifact JavaScript
+        run: |
+          for file in _site/assets/*.js; do node --check "$file"; done
+      - name: Install CJK fonts for deterministic screenshots
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+      - name: Capture real rendered demo UI screenshots
+        run: |
+          set -euo pipefail
+          mkdir -p ui-screenshots
+          python -m http.server 4173 --directory _site >/tmp/growthevo-pages.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME_BIN"
+          chrome_shot() {
+            name="$1"
+            route="$2"
+            "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=1536,1024 --screenshot="ui-screenshots/${name}.png" "http://127.0.0.1:4173/#${route}"
+            test -s "ui-screenshots/${name}.png"
+          }
+          chrome_shot growthevo-desktop dashboard
+          chrome_shot growthevo-opportunities opportunities
+          chrome_shot growthevo-campaign-studio campaignStudio
+          chrome_shot growthevo-experiments experiments
+          chrome_shot growthevo-realtime realtime
+          chrome_shot growthevo-approvals approvals
+          chrome_shot growthevo-agent-harness harness
+          chrome_shot growthevo-evolution evolution
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=430,932 --screenshot=ui-screenshots/growthevo-mobile-web.png http://127.0.0.1:4173/
+          test -s ui-screenshots/growthevo-mobile-web.png
+      - name: Exercise API-mode workbenches in real Chrome
+        shell: bash
+        env:
+          GROWTHEVO_API_BASE: http://127.0.0.1:8765
+        run: |
+          set -euo pipefail
+          python scripts/build_pages.py --output _site-api
+          for file in _site-api/assets/*.js; do node --check "$file"; done
+          docker run --rm -d --name growthevo-api-browser -p 8765:8765 \
+            -e GROWTHEVO_MODE=api \
+            -e GROWTHEVO_ENV=browser-ci \
+            -e GROWTHEVO_CORS_ORIGINS=http://127.0.0.1:4174 \
+            growthevo-api:ci
+          API_PID="growthevo-api-browser"
+          python -m http.server 4174 --directory _site-api >/tmp/growthevo-pages-api.log 2>&1 &
+          PAGES_PID=$!
+          trap 'kill $PAGES_PID >/dev/null 2>&1 || true; docker rm -f "$API_PID" >/dev/null 2>&1 || true' EXIT
+          READY=0
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8765/api/ready >/dev/null && curl --fail --silent http://127.0.0.1:4174/ >/dev/null; then
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$READY" != "1" ]]; then
+            docker logs "$API_PID" || true
+            cat /tmp/growthevo-pages-api.log || true
+            exit 1
+          fi
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME_BIN"
+          assert_live_route() {
+            route="$1"
+            marker="$2"
+            out="/tmp/growthevo-${route}.html"
+            "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --virtual-time-budget=5000 --dump-dom "http://127.0.0.1:4174/#${route}" > "$out"
+            grep -Fq "$marker" "$out"
+            if grep -Fq 'Reference UI Fixture' "$out"; then
+              echo "${route} unexpectedly rendered as a static fixture" >&2
+              exit 1
+            fi
+          }
+          assert_live_route opportunities 'Live API'
+          assert_live_route experiments 'Live API'
+          assert_live_route realtime 'free_shipping'
+          assert_live_route harness 'run_9081'
+          assert_live_route approvals 'apr_281'
+          assert_live_route evolution 'EV-281'
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=5000 --screenshot=ui-screenshots/growthevo-api-realtime.png http://127.0.0.1:4174/#realtime
+          test -s ui-screenshots/growthevo-api-realtime.png
+          docker rm -f "$API_PID" >/dev/null
+          unavailable_out="/tmp/growthevo-api-unavailable.html"
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:4174/#dashboard" > "$unavailable_out"
+          grep -Fq 'GrowthEvo API 暂不可用' "$unavailable_out"
+          if grep -Fq 'Demo Workspace · Synthetic Data' "$unavailable_out"; then
+            echo "strict API mode silently exposed the Demo workspace after API failure" >&2
+            exit 1
+          fi
+          if grep -Fq 'Reference UI Fixture' "$unavailable_out"; then
+            echo "strict API mode rendered a reference fixture after API failure" >&2
+            exit 1
+          fi
+      - name: Upload rendered UI screenshots
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: growthevo-ui-screenshots
+          path: ui-screenshots/*.png
+          if-no-files-found: error
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22.13"
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - name: Install locked mobile dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck

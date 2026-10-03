@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import importlib.util
 import re
 import sys
@@ -29,7 +30,14 @@ def _good_ruleset() -> dict:
         "rules": [
             {
                 "type": "pull_request",
-                "parameters": {"required_approving_review_count": 0},
+                "parameters": {
+                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                    "dismiss_stale_reviews_on_push": False,
+                    "require_code_owner_review": False,
+                    "require_last_push_approval": False,
+                    "required_approving_review_count": 0,
+                    "required_review_thread_resolution": False,
+                },
             },
             {
                 "type": "required_status_checks",
@@ -50,11 +58,16 @@ def _good_ruleset() -> dict:
     }
 
 
-def test_good_ruleset_passes() -> None:
-    result = MODULE.audit_governance(
-        branch_data={"name": "main", "protected": True},
-        rulesets=[_good_ruleset()],
+def _audit(rulesets: list[dict], *, protected: bool = True, allow_unconfigured: bool = False):
+    return MODULE.audit_governance(
+        branch_data={"name": "main", "protected": protected},
+        rulesets=rulesets,
+        allow_unconfigured=allow_unconfigured,
     )
+
+
+def test_good_ruleset_passes() -> None:
+    result = _audit([_good_ruleset()])
     assert result.ok is True
     assert result.pending is False
     assert result.failures == ()
@@ -62,29 +75,19 @@ def test_good_ruleset_passes() -> None:
 
 
 def test_effective_ruleset_is_sufficient_even_if_branch_flag_is_false() -> None:
-    result = MODULE.audit_governance(
-        branch_data={"name": "main", "protected": False},
-        rulesets=[_good_ruleset()],
-    )
+    result = _audit([_good_ruleset()], protected=False)
     assert result.ok is True
     assert result.failures == ()
 
 
 def test_missing_ruleset_fails_even_if_branch_flag_is_true() -> None:
-    result = MODULE.audit_governance(
-        branch_data={"name": "main", "protected": True},
-        rulesets=[],
-    )
+    result = _audit([])
     assert result.ok is False
-    assert any("no active branch ruleset" in failure for failure in result.failures)
+    assert any("expected exactly one active branch ruleset" in failure for failure in result.failures)
 
 
 def test_open_tracker_can_tolerate_completely_unconfigured_repository() -> None:
-    result = MODULE.audit_governance(
-        branch_data={"name": "main", "protected": False},
-        rulesets=[],
-        allow_unconfigured=True,
-    )
+    result = _audit([], protected=False, allow_unconfigured=True)
     assert result.ok is True
     assert result.pending is True
     assert result.failures == ()
@@ -94,11 +97,7 @@ def test_open_tracker_can_tolerate_completely_unconfigured_repository() -> None:
 def test_bootstrap_mode_rejects_partial_active_ruleset() -> None:
     ruleset = _good_ruleset()
     ruleset["rules"] = [rule for rule in ruleset["rules"] if rule["type"] != "non_fast_forward"]
-    result = MODULE.audit_governance(
-        branch_data={"name": "main", "protected": False},
-        rulesets=[ruleset],
-        allow_unconfigured=True,
-    )
+    result = _audit([ruleset], protected=False, allow_unconfigured=True)
     assert result.ok is False
     assert result.pending is False
 
@@ -107,11 +106,7 @@ def test_missing_check_fails_closed() -> None:
     ruleset = _good_ruleset()
     status_rule = next(rule for rule in ruleset["rules"] if rule["type"] == "required_status_checks")
     status_rule["parameters"]["required_status_checks"] = status_rule["parameters"]["required_status_checks"][:-1]
-    result = MODULE.audit_governance(
-        branch_data={"name": "main", "protected": True},
-        rulesets=[ruleset],
-    )
-    assert result.ok is False
+    assert _audit([ruleset]).ok is False
 
 
 def test_extra_manual_full_data_check_is_not_accepted() -> None:
@@ -123,11 +118,7 @@ def test_extra_manual_full_data_check_is_not_accepted() -> None:
             "integration_id": MODULE.GITHUB_ACTIONS_INTEGRATION_ID,
         }
     )
-    result = MODULE.audit_governance(
-        branch_data={"name": "main", "protected": True},
-        rulesets=[ruleset],
-    )
-    assert result.ok is False
+    assert _audit([ruleset]).ok is False
 
 
 def test_duplicate_required_check_fails() -> None:
@@ -138,32 +129,28 @@ def test_duplicate_required_check_fails() -> None:
     status_rule["parameters"]["required_status_checks"].append(
         dict(status_rule["parameters"]["required_status_checks"][0])
     )
-    result = MODULE.audit_governance(
-        branch_data={"name": "main", "protected": True},
-        rulesets=[ruleset],
-    )
-    assert result.ok is False
+    assert _audit([ruleset]).ok is False
 
 
 def test_wrong_actions_integration_id_fails() -> None:
     ruleset = _good_ruleset()
     status_rule = next(rule for rule in ruleset["rules"] if rule["type"] == "required_status_checks")
     status_rule["parameters"]["required_status_checks"][0]["integration_id"] = 999
-    result = MODULE.audit_governance(
-        branch_data={"name": "main", "protected": True},
-        rulesets=[ruleset],
-    )
-    assert result.ok is False
+    assert _audit([ruleset]).ok is False
 
 
 def test_bypass_actor_fails() -> None:
     ruleset = _good_ruleset()
-    ruleset["bypass_actors"] = [{"actor_id": 1, "actor_type": "RepositoryRole", "bypass_mode": "always"}]
-    result = MODULE.audit_governance(
-        branch_data={"name": "main", "protected": True},
-        rulesets=[ruleset],
-    )
-    assert result.ok is False
+    ruleset["bypass_actors"] = [
+        {"actor_id": 1, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+    ]
+    assert _audit([ruleset]).ok is False
+
+
+def test_missing_bypass_actor_field_fails_closed() -> None:
+    ruleset = _good_ruleset()
+    del ruleset["bypass_actors"]
+    assert _audit([ruleset]).ok is False
 
 
 def test_inactive_or_wrong_branch_rulesets_fail() -> None:
@@ -172,12 +159,75 @@ def test_inactive_or_wrong_branch_rulesets_fail() -> None:
     wrong_branch = _good_ruleset()
     wrong_branch["id"] = 124
     wrong_branch["conditions"]["ref_name"]["include"] = ["refs/heads/release"]
-    result = MODULE.audit_governance(
-        branch_data={"name": "main", "protected": True},
-        rulesets=[inactive, wrong_branch],
-    )
-    assert result.ok is False
+    assert _audit([inactive, wrong_branch]).ok is False
 
+
+def test_pull_request_rule_requires_exact_solo_maintainer_contract() -> None:
+    mutations = (
+        ("allowed_merge_methods", ["squash", "rebase"]),
+        ("dismiss_stale_reviews_on_push", True),
+        ("require_code_owner_review", True),
+        ("require_last_push_approval", True),
+        ("required_approving_review_count", 1),
+        ("required_approving_review_count", False),
+        ("required_review_thread_resolution", True),
+    )
+    for key, value in mutations:
+        ruleset = deepcopy(_good_ruleset())
+        pull_rule = next(rule for rule in ruleset["rules"] if rule["type"] == "pull_request")
+        pull_rule["parameters"][key] = value
+        assert _audit([ruleset]).ok is False, key
+
+
+def test_missing_pull_request_parameter_fails_closed() -> None:
+    for key in (
+        "allowed_merge_methods",
+        "dismiss_stale_reviews_on_push",
+        "require_code_owner_review",
+        "require_last_push_approval",
+        "required_approving_review_count",
+        "required_review_thread_resolution",
+    ):
+        ruleset = deepcopy(_good_ruleset())
+        pull_rule = next(rule for rule in ruleset["rules"] if rule["type"] == "pull_request")
+        del pull_rule["parameters"][key]
+        assert _audit([ruleset]).ok is False, key
+
+
+def test_extra_rule_type_or_duplicate_contract_rule_fails() -> None:
+    extra = _good_ruleset()
+    extra["rules"].append({"type": "required_signatures"})
+    assert _audit([extra]).ok is False
+
+    duplicate = _good_ruleset()
+    duplicate["rules"].append(deepcopy(duplicate["rules"][0]))
+    assert _audit([duplicate]).ok is False
+
+
+def test_ruleset_must_target_only_main_or_default_branch() -> None:
+    ruleset = _good_ruleset()
+    ruleset["conditions"]["ref_name"]["include"].append("refs/heads/release")
+    result = _audit([ruleset], protected=False, allow_unconfigured=True)
+    assert result.ok is False
+    assert result.pending is False
+
+
+def test_second_active_main_ruleset_fails_even_if_both_individually_match() -> None:
+    first = _good_ruleset()
+    second = deepcopy(first)
+    second["id"] = 124
+    result = _audit([first, second])
+    assert result.ok is False
+    assert result.pending is False
+    assert set(result.matched_ruleset_ids) == {123, 124}
+
+
+def test_broad_active_main_ruleset_disables_bootstrap_pending() -> None:
+    ruleset = _good_ruleset()
+    ruleset["conditions"]["ref_name"]["include"] = ["refs/heads/*"]
+    result = _audit([ruleset], protected=False, allow_unconfigured=True)
+    assert result.ok is False
+    assert result.pending is False
 
 
 def test_required_checks_track_ci_matrix_and_documented_contract() -> None:
@@ -199,7 +249,6 @@ def test_required_checks_track_ci_matrix_and_documented_contract() -> None:
     )
     for check in expected:
         assert f"`{check}`" in governance_doc
-
 
 
 def test_governance_workflow_keeps_schedule_bootstrap_and_manual_strict() -> None:

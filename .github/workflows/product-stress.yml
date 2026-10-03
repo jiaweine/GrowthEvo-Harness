@@ -1,0 +1,127 @@
+name: Product Stress
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Stress profile to run
+        required: true
+        default: standard
+        type: choice
+        options:
+          - quick
+          - ci
+          - standard
+          - soak
+  pull_request:
+    paths:
+      - "growthevo/web/**"
+      - "scripts/stress_product.py"
+      - "scripts/stress_decision_semantics.py"
+      - "constraints/web-container-py313.txt"
+      - "tests/test_product_*.py"
+      - "pyproject.toml"
+      - ".github/workflows/product-stress.yml"
+      - "Dockerfile"
+      - ".dockerignore"
+  schedule:
+    - cron: "17 3 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/web-container-py313.txt
+      - name: Select stress profile
+        id: profile
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            PROFILE=soak
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            PROFILE="${{ inputs.profile }}"
+          else
+            PROFILE=standard
+          fi
+          echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
+          echo "Selected profile: $PROFILE"
+      - name: Install production-aligned test dependencies
+        run: python -m pip install --constraint constraints/web-container-py313.txt -e '.[web,dev]'
+      - name: Run race-sensitive concurrency contracts
+        run: pytest tests/test_product_concurrency.py tests/test_product_api.py tests/test_product_configuration.py
+      - name: Build production container
+        run: docker build -t growthevo-api:stress .
+      - name: Run pressure test
+        shell: bash
+        run: |
+          docker run --rm -d --name growthevo-api-pressure -p 8765:8765 \
+            -e GROWTHEVO_MODE=api \
+            -e GROWTHEVO_ENV=pressure \
+            growthevo-api:stress
+          trap 'docker rm -f growthevo-api-pressure >/dev/null 2>&1 || true' EXIT
+          READY=0
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8765/api/ready >/dev/null; then
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$READY" != "1" ]]; then
+            docker logs growthevo-api-pressure || true
+            echo "GrowthEvo pressure container never became ready" >&2
+            exit 1
+          fi
+          mkdir -p stress-reports
+          set +e
+          python scripts/stress_product.py \
+            --base-url http://127.0.0.1:8765 \
+            --profile "${{ steps.profile.outputs.profile }}" \
+            --json-out "stress-reports/product-stress-${{ steps.profile.outputs.profile }}.json" \
+            --markdown-out "stress-reports/product-stress-${{ steps.profile.outputs.profile }}.md"
+          STATUS=$?
+          set -e
+          if [[ -f "stress-reports/product-stress-${{ steps.profile.outputs.profile }}.md" ]]; then
+            cat "stress-reports/product-stress-${{ steps.profile.outputs.profile }}.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ "$STATUS" != "0" ]]; then
+            echo "Pressure test failed; container log follows:" >&2
+            docker logs growthevo-api-pressure || true
+            if [[ -f "stress-reports/product-stress-${{ steps.profile.outputs.profile }}.json" ]]; then
+              echo "Pressure report with sample errors follows:" >&2
+              cat "stress-reports/product-stress-${{ steps.profile.outputs.profile }}.json" >&2
+            fi
+            exit "$STATUS"
+          fi
+
+          set +e
+          python scripts/stress_decision_semantics.py \
+            --base-url http://127.0.0.1:8765 \
+            --profile "${{ steps.profile.outputs.profile }}" \
+            > "stress-reports/decision-semantics-${{ steps.profile.outputs.profile }}.json"
+          SEMANTIC_STATUS=$?
+          set -e
+          cat "stress-reports/decision-semantics-${{ steps.profile.outputs.profile }}.json"
+          if [[ "$SEMANTIC_STATUS" != "0" ]]; then
+            echo "Decision propensity semantic pressure gate failed; container log follows:" >&2
+            docker logs growthevo-api-pressure || true
+            exit "$SEMANTIC_STATUS"
+          fi
+      - name: Upload pressure report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: growthevo-product-stress-${{ steps.profile.outputs.profile }}
+          path: stress-reports/*
+          if-no-files-found: warn

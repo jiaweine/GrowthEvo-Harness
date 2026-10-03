@@ -1,100 +1,54 @@
-const $ = (selector) => document.querySelector(selector);
+const REFERENCE_FIXTURE_ROUTES=new Set(['campaigns','campaignStudio','execution','evidence','data','integrations','settings']);
+const baseRouteRender=render;
+let routeRenderEpoch=0;
 
-function node(tag, className, text) {
-  const element = document.createElement(tag);
-  if (className) element.className = className;
-  if (text !== undefined) element.textContent = text;
-  return element;
+function markReferenceFixture(route){
+ if(useDemo||!REFERENCE_FIXTURE_ROUTES.has(route))return;
+ const view=$('#view');if(!view||view.querySelector('[data-reference-fixture]'))return;
+ const note=document.createElement('div');note.dataset.referenceFixture='true';note.className='card';
+ note.style.cssText='margin-bottom:10px;padding:9px 12px;border:1px solid #e2d6a6;background:#fffaf0;color:#6f5a16;font-size:10px;line-height:1.5';
+ note.textContent='Reference UI Fixture · 此工作台仍包含静态参考数据，不代表实时生产状态。真实 API 可用性与业务数据不会被 synthetic fixture 替代。';
+ view.prepend(note);
 }
 
-function renderEvidence(items) {
-  const grid = $("#evidence-grid");
-  grid.replaceChildren();
+render=async function guardedRender(){
+ const epoch=++routeRenderEpoch;const route=state.route;
+ if(useDemo)return baseRouteRender();
+ if(runtimeAvailability==='unavailable'){renderApiUnavailable(runtimeLastError);return}
+ // Deep links prove that the business API is reachable before either live or
+ // reference workbench content may render. This prevents an unavailable runtime
+ // from being visually overwritten by fixture content.
+ if(route!=='dashboard'&&!state.dashboard){
+  try{state.dashboard=await api('/api/dashboard')}
+  catch(error){if(epoch===routeRenderEpoch)renderApiUnavailable(error);return}
+  if(epoch!==routeRenderEpoch||route!==state.route)return;
+ }
+ try{await baseRouteRender()}
+ catch(error){if(epoch===routeRenderEpoch)renderApiUnavailable(error);return}
+ if(epoch===routeRenderEpoch&&route===state.route)markReferenceFixture(route);
+};
 
-  for (const item of items) {
-    const card = node("article", "evidence-card");
-    const top = node("div", "card-top");
-    const titleWrap = node("div");
-    titleWrap.append(node("span", "kicker", item.kind), node("h3", "", item.name));
-    top.append(titleWrap, node("span", "badge", "LOCKED"));
-    card.append(top);
-
-    const winner = node("p", "winner");
-    winner.append("Validation winner · ", node("strong", "", item.winner));
-    card.append(winner);
-
-    const metrics = node("div", "metric-grid");
-    for (const metric of item.metrics) {
-      const box = node("div", "metric");
-      box.append(node("span", "", metric.label), node("strong", "", metric.value));
-      metrics.append(box);
-    }
-    card.append(metrics);
-
-    const footer = node("div", "card-footer");
-    footer.append(node("code", "", item.commit.slice(0, 12)));
-    const link = node("a", "", "Evidence bundle ↗");
-    link.href = item.href;
-    link.target = "_blank";
-    link.rel = "noreferrer";
-    footer.append(link);
-    card.append(footer);
-    grid.append(card);
-  }
+async function submitAgentPrompt(e){
+ e.preventDefault();const t=$('#agent-input');const goal=t.value.trim();if(!goal)return;
+ if(useDemo){toast('Agent 已接收指令（Demo 模式）');t.value='';return}
+ const submit=$('#agent-form button[type="submit"]');if(submit)submit.disabled=true;
+ try{
+  const result=await api('/api/agent/plan',{method:'POST',body:JSON.stringify({goal,primary_metric:'incremental_profit',guardrails:[]})});
+  toast(`Agent Plan 已生成 · ${result.run_id||'proposal_ready'}`);t.value='';
+ }catch(error){renderApiUnavailable(error)}finally{if(submit)submit.disabled=false}
 }
-
-function renderCapabilities(items) {
-  const grid = $("#capability-grid");
-  grid.replaceChildren();
-
-  items.forEach((item, index) => {
-    const card = node("article", "capability-card");
-    card.append(
-      node("span", "cap-index", String(index + 1).padStart(2, "0")),
-      node("h3", "", item.name),
-      node("p", "", item.detail),
-      node("div", "module", item.module),
-    );
-    grid.append(card);
-  });
+function init(){ $('#search-icon').innerHTML=icon('search');$('#command-search-icon').innerHTML=icon('search');$('#bell-icon').innerHTML=icon('bell');
+ const nav=$('#main-nav');nav.innerHTML=NAV.map(n=>`<button class="nav-item" data-route="${n[0]}"><span class="nav-icon">${icon(n[1])}</span>${esc(n[2])}</button>`).join('');
+ $('#mobile-tabs').innerHTML=MOBILE.map(n=>`<button class="mobile-tab" data-route="${n[0]}"><i>${esc(n[1])}</i>${esc(n[2])}</button>`).join('');$$('[data-route]').forEach(b=>b.onclick=()=>go(b.dataset.route));
+ $('#mobile-menu').onclick=()=>$('#sidebar').classList.toggle('open');$('#command-open').onclick=openCommand;document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openCommand()}if(e.key==='Escape')$('#command-modal').hidden=true});
+ $('#agent-form').onsubmit=submitAgentPrompt;
+ renderAgent();renderAchievement();active();void render();
 }
-
-function renderArchitecture(items) {
-  const stack = $("#architecture-stack");
-  stack.replaceChildren();
-
-  items.forEach((item, index) => {
-    const card = node("article");
-    card.append(
-      node("span", "step", "0" + (index + 1)),
-      node("h3", "", item.name),
-      node("p", "", item.detail),
-    );
-    stack.append(card);
-  });
-}
-
-async function boot() {
-  try {
-    const response = await fetch("/api/dashboard", {headers: {"Accept": "application/json"}});
-    if (!response.ok) throw new Error("dashboard request failed: " + response.status);
-    const data = await response.json();
-
-    $("#service-status").textContent = "Healthy";
-    $("#version").textContent = data.project.version;
-    $("#api-version").textContent = data.summary.api_version;
-    $("#tagline").textContent = data.project.tagline + ". The web layer stays read-only so evidence and execution governance remain explicit.";
-
-    renderEvidence(data.evidence);
-    renderCapabilities(data.capabilities);
-    renderArchitecture(data.architecture);
-  } catch (error) {
-    $("#service-status").textContent = "Unavailable";
-    const grid = $("#evidence-grid");
-    const message = node("div", "error", "The dashboard API could not be loaded. Check the server logs and /api/health.");
-    grid.replaceChildren(message);
-    console.error(error);
-  }
-}
-
-boot();
+function parentRoute(route){return (typeof ROUTE_PARENT!=='undefined'&&ROUTE_PARENT[route])||route}
+function active(){const parent=parentRoute(state.route);$$('[data-route]').forEach(b=>b.classList.toggle('active',b.dataset.route===parent))}
+function go(route){if(route==='agent'){openAgent();return}state.route=route;location.hash=route;active();void render();$('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'instant'})}
+window.addEventListener('hashchange',()=>{state.route=(location.hash||'#dashboard').slice(1);active();void render()});
+function openAgent(){$('#agent-sidecar').classList.add('open')}
+function openCommand(){const items=[['campaignStudio','创建一个新活动','Goal → Audience → Evidence → Execution'],['opportunities','分析新用户增长机会','Opportunity Map · causal incrementality'],['experiments','打开实验中心','Assignment / Holdout / Guardrails'],['realtime','查看实时决策','Decision API / propensity / policy'],['approvals','查看待审批事项','Risk / evidence / identity'],['harness','打开 Agent Harness','Trace / tools / guardrails'],['evolution','打开 Evolution Lab','Replay → Shadow → Canary']];$('#command-modal').hidden=false;$('#command-input').focus();$('#command-results').innerHTML=items.map(x=>`<div class="command-result" data-command-route="${x[0]}"><strong>${esc(x[1])}</strong><div style="font-size:8px;color:#8b95a5;margin-top:2px">${esc(x[2])}</div></div>`).join('');$$('[data-command-route]').forEach(x=>x.onclick=()=>{$('#command-modal').hidden=true;go(x.dataset.commandRoute)})}
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));}
+document.addEventListener('DOMContentLoaded',init);
