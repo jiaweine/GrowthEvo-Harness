@@ -16,7 +16,7 @@
 
 <br>
 
-[产品总览](#产品总览) · [增长机会](#增长机会) · [策略与实验](#策略与实验) · [Growth Agent](#growth-agent) · [效果证据](#效果证据) · [移动体验](#移动体验)
+[产品总览](#产品总览) · [增长机会](#增长机会) · [策略与实验](#策略与实验) · [Growth Agent](#growth-agent) · [治理与进化](#治理与进化) · [效果证据](#效果证据) · [移动体验](#移动体验)
 
 </div>
 
@@ -99,6 +99,12 @@ Campaign Studio 把一个增长想法拆成清晰的工作流：**目标、人�
 
 Growth Agent 是贯穿产品的增长协作助手。它会围绕当前目标，结合机会、证据、边界与工作状态，帮助团队整理下一步动作，而不是脱离上下文给出泛化建议。
 
+<p align="center">
+  <img src="docs/assets/product/readme-agent.png" alt="GrowthEvo Growth Agent 工作空间" width="100%" />
+</p>
+
+<p align="center"><sub>Growth Agent · 目标、上下文、证据、约束与行动过程保持在同一个工作空间</sub></p>
+
 在 GrowthEvo 中，Agent 更像一名坐在驾驶舱里的增长搭档：
 
 <table>
@@ -111,6 +117,30 @@ Growth Agent 是贯穿产品的增长协作助手。它会围绕当前目标，�
 </table>
 
 > **目标不是让 AI 替团队做决定，而是让每个决定更快、更清楚、更有依据。**
+
+---
+
+## 治理与进化
+
+### 治理与审批 · 重要动作有依据，也有人把关
+
+<p align="center">
+  <img src="docs/assets/product/readme-approvals.png" alt="GrowthEvo 治理与审批" width="100%" />
+</p>
+
+高影响增长动作不应该藏在聊天记录或零散表格里。GrowthEvo 把受众、预算、预期影响、证据与风险放在同一处，让团队在扩大动作前清楚看到 **为什么要做、影响多大、谁来确认**。
+
+审批不是增长的刹车，而是让团队能够放心加速：低风险动作保持流畅，高影响动作进入更明确的确认路径。
+
+### Evolution Lab · 把每一次结果变成下一轮更好的起点
+
+<p align="center">
+  <img src="docs/assets/product/readme-evolution.png" alt="GrowthEvo Evolution Lab" width="100%" />
+</p>
+
+GrowthEvo 不把一次活动结束当作终点。历史结果会进入持续复盘：哪些做法有效、哪些地方需要调整、哪些候选方案值得继续观察，都能在同一条演进路径里被追踪。
+
+这让“复盘”不再只是写一份总结，而是把真实结果直接带进下一轮增长决策。
 
 ---
 
