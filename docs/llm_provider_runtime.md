@@ -37,6 +37,45 @@ provider = OpenAIResponsesClient(
 
 The queue cap is process-local and should be sized together with the upstream worker count, provider account rate limits, request latency, and deployment replica count. Increasing it does not increase provider throughput; it only allows a larger short-lived burst to wait in memory.
 
+## Multi-provider failover
+
+`ProviderFailoverClient` composes multiple structured providers without racing them in parallel:
+
+```python
+from growthevo.llm import (
+    ProviderFailoverClient,
+    ProviderFailoverConfig,
+    ProviderRoute,
+)
+
+client = ProviderFailoverClient(
+    [
+        ProviderRoute("openai-primary", openai_client),
+        ProviderRoute("anthropic-backup", anthropic_client),
+        ProviderRoute("gemini-tertiary", gemini_client),
+    ],
+    config=ProviderFailoverConfig(
+        failure_threshold=3,
+        cooldown_seconds=30,
+        max_provider_attempts=2,
+    ),
+)
+```
+
+Routes are evaluated in order. GrowthEvo deliberately does **not** race OpenAI, Anthropic and Gemini for the same logical decision because parallel racing would multiply spend, provider traffic and the number of external systems receiving the same request context.
+
+A local `ProviderBusyError` causes immediate spillover to the next route but does not count as a provider-health failure: local saturation is not evidence that the upstream provider is unhealthy. Real provider/response failures increment that route's health state. Once `failure_threshold` is reached, only that route opens; healthy routes remain available.
+
+After `cooldown_seconds`, the circuit enters half-open recovery. Exactly one request is allowed to probe the recovering route while concurrent requests skip it, preventing a thundering herd when a provider comes back. A successful probe closes the route; a failed probe reopens it.
+
+`max_provider_attempts` bounds real upstream provider attempts per logical decision. Circuit skips, local busy rejections and routes that do not implement async do not consume the upstream-attempt budget because they make no provider request. With the default of two, one logical decision cannot cascade through all configured providers after repeated network failures, which bounds cross-provider latency and retry multiplication.
+
+Async cancellation is terminal for that logical request: it is propagated immediately, never converted into failover, and never counted as a provider failure. This keeps user/client cancellations from poisoning circuit health.
+
+The pool stores the actually selected provider/model in a request-local `ContextVar`. A shared pool can therefore serve many concurrent tasks while `GuardedLLMGrowthPlanner` audit traces still report the provider that actually answered that request rather than a shared mutable "last provider" value.
+
+`metrics()` exposes redacted pool-level counts for submissions, successes, failures, cancellations, real provider attempts, successful failovers, circuit skips and busy-route skips. `health_snapshot()` exposes per-route circuit state and counters without prompts, responses, user identifiers, credentials or raw exception messages.
+
 ## Retry policy
 
 GrowthEvo does **not** add an outer network retry loop. Retry multiplication is dangerous during provider throttling or outage: an SDK retry budget of three attempts wrapped by another three-attempt loop can become nine upstream requests for one logical decision.
@@ -47,7 +86,7 @@ Instead, `max_retries` is configured once on the provider SDK:
 - Anthropic receives `timeout` and `max_retries` on `Anthropic` / `AsyncAnthropic`;
 - Google receives `HttpOptions.timeout` and `HttpRetryOptions.attempts`; GrowthEvo converts `max_retries=N` to `attempts=N+1` because Google counts the initial request.
 
-The local admission/capacity gates remain independent from SDK retry behavior, which prevents retries from bypassing GrowthEvo's process-local fan-out budget.
+The local admission/capacity gates remain independent from SDK retry behavior, which prevents retries from bypassing GrowthEvo's process-local fan-out budget. Provider-pool failover is a separate, bounded layer: it changes route after a completed provider failure but does not repeat the same provider call outside that provider SDK's retry budget.
 
 ## Metrics
 
@@ -87,6 +126,12 @@ The repository continuously verifies this design through:
 - overload rejection after a bounded queue wait;
 - capacity release after provider exceptions;
 - native async request-shape tests for OpenAI, Anthropic and Gemini;
+- ordered provider failover with request-local provider identity;
+- local-overload spillover without circuit poisoning;
+- bounded cross-provider attempt budgets and redacted aggregate errors;
+- single-probe half-open recovery under concurrent load;
+- cancellation propagation without health-state mutation;
+- concurrent async failover identity isolation;
 - concurrent planner trace-isolation tests;
 - exact optional provider SDK floor validation without credentials or network calls;
 - the existing Product Stress gate, which runs these race-sensitive provider tests alongside the product API pressure suite.
