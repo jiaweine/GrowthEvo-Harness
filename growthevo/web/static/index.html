@@ -27,23 +27,23 @@
           <div class="avatar avatar-photo">李</div>
           <div class="workspace-copy"><strong>李明</strong><span>增长负责人</span></div>
         </div>
-        <button class="collapse-btn"><span>‹</span> 收起</button>
+        <button class="collapse-btn" id="sidebar-collapse" type="button" aria-label="收起侧栏" aria-expanded="true"><span>‹</span> 收起</button>
       </div>
     </aside>
 
     <main class="main-column">
       <header class="topbar">
-        <button class="mobile-menu" id="mobile-menu" aria-label="打开导航">☰</button>
-        <button class="command-search" id="command-open" aria-label="打开命令面板">
+        <button class="mobile-menu" id="mobile-menu" type="button" aria-label="打开导航">☰</button>
+        <button class="command-search" id="command-open" type="button" aria-label="打开命令面板">
           <span class="search-icon" id="search-icon"></span>
           <span class="search-placeholder">搜索用户、活动、实验、创意或向 AI 提问...</span>
           <kbd>⌘ K</kbd>
         </button>
         <div class="top-actions">
-          <button class="top-filter">2024-12-01 → 2024-12-31</button>
-          <button class="top-filter">全部渠道 <span class="down">⌄</span></button>
-          <button class="bell" aria-label="通知"><span id="bell-icon"></span><i></i></button>
-          <div class="top-avatar">L</div>
+          <button class="top-filter" id="date-filter" type="button" aria-haspopup="menu"><span id="date-filter-label">最近 30 天</span> <span class="down">⌄</span></button>
+          <button class="top-filter" id="channel-filter" type="button" aria-haspopup="menu"><span id="channel-filter-label">全部渠道</span> <span class="down">⌄</span></button>
+          <button class="bell" id="notification-open" type="button" aria-label="通知" aria-haspopup="menu"><span id="bell-icon"></span><i></i></button>
+          <button class="top-avatar" id="profile-open" type="button" aria-label="打开账户菜单" aria-haspopup="menu">L</button>
         </div>
       </header>
 
@@ -57,23 +57,31 @@
     <aside class="agent-sidecar" id="agent-sidecar" aria-label="Growth Agent">
       <div class="agent-head">
         <div class="agent-title"><span class="agent-logo">✦</span><strong>Growth Agent</strong><span class="online-dot"></span><span class="online-text">在线</span></div>
-        <button class="mode-btn">切换模式⌄</button>
+        <div class="agent-head-actions">
+          <button class="mode-btn" id="agent-mode" type="button">策略模式⌄</button>
+          <button class="agent-close" id="agent-close" type="button" aria-label="关闭 Growth Agent">×</button>
+        </div>
       </div>
       <div class="agent-body" id="agent-body"></div>
       <form class="agent-composer" id="agent-form">
         <textarea id="agent-input" rows="2" placeholder="继续提问，或输入指令..."></textarea>
-        <div class="composer-tools"><button type="button" aria-label="附件">⌕</button><button type="button" aria-label="语音">♩</button><button class="send" type="submit" aria-label="发送">➤</button></div>
+        <input id="agent-file-input" type="file" hidden />
+        <div class="composer-tools"><button id="agent-attach" type="button" aria-label="附件">⌕</button><button id="agent-voice" type="button" aria-label="语音">♩</button><button class="send" type="submit" aria-label="发送">➤</button></div>
       </form>
       <div class="agent-achievement" id="agent-achievement"></div>
       <div class="agent-banner">
         <div class="banner-overlay"></div>
         <div class="banner-copy"><strong>让每一次触达，<br/>都创造真实的增长</strong><span>数据 × 因果 × AI × 执行</span></div>
-        <button class="video-btn"><span>▶</span> 观看产品介绍 · 2 分钟</button>
+        <button class="video-btn" id="product-intro" type="button"><span>▶</span> 观看产品介绍 · 2 分钟</button>
       </div>
     </aside>
 
     <nav class="mobile-tabs" id="mobile-tabs"></nav>
   </div>
+
+  <button class="page-backdrop" id="page-backdrop" type="button" aria-label="关闭浮层" hidden></button>
+
+  <div class="utility-popover" id="utility-popover" role="menu" hidden></div>
 
   <div class="command-modal" id="command-modal" hidden>
     <div class="command-panel">
@@ -81,6 +89,16 @@
       <div class="command-results" id="command-results"></div>
     </div>
   </div>
+
+  <div class="command-modal" id="intro-modal" hidden>
+    <div class="command-panel intro-panel">
+      <div class="intro-head"><div><strong>GrowthEvo</strong><span>从机会发现到真实增量的闭环</span></div><button id="intro-close" type="button" aria-label="关闭产品介绍">×</button></div>
+      <div class="intro-flow"><span>Discover</span><b>→</b><span>Decide</span><b>→</b><span>Design</span><b>→</b><span>Validate</span><b>→</b><span>Approve</span><b>→</b><span>Execute</span><b>→</b><span>Learn</span></div>
+      <p>GrowthEvo 把增长机会、因果证据、策略设计、实验、审批与执行放在同一个工作空间，让团队围绕真实增量持续迭代。</p>
+      <div class="intro-actions"><button class="secondary" id="intro-evidence" type="button">查看增长证据</button><button class="primary" id="intro-campaign" type="button">进入 Campaign Studio</button></div>
+    </div>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="./assets/config.js"></script>
   <script src="./assets/data.js" defer></script>
