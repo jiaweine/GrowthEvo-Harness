@@ -6,6 +6,7 @@ safety gates. Importing this package does not require any model-provider SDK.
 
 from .contracts import planner_contract_fingerprint, planner_contract_payload
 from .planner import (
+    AsyncStructuredLLMClient,
     GuardedLLMGrowthPlanner,
     LLMPlannerConfig,
     LLMPlannerTrace,
@@ -20,6 +21,7 @@ from .providers import AnthropicToolClient, GeminiStructuredClient, OpenAIRespon
 
 __all__ = [
     "AnthropicToolClient",
+    "AsyncStructuredLLMClient",
     "GeminiStructuredClient",
     "GuardedLLMGrowthPlanner",
     "LLMPlannerConfig",
