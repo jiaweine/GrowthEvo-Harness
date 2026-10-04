@@ -52,7 +52,13 @@ jobs:
       - name: Install production-aligned test dependencies
         run: python -m pip install --constraint constraints/web-container-py313.txt -e '.[web,dev]'
       - name: Run race-sensitive concurrency contracts
-        run: pytest tests/test_product_concurrency.py tests/test_product_api.py tests/test_product_configuration.py
+        run: |
+          pytest \
+            tests/test_product_concurrency.py \
+            tests/test_product_api.py \
+            tests/test_product_configuration.py \
+            tests/test_llm_provider_concurrency.py \
+            tests/test_llm_planner_concurrency.py
       - name: Build production container
         run: docker build -t growthevo-api:stress .
       - name: Run pressure test
