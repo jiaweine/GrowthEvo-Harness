@@ -12,6 +12,14 @@ from .planner import (
     LLMPlannerTrace,
     StructuredLLMClient,
 )
+from .provider_pool import (
+    ProviderFailoverClient,
+    ProviderFailoverConfig,
+    ProviderPoolMetrics,
+    ProviderRoute,
+    ProviderRouteHealth,
+    ProviderUnavailableError,
+)
 from .provider_runtime import (
     ProviderBusyError,
     ProviderRuntimeConfig,
@@ -28,8 +36,14 @@ __all__ = [
     "LLMPlannerTrace",
     "OpenAIResponsesClient",
     "ProviderBusyError",
+    "ProviderFailoverClient",
+    "ProviderFailoverConfig",
+    "ProviderPoolMetrics",
+    "ProviderRoute",
+    "ProviderRouteHealth",
     "ProviderRuntimeConfig",
     "ProviderRuntimeMetrics",
+    "ProviderUnavailableError",
     "StructuredLLMClient",
     "planner_contract_fingerprint",
     "planner_contract_payload",
