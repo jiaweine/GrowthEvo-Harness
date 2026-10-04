@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 import json
 import math
+import threading
 import time
 from typing import Any, Mapping, Protocol
 
@@ -11,12 +13,27 @@ from growthevo.runtime.planner import GrowthHypothesis, GrowthHypothesisPlanner
 
 
 class StructuredLLMClient(Protocol):
-    """Minimal provider-neutral contract used by the proposal plane."""
+    """Minimal provider-neutral sync contract used by the proposal plane."""
 
     provider_name: str
     model: str
 
     def generate(
+        self,
+        *,
+        system: str,
+        user: str,
+        schema: Mapping[str, Any],
+    ) -> Mapping[str, Any]: ...
+
+
+class AsyncStructuredLLMClient(Protocol):
+    """Provider-neutral async contract for high-concurrency model workloads."""
+
+    provider_name: str
+    model: str
+
+    async def agenerate(
         self,
         *,
         system: str,
@@ -112,9 +129,20 @@ numeric policy and legal gate remain authoritative.
         self.fallback = fallback or GrowthHypothesisPlanner()
         self.critic = critic
         self.config = config or LLMPlannerConfig()
+        self._state_lock = threading.Lock()
         self._consecutive_failures = 0
         self._circuit_open_until = 0.0
-        self._last_trace: LLMPlannerTrace | None = None
+        self._trace_context: ContextVar[LLMPlannerTrace | None] = ContextVar(
+            f"growthevo_llm_trace_{id(self)}", default=None
+        )
+
+    @property
+    def _last_trace(self) -> LLMPlannerTrace | None:
+        return self._trace_context.get()
+
+    @_last_trace.setter
+    def _last_trace(self, value: LLMPlannerTrace | None) -> None:
+        self._trace_context.set(value)
 
     def plan(self, belief: CausalBelief, goal: GrowthGoal) -> GrowthHypothesis:
         baseline = self.fallback.plan(belief, goal)
@@ -137,7 +165,7 @@ numeric policy and legal gate remain authoritative.
             return baseline
 
         now = time.monotonic()
-        if now < self._circuit_open_until:
+        if self._circuit_is_open(now):
             self._last_trace = LLMPlannerTrace(
                 used_llm=False,
                 accepted=False,
@@ -400,14 +428,20 @@ numeric policy and legal gate remain authoritative.
         )
         return baseline
 
+    def _circuit_is_open(self, now: float) -> bool:
+        with self._state_lock:
+            return now < self._circuit_open_until
+
     def _record_success(self) -> None:
-        self._consecutive_failures = 0
-        self._circuit_open_until = 0.0
+        with self._state_lock:
+            self._consecutive_failures = 0
+            self._circuit_open_until = 0.0
 
     def _record_failure(self, now: float) -> None:
-        self._consecutive_failures += 1
-        if self._consecutive_failures >= self.config.max_consecutive_failures:
-            self._circuit_open_until = now + self.config.circuit_cooldown_seconds
+        with self._state_lock:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self.config.max_consecutive_failures:
+                self._circuit_open_until = now + self.config.circuit_cooldown_seconds
 
     @staticmethod
     def _safe_text(value: str, limit: int) -> str:
