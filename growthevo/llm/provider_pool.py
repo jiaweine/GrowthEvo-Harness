@@ -22,7 +22,8 @@ class ProviderFailoverConfig:
     provider failures. ``cooldown_seconds`` controls how long the route remains
     open before exactly one half-open probe is admitted. ``max_provider_attempts``
     bounds real provider attempts per logical request; local ``ProviderBusyError``
-    rejections do not consume this budget because no upstream request was made.
+    rejections and unsupported async routes do not consume this budget because
+    no upstream request was made.
     """
 
     failure_threshold: int = 3
@@ -75,6 +76,7 @@ class ProviderPoolMetrics:
     submitted_total: int
     succeeded_total: int
     failed_total: int
+    cancelled_total: int
     provider_attempts_total: int
     failover_succeeded_total: int
     circuit_skipped_total: int
@@ -133,6 +135,7 @@ class ProviderFailoverClient:
         self._submitted_total = 0
         self._succeeded_total = 0
         self._failed_total = 0
+        self._cancelled_total = 0
         self._provider_attempts_total = 0
         self._failover_succeeded_total = 0
         self._circuit_skipped_total = 0
@@ -225,8 +228,6 @@ class ProviderFailoverClient:
             agenerate = getattr(route.client, "agenerate", None)
             if not callable(agenerate):
                 self._release_probe(route.name, is_probe=is_probe)
-                provider_attempts += 1
-                self._record_attempt_only_failure(route.name)
                 used_failover = True
                 errors.append((route.name, "AsyncUnsupported"))
                 continue
@@ -236,6 +237,7 @@ class ProviderFailoverClient:
                 result = await agenerate(system=system, user=user, schema=schema)
             except asyncio.CancelledError:
                 self._release_probe(route.name, is_probe=is_probe)
+                self._cancel_request()
                 raise
             except ProviderBusyError:
                 self._record_busy(route.name, is_probe=is_probe)
@@ -266,6 +268,7 @@ class ProviderFailoverClient:
                 submitted_total=self._submitted_total,
                 succeeded_total=self._succeeded_total,
                 failed_total=self._failed_total,
+                cancelled_total=self._cancelled_total,
                 provider_attempts_total=self._provider_attempts_total,
                 failover_succeeded_total=self._failover_succeeded_total,
                 circuit_skipped_total=self._circuit_skipped_total,
@@ -351,15 +354,6 @@ class ProviderFailoverClient:
                 state.open_until = now + self.config.cooldown_seconds
                 state.half_open_in_flight = False
 
-    def _record_attempt_only_failure(self, name: str) -> None:
-        """Count a route contract failure without treating it as provider health."""
-
-        with self._state_lock:
-            state = self._states[name]
-            state.attempts_total += 1
-            state.failed_total += 1
-            self._provider_attempts_total += 1
-
     def _record_busy(self, name: str, *, is_probe: bool) -> None:
         with self._state_lock:
             state = self._states[name]
@@ -382,6 +376,10 @@ class ProviderFailoverClient:
                     self._failover_succeeded_total += 1
             else:
                 self._failed_total += 1
+
+    def _cancel_request(self) -> None:
+        with self._state_lock:
+            self._cancelled_total += 1
 
     @staticmethod
     def _unavailable_message(errors: Sequence[tuple[str, str]]) -> str:
