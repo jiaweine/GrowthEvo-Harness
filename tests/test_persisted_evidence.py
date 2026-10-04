@@ -158,14 +158,16 @@ def test_obd_persisted_evidence_is_semantically_locked() -> None:
 def test_readme_surfaces_only_current_locked_evidence() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "**Evidence commit:** `7ac26a5aebde2c70e1b43264b89f08dddcff0245`" in readme
-    assert "| Population incremental visit | **+0.93791 pp** |" in readme
-    assert "| Selected top-10% incremental visit | **+9.37910 pp** |" in readme
+    # Keep the public landing page product-first while ensuring every surfaced
+    # outcome still points at the accepted repository evidence bundle.
+    assert "Criteo Uplift v2.1" in readme
+    assert "**13,979,592**" in readme
+    assert "<h3>+0.94 pp</h3>" in readme
+    assert "<h3>+9.38 pp</h3>" in readme
+    assert "benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md" in readme
 
-    assert "**Evidence commit:** `7d538cea9698b5f0a48c585eed85e3ae526e5af6`" in readme
-    assert "| Final estimate | **0.0045295435** |" in readme
-    assert "| Final support coverage | **1.0000** |" in readme
-    assert "| Final ESS ratio | **0.16123** |" in readme
+    assert "Open Bandit Dataset" in readme
+    assert "benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/README.md" in readme
 
     assert "+6.8%" not in readme
     assert "-8.4%" not in readme
