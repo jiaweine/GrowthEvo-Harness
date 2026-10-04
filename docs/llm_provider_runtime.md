@@ -10,7 +10,7 @@ The same runtime controls apply to:
 - `AnthropicToolClient` — forced schema tool call;
 - `GeminiStructuredClient` — JSON-schema structured output.
 
-Every adapter keeps the existing synchronous `generate(...)` method and also exposes `await agenerate(...)`. The async path uses the provider's native async SDK when available. An injected custom sync-only client remains compatible through a worker-thread fallback, but capacity is acquired before dispatch so overload cannot create an unbounded thread queue.
+Every adapter keeps the existing synchronous `generate(...)` method and also exposes `await agenerate(...)`. The async path uses the provider's native async SDK when available. An injected custom sync-only client remains compatible through a worker-thread fallback, but both admission and provider capacity are acquired before dispatch so overload cannot create an unbounded thread queue.
 
 ## Capacity and backpressure
 
@@ -25,6 +25,7 @@ provider = OpenAIResponsesClient(
         timeout_seconds=45,
         max_retries=2,
         max_concurrency=64,
+        max_queue_size=256,
         acquire_timeout_seconds=1.0,
     ),
 )
@@ -32,7 +33,9 @@ provider = OpenAIResponsesClient(
 
 `max_concurrency` is one process-local hard cap per adapter instance. Sync and async calls share the same capacity semaphore, so mixed workloads cannot silently double the provider fan-out.
 
-When all slots are occupied, a call waits only for `acquire_timeout_seconds`. If capacity still is not available, GrowthEvo raises `ProviderBusyError`. This is intentional load shedding: callers can fail closed to the deterministic planner instead of accumulating an unbounded in-memory request queue.
+`max_queue_size` is a separate hard cap on requests allowed to wait for provider capacity. At most `max_concurrency + max_queue_size` calls may be admitted into one adapter at a time. Once that budget is occupied, the next call is rejected immediately with `ProviderBusyError`; admitted waiters may wait only for `acquire_timeout_seconds` before they are also rejected. This gives the provider layer two-stage overload protection: a finite queue for short bursts and immediate load shedding once the queue budget is full.
+
+The queue cap is process-local and should be sized together with the upstream worker count, provider account rate limits, request latency, and deployment replica count. Increasing it does not increase provider throughput; it only allows a larger short-lived burst to wait in memory.
 
 ## Retry policy
 
@@ -44,7 +47,7 @@ Instead, `max_retries` is configured once on the provider SDK:
 - Anthropic receives `timeout` and `max_retries` on `Anthropic` / `AsyncAnthropic`;
 - Google receives `HttpOptions.timeout` and `HttpRetryOptions.attempts`; GrowthEvo converts `max_retries=N` to `attempts=N+1` because Google counts the initial request.
 
-The local capacity gate remains independent from SDK retry behavior, which prevents retries from bypassing the provider concurrency budget.
+The local admission/capacity gates remain independent from SDK retry behavior, which prevents retries from bypassing GrowthEvo's process-local fan-out budget.
 
 ## Metrics
 
@@ -55,6 +58,7 @@ The local capacity gate remains independent from SDK retry behavior, which preve
 - successes and failures;
 - local overload rejections;
 - current and peak in-flight calls;
+- current and peak waiting calls;
 - average provider-call latency.
 
 No prompt, response, user identifier, API key or model context is stored in these metrics.
@@ -79,6 +83,7 @@ The repository continuously verifies this design through:
 
 - high-volume sync provider-runtime calls under a bounded thread pool;
 - hundreds of concurrent async calls with a strict peak-in-flight cap;
+- a hard queue-size test proving an extra burst is rejected immediately once one in-flight slot and one waiting slot are occupied;
 - overload rejection after a bounded queue wait;
 - capacity release after provider exceptions;
 - native async request-shape tests for OpenAI, Anthropic and Gemini;
