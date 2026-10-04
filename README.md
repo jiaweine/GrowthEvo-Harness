@@ -65,7 +65,7 @@ Opportunity Map 把 **人群规模 × 增量提升 × 价值 × 可执行性** �
 - 规模大、增量高，值得优先行动的机会；
 - 自然转化已经很高，但继续触达价值有限的人群；
 - 有潜力但需要更多证据的机会；
-- 更适合保持 `NO_TREATMENT`、避免过度营销的人群。
+- 更适合保持“不触达”、避免过度营销的人群。
 
 这样，增长资源不再只按照“谁最容易买”分配，而是围绕“哪里真的能多创造结果”分配。
 
@@ -133,7 +133,7 @@ Growth Agent 是贯穿产品的增长协作助手。它会围绕当前目标，�
 
 GrowthEvo 的产品理念建立在一个简单原则上：**增长应该证明“多创造了什么”，而不只是“发生了什么”。**
 
-在公开增量数据上的冻结评估中，GrowthEvo 使用 **13,979,592** 条源数据完成目标人群评估：
+在公开数据集 **Criteo Uplift v2.1** 的预先固定评估中，GrowthEvo 使用 **13,979,592** 条源数据完成目标人群评估：
 
 <table>
 <tr>
@@ -145,8 +145,8 @@ GrowthEvo 的产品理念建立在一个简单原则上：**增长应该证明�
 
 评估过程先固定候选方案和选择规则，再进入最终结果验证，避免在看到最终答案之后反过来挑选最好看的结论。
 
-- [查看 Criteo 增量目标评估](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md)
-- [查看 Open Bandit 策略评估](benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/README.md)
+- [查看 Criteo Uplift v2.1 增量目标评估](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md)
+- [查看 Open Bandit Dataset 策略评估](benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/README.md)
 
 ---
 
