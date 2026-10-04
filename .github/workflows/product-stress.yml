@@ -59,6 +59,7 @@ jobs:
             tests/test_product_configuration.py \
             tests/test_llm_provider_concurrency.py \
             tests/test_llm_provider_failover.py \
+            tests/test_llm_runtime_activation.py \
             tests/test_llm_planner_concurrency.py
       - name: Build production container
         run: docker build -t growthevo-api:stress .
