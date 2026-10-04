@@ -53,6 +53,9 @@ class _FakeClient:
     async def agenerate(self, **_: Any) -> Mapping[str, Any]:
         return {"ok": True}
 
+    def close(self) -> None:
+        self.close_calls += 1
+
     async def aclose(self) -> None:
         self.close_calls += 1
 
@@ -115,6 +118,37 @@ def test_explicit_routes_are_authoritative_and_fail_closed(
     monkeypatch.setenv("GROWTHEVO_LLM_ROUTES", "unknown")
     with pytest.raises(ValueError, match="unknown"):
         configured_routes_from_env()
+
+
+def test_partial_pool_construction_closes_already_created_clients(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GROWTHEVO_LLM_ROUTES", "openai,anthropic")
+    monkeypatch.setenv("OPENAI_API_KEY", "o")
+    monkeypatch.setenv("GROWTHEVO_OPENAI_MODEL", "openai-snapshot")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
+    monkeypatch.setenv("GROWTHEVO_ANTHROPIC_MODEL", "claude-snapshot")
+    created: list[_FakeClient] = []
+
+    def openai_factory(*, model: str, runtime: Any) -> _FakeClient:
+        client = _FakeClient("openai", model=model, runtime=runtime)
+        created.append(client)
+        return client
+
+    def broken_anthropic_factory(**_: Any) -> Any:
+        raise RuntimeError("constructor failed")
+
+    with pytest.raises(RuntimeError, match="constructor failed"):
+        build_provider_pool_from_env(
+            factories={
+                "openai": openai_factory,
+                "anthropic": broken_anthropic_factory,
+                "gemini": _factory("google"),
+            }
+        )
+
+    assert len(created) == 1
+    assert created[0].close_calls == 1
 
 
 def test_runtime_limits_are_bounded_before_provider_clients_exist(
