@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import os
 from pathlib import Path
 from typing import Any
+
+from growthevo.llm.configuration import (
+    activation_summary,
+    build_provider_pool_from_env,
+    close_provider_pool,
+    llm_environment_configured,
+)
 
 from .data import build_dashboard_payload
 from .decisioning import (
@@ -151,6 +158,7 @@ def create_app() -> Any:
     settings = RuntimeSettings.from_env()
     authenticator: Any | None = None
     persistence_store: Any | None = None
+    llm_pool: Any | None = None
 
     # Authentication activation requires the complete generic OIDC/JWKS contract.
     # Partial settings remain visible as configured_not_active and production stays
@@ -203,13 +211,28 @@ def create_app() -> Any:
         decision_engine = ReferenceDecisionEngine()
         product_state = ReferenceProductState()
 
+    # Demo is credential-free by contract and never reaches an external model,
+    # even if API keys leak into its environment. API/production activation needs
+    # a complete Key + explicitly pinned model pair. Build this last so failures
+    # can close an already-open persistence store before startup aborts.
+    if llm_environment_configured() and not settings.synthetic_data:
+        try:
+            llm_pool = build_provider_pool_from_env()
+        except Exception as exc:
+            if persistence_store is not None:
+                persistence_store.close()
+            raise RuntimeError("configured LLM provider runtime could not be initialized") from exc
+
     @asynccontextmanager
     async def lifespan(_: Any):
         try:
             yield
         finally:
-            if persistence_store is not None:
-                persistence_store.close()
+            try:
+                await close_provider_pool(llm_pool)
+            finally:
+                if persistence_store is not None:
+                    persistence_store.close()
 
     app = FastAPI(
         title="GrowthEvo Growth OS",
@@ -224,6 +247,7 @@ def create_app() -> Any:
     app.state.product_state = product_state
     app.state.persistence_store = persistence_store
     app.state.authenticator = authenticator
+    app.state.llm_pool = llm_pool
     app.state.runtime_settings = settings
 
     def persistence_healthy() -> bool:
@@ -243,6 +267,8 @@ def create_app() -> Any:
             return False
 
     def runtime_ready() -> bool:
+        # LLMs are intentionally not a readiness dependency: the guarded planner
+        # fails closed to deterministic policy when every model route is unavailable.
         return settings.ready and persistence_healthy() and authentication_healthy()
 
     def runtime_payload() -> dict[str, object]:
@@ -267,6 +293,40 @@ def create_app() -> Any:
             for connector in connectors:
                 if connector.get("id") == "authentication":
                     connector["state"] = "connected" if authentication_ok else "error"
+
+        llm_summary = activation_summary(llm_pool)
+        if settings.synthetic_data:
+            llm_available_routes = 0
+            llm_healthy = True
+            llm_state = "demo"
+        elif llm_pool is not None:
+            route_health = llm_pool.health_snapshot()
+            llm_available_routes = sum(
+                1 for route in route_health if route.circuit_state != "open"
+            )
+            llm_healthy = llm_available_routes > 0
+            llm_state = "connected" if llm_healthy else "error"
+        else:
+            llm_available_routes = 0
+            llm_healthy = not llm_summary.configured
+            llm_state = "configured_not_active" if llm_summary.configured else "unconfigured"
+
+        llm_payload: dict[str, object] = {
+            "configured": llm_summary.configured,
+            "active": llm_summary.active,
+            "backend": llm_summary.backend,
+            "route_count": llm_summary.route_count,
+            "available_routes": llm_available_routes,
+            "healthy": llm_healthy,
+            "providers": list(llm_summary.providers),
+        }
+        if llm_pool is not None:
+            llm_payload["metrics"] = asdict(llm_pool.metrics())
+        payload["llm"] = llm_payload
+        for connector in connectors:
+            if connector.get("id") == "llm":
+                connector["label"] = "LLM Provider Pool"
+                connector["state"] = llm_state
 
         payload["connectors"] = connectors
         return payload

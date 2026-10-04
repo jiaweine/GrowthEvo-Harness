@@ -12,6 +12,39 @@ The same runtime controls apply to:
 
 Every adapter keeps the existing synchronous `generate(...)` method and also exposes `await agenerate(...)`. The async path uses the provider's native async SDK when available. An injected custom sync-only client remains compatible through a worker-thread fallback, but both admission and provider capacity are acquired before dispatch so overload cannot create an unbounded thread queue.
 
+## Product runtime activation
+
+The web/API runtime can own one process-long provider pool. Activation is explicit: a route requires both the provider's normal API-key environment variable and a pinned GrowthEvo model ID.
+
+| Route | Credential | Required pinned model |
+| --- | --- | --- |
+| OpenAI | `OPENAI_API_KEY` | `GROWTHEVO_OPENAI_MODEL` |
+| Anthropic | `ANTHROPIC_API_KEY` | `GROWTHEVO_ANTHROPIC_MODEL` |
+| Gemini | `GEMINI_API_KEY` | `GROWTHEVO_GEMINI_MODEL` |
+
+If `GROWTHEVO_LLM_ROUTES` is omitted, complete route pairs are discovered in deterministic `openai,anthropic,gemini` order. A key without a pinned model is treated as configured-but-not-active rather than silently following a moving model alias.
+
+Set `GROWTHEVO_LLM_ROUTES` to make route order explicit, for example `anthropic,openai`. An explicit route list is fail-closed: unknown names, duplicate routes, or a named route missing either its key or pinned model make startup fail instead of silently reducing intended redundancy.
+
+Demo mode never constructs external model clients, even if provider credentials accidentally exist in its environment. API/production mode creates configured provider SDK clients once and reuses their connection pools until application shutdown. Partial provider construction is cleaned up if a later route fails to initialize.
+
+The production container includes exact provider SDK roots matching the versions exercised by the repository's SDK-floor contract. This prevents a runtime with valid credentials from advertising an LLM connector that cannot actually import its driver.
+
+Runtime controls are configurable with bounded environment values:
+
+- `GROWTHEVO_LLM_TIMEOUT_SECONDS` — default `45`;
+- `GROWTHEVO_LLM_MAX_RETRIES` — default `2`;
+- `GROWTHEVO_LLM_MAX_CONCURRENCY` — default `64` per provider adapter;
+- `GROWTHEVO_LLM_MAX_QUEUE_SIZE` — default `256` per provider adapter;
+- `GROWTHEVO_LLM_ACQUIRE_TIMEOUT_SECONDS` — default `1`;
+- `GROWTHEVO_LLM_FAILURE_THRESHOLD` — default `3`;
+- `GROWTHEVO_LLM_COOLDOWN_SECONDS` — default `30`;
+- `GROWTHEVO_LLM_MAX_PROVIDER_ATTEMPTS` — default `2`, hard-bounded to at most the three built-in provider routes.
+
+`/api/system/runtime` reports only redacted activation state, provider names, route counts, available-route count and aggregate pool metrics. Credentials, prompts, responses, raw exception messages and configured model IDs are not exposed by that public runtime payload.
+
+LLM health is deliberately **not** a global production-readiness dependency. If every model route is unavailable, the LLM connector can report `error` while the service remains ready because the guarded planning path falls back to deterministic GrowthEvo behavior. Authentication and durable persistence remain the fail-closed production readiness boundaries.
+
 ## Capacity and backpressure
 
 Configure the provider boundary with `ProviderRuntimeConfig`:
@@ -132,6 +165,9 @@ The repository continuously verifies this design through:
 - single-probe half-open recovery under concurrent load;
 - cancellation propagation without health-state mutation;
 - concurrent async failover identity isolation;
+- explicit product-runtime activation and redacted connector-state tests;
+- partial provider-construction cleanup and application shutdown cleanup;
 - concurrent planner trace-isolation tests;
 - exact optional provider SDK floor validation without credentials or network calls;
+- production-container builds that include the provider SDK roots;
 - the existing Product Stress gate, which runs these race-sensitive provider tests alongside the product API pressure suite.

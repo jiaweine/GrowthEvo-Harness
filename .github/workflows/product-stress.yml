@@ -59,9 +59,23 @@ jobs:
             tests/test_product_configuration.py \
             tests/test_llm_provider_concurrency.py \
             tests/test_llm_provider_failover.py \
+            tests/test_llm_runtime_activation.py \
             tests/test_llm_planner_concurrency.py
       - name: Build production container
         run: docker build -t growthevo-api:stress .
+      - name: Smoke real provider activation in production container
+        run: |
+          docker run --rm \
+            -e GROWTHEVO_MODE=api \
+            -e GROWTHEVO_LLM_ROUTES=openai,anthropic,gemini \
+            -e OPENAI_API_KEY=test-openai-key \
+            -e GROWTHEVO_OPENAI_MODEL=test-openai-snapshot \
+            -e ANTHROPIC_API_KEY=test-anthropic-key \
+            -e GROWTHEVO_ANTHROPIC_MODEL=test-anthropic-snapshot \
+            -e GEMINI_API_KEY=test-gemini-key \
+            -e GROWTHEVO_GEMINI_MODEL=test-gemini-snapshot \
+            growthevo-api:stress \
+            python -c 'from growthevo.web.app import app; pool=app.state.llm_pool; assert pool is not None; assert [r.client.provider_name for r in pool.routes] == ["openai", "anthropic", "google"]; print("provider pool activation ok")'
       - name: Run pressure test
         shell: bash
         run: |
