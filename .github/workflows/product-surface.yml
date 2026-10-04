@@ -32,6 +32,7 @@ jobs:
       - name: Check browser JavaScript syntax
         run: |
           for file in growthevo/web/static/*.js; do node --check "$file"; done
+          node --check scripts/browser_interaction_smoke.js
       - name: Build production container
         run: docker build -t growthevo-api:ci .
       - name: Smoke and stress the same production container
@@ -99,10 +100,21 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fonts-noto-cjk
-      - name: Capture real rendered demo UI screenshots
+      - name: Capture and exercise real rendered demo UI
         run: |
           set -euo pipefail
           mkdir -p ui-screenshots
+          cp scripts/browser_interaction_smoke.js _site/assets/interaction-smoke.js
+          python - <<'PY'
+          from pathlib import Path
+
+          index = Path('_site/index.html')
+          html = index.read_text(encoding='utf-8')
+          marker = '<script src="./assets/interaction-smoke.js" defer></script>'
+          if marker not in html:
+              html = html.replace('</body>', f'{marker}\n</body>')
+          index.write_text(html, encoding='utf-8')
+          PY
           python -m http.server 4173 --directory _site >/tmp/growthevo-pages.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID >/dev/null 2>&1 || true' EXIT
@@ -114,6 +126,13 @@ jobs:
           done
           CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME_BIN"
+          interaction_out=/tmp/growthevo-interaction-smoke.html
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=6000 --dump-dom "http://127.0.0.1:4173/?interaction-smoke=1#dashboard" > "$interaction_out"
+          if ! grep -Fq 'INTERACTION_SMOKE_PASS' "$interaction_out"; then
+            echo 'GrowthEvo browser interaction smoke failed:' >&2
+            grep -F 'INTERACTION_SMOKE_' "$interaction_out" >&2 || cat "$interaction_out" >&2
+            exit 1
+          fi
           chrome_shot() {
             name="$1"
             route="$2"
