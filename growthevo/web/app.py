@@ -160,16 +160,6 @@ def create_app() -> Any:
     persistence_store: Any | None = None
     llm_pool: Any | None = None
 
-    # Demo is credential-free by contract and never reaches an external model,
-    # even if API keys leak into its environment. API/production activation needs
-    # a complete Key + explicitly pinned model pair. Explicit route lists are
-    # fail-fast so a typo cannot silently reduce redundancy in production.
-    if llm_environment_configured() and not settings.synthetic_data:
-        try:
-            llm_pool = build_provider_pool_from_env()
-        except Exception as exc:
-            raise RuntimeError("configured LLM provider runtime could not be initialized") from exc
-
     # Authentication activation requires the complete generic OIDC/JWKS contract.
     # Partial settings remain visible as configured_not_active and production stays
     # fail-closed. Complete settings are fail-fast: the JWKS must be reachable and
@@ -220,6 +210,18 @@ def create_app() -> Any:
     else:
         decision_engine = ReferenceDecisionEngine()
         product_state = ReferenceProductState()
+
+    # Demo is credential-free by contract and never reaches an external model,
+    # even if API keys leak into its environment. API/production activation needs
+    # a complete Key + explicitly pinned model pair. Build this last so failures
+    # can close an already-open persistence store before startup aborts.
+    if llm_environment_configured() and not settings.synthetic_data:
+        try:
+            llm_pool = build_provider_pool_from_env()
+        except Exception as exc:
+            if persistence_store is not None:
+                persistence_store.close()
+            raise RuntimeError("configured LLM provider runtime could not be initialized") from exc
 
     @asynccontextmanager
     async def lifespan(_: Any):
