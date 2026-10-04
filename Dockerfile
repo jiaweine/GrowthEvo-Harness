@@ -13,11 +13,17 @@ COPY growthevo ./growthevo
 # The web container runs directly from the checked-in source tree. Avoid building
 # the local project through a separate PEP 517 isolation environment, whose
 # setuptools/wheel resolver would otherwise sit outside the runtime lock.
+#
+# Provider SDK roots are pinned to the exact minimum versions continuously
+# exercised by the offline SDK-floor contract. This keeps production activation
+# from depending on an untested moving provider SDK while Product Surface/Stress
+# rebuild the complete resolved image graph on every relevant change.
 RUN python -m pip install --disable-pip-version-check \
     --constraint constraints/web-container-py313.txt \
     fastapi==0.141.1 uvicorn==0.54.0 \
     psycopg==3.3.6 psycopg-binary==3.3.6 psycopg-pool==3.3.3 \
-    PyJWT==2.15.1 cryptography==50.0.2
+    PyJWT==2.15.1 cryptography==50.0.2 \
+    openai==2.0.0 anthropic==0.60.0 google-genai==2.22.0
 
 RUN useradd --create-home --uid 10001 growthevo && chown -R growthevo:growthevo /app
 USER growthevo
