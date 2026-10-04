@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 import os
 from typing import Any, Callable, Mapping
 
@@ -169,6 +170,35 @@ def build_provider_pool_from_env(
         routes.append(ProviderRoute(provider, client))
 
     return ProviderFailoverClient(routes, config=failover)
+
+
+async def close_provider_pool(pool: ProviderFailoverClient | None) -> None:
+    """Close each owned route client exactly once at application shutdown."""
+
+    if pool is None:
+        return
+    seen: set[int] = set()
+    errors: list[BaseException] = []
+    for route in pool.routes:
+        client = route.client
+        identity = id(client)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        try:
+            aclose = getattr(client, "aclose", None)
+            if callable(aclose):
+                result = aclose()
+                if inspect.isawaitable(result):
+                    await result
+                continue
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+        except BaseException as exc:  # close remaining clients before surfacing shutdown failure
+            errors.append(exc)
+    if errors:
+        raise ExceptionGroup("one or more LLM provider clients failed to close", errors)
 
 
 def activation_summary(pool: ProviderFailoverClient | None) -> LLMActivationSummary:
