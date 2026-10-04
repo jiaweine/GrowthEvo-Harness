@@ -18,9 +18,11 @@ class ProviderBusyError(RuntimeError):
 class ProviderRuntimeConfig:
     """Bounded runtime controls shared by all model-provider adapters.
 
-    ``max_concurrency`` is a hard process-local cap per adapter instance. Calls
-    wait for at most ``acquire_timeout_seconds`` before failing fast with
-    ``ProviderBusyError`` so overload cannot turn into an unbounded memory queue.
+    ``max_concurrency`` is the hard process-local provider-call cap per adapter
+    instance. ``max_queue_size`` separately caps calls allowed to wait for one
+    of those slots. Once both budgets are occupied, new work is rejected
+    immediately; admitted waiters still wait for at most
+    ``acquire_timeout_seconds`` before failing with ``ProviderBusyError``.
 
     ``timeout_seconds`` and ``max_retries`` are forwarded to the provider SDK.
     GrowthEvo deliberately does not add another network retry loop around the
@@ -31,6 +33,7 @@ class ProviderRuntimeConfig:
     timeout_seconds: float = 45.0
     max_retries: int = 2
     max_concurrency: int = 64
+    max_queue_size: int = 256
     acquire_timeout_seconds: float = 1.0
 
     def __post_init__(self) -> None:
@@ -40,6 +43,8 @@ class ProviderRuntimeConfig:
             raise ValueError("max_retries must be non-negative")
         if self.max_concurrency <= 0:
             raise ValueError("max_concurrency must be positive")
+        if self.max_queue_size < 0:
+            raise ValueError("max_queue_size must be non-negative")
         if self.acquire_timeout_seconds < 0:
             raise ValueError("acquire_timeout_seconds must be non-negative")
 
@@ -59,16 +64,21 @@ class ProviderRuntimeMetrics:
     rejected_total: int
     in_flight: int
     peak_in_flight: int
+    waiting: int
+    peak_waiting: int
     average_latency_ms: float
 
 
 class ProviderRuntime:
-    """Concurrency gate, overload backpressure and metrics for one adapter.
+    """Bounded concurrency, bounded queueing and metrics for one adapter.
 
-    A single ``threading.BoundedSemaphore`` is shared by the sync and async
-    paths, so mixing ``generate`` and ``agenerate`` on the same adapter still
-    obeys one global capacity limit. The async path polls non-blockingly rather
-    than blocking the event loop or consuming worker threads while queued.
+    Sync and async paths share both semaphores. ``_admission`` bounds the total
+    number of calls that may be executing or waiting; ``_capacity`` bounds only
+    provider calls actually in flight. This means a burst cannot create an
+    unbounded waiter population even when callers create very large task sets.
+
+    The async path polls the thread-safe capacity semaphore non-blockingly, so
+    waiting never blocks the event loop or consumes worker threads.
     """
 
     _ASYNC_POLL_SECONDS = 0.005
@@ -77,6 +87,9 @@ class ProviderRuntime:
         self.provider_name = provider_name
         self.config = config
         self._capacity = threading.BoundedSemaphore(config.max_concurrency)
+        self._admission = threading.BoundedSemaphore(
+            config.max_concurrency + config.max_queue_size
+        )
         self._metrics_lock = threading.Lock()
         self._submitted_total = 0
         self._started_total = 0
@@ -85,57 +98,81 @@ class ProviderRuntime:
         self._rejected_total = 0
         self._in_flight = 0
         self._peak_in_flight = 0
+        self._waiting = 0
+        self._peak_waiting = 0
         self._total_latency_ms = 0.0
 
     def run_sync(self, call: Callable[[], _T]) -> _T:
         self._record_submitted()
-        acquired = self._capacity.acquire(timeout=self.config.acquire_timeout_seconds)
-        if not acquired:
-            self._record_rejected()
-            raise ProviderBusyError(
-                f"{self.provider_name} provider capacity exhausted "
-                f"(max_concurrency={self.config.max_concurrency})"
-            )
+        if not self._admission.acquire(blocking=False):
+            self._reject()
 
-        started = time.perf_counter()
-        self._record_started()
+        acquired_capacity = False
         try:
-            result = call()
-        except BaseException:
-            self._record_finished(started, succeeded=False)
-            raise
-        else:
-            self._record_finished(started, succeeded=True)
-            return result
+            if self._capacity.acquire(blocking=False):
+                acquired_capacity = True
+            else:
+                self._record_waiting_started()
+                try:
+                    acquired_capacity = self._capacity.acquire(
+                        timeout=self.config.acquire_timeout_seconds
+                    )
+                finally:
+                    self._record_waiting_finished()
+
+            if not acquired_capacity:
+                self._reject()
+
+            started = time.perf_counter()
+            self._record_started()
+            try:
+                result = call()
+            except BaseException:
+                self._record_finished(started, succeeded=False)
+                raise
+            else:
+                self._record_finished(started, succeeded=True)
+                return result
         finally:
-            self._capacity.release()
+            if acquired_capacity:
+                self._capacity.release()
+            self._admission.release()
 
     async def run_async(self, call: Callable[[], Awaitable[_T]]) -> _T:
         self._record_submitted()
-        acquired = await self._acquire_async()
-        if not acquired:
-            self._record_rejected()
-            raise ProviderBusyError(
-                f"{self.provider_name} provider capacity exhausted "
-                f"(max_concurrency={self.config.max_concurrency})"
-            )
+        if not self._admission.acquire(blocking=False):
+            self._reject()
 
-        started = time.perf_counter()
-        self._record_started()
+        acquired_capacity = False
         try:
-            result = await call()
-        except BaseException:
-            self._record_finished(started, succeeded=False)
-            raise
-        else:
-            self._record_finished(started, succeeded=True)
-            return result
+            if self._capacity.acquire(blocking=False):
+                acquired_capacity = True
+            else:
+                self._record_waiting_started()
+                try:
+                    acquired_capacity = await self._acquire_async()
+                finally:
+                    self._record_waiting_finished()
+
+            if not acquired_capacity:
+                self._reject()
+
+            started = time.perf_counter()
+            self._record_started()
+            try:
+                result = await call()
+            except BaseException:
+                self._record_finished(started, succeeded=False)
+                raise
+            else:
+                self._record_finished(started, succeeded=True)
+                return result
         finally:
-            self._capacity.release()
+            if acquired_capacity:
+                self._capacity.release()
+            self._admission.release()
 
     async def _acquire_async(self) -> bool:
-        if self._capacity.acquire(blocking=False):
-            return True
         if self.config.acquire_timeout_seconds == 0:
             return False
 
@@ -161,8 +198,18 @@ class ProviderRuntime:
                 rejected_total=self._rejected_total,
                 in_flight=self._in_flight,
                 peak_in_flight=self._peak_in_flight,
+                waiting=self._waiting,
+                peak_waiting=self._peak_waiting,
                 average_latency_ms=average,
             )
+
+    def _reject(self) -> None:
+        self._record_rejected()
+        raise ProviderBusyError(
+            f"{self.provider_name} provider capacity exhausted "
+            f"(max_concurrency={self.config.max_concurrency}, "
+            f"max_queue_size={self.config.max_queue_size})"
+        )
 
     def _record_submitted(self) -> None:
         with self._metrics_lock:
@@ -171,6 +218,15 @@ class ProviderRuntime:
     def _record_rejected(self) -> None:
         with self._metrics_lock:
             self._rejected_total += 1
+
+    def _record_waiting_started(self) -> None:
+        with self._metrics_lock:
+            self._waiting += 1
+            self._peak_waiting = max(self._peak_waiting, self._waiting)
+
+    def _record_waiting_finished(self) -> None:
+        with self._metrics_lock:
+            self._waiting -= 1
 
     def _record_started(self) -> None:
         with self._metrics_lock:
