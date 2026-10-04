@@ -11,6 +11,11 @@ from .planner import (
     LLMPlannerTrace,
     StructuredLLMClient,
 )
+from .provider_runtime import (
+    ProviderBusyError,
+    ProviderRuntimeConfig,
+    ProviderRuntimeMetrics,
+)
 from .providers import AnthropicToolClient, GeminiStructuredClient, OpenAIResponsesClient
 
 __all__ = [
@@ -20,6 +25,9 @@ __all__ = [
     "LLMPlannerConfig",
     "LLMPlannerTrace",
     "OpenAIResponsesClient",
+    "ProviderBusyError",
+    "ProviderRuntimeConfig",
+    "ProviderRuntimeMetrics",
     "StructuredLLMClient",
     "planner_contract_fingerprint",
     "planner_contract_payload",
