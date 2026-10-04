@@ -137,6 +137,26 @@ class LLMActivationSummary:
     backend: str
 
 
+def _close_constructed_sync_clients(routes: list[ProviderRoute]) -> None:
+    """Best-effort cleanup for a pool that failed before async clients existed."""
+
+    seen: set[int] = set()
+    for route in reversed(routes):
+        client = route.client
+        identity = id(client)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        close = getattr(client, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                # Preserve the original construction failure. Shutdown-time cleanup
+                # uses close_provider_pool and surfaces its errors explicitly.
+                pass
+
+
 def build_provider_pool_from_env(
     *,
     factories: Mapping[str, Callable[..., Any]] | None = None,
@@ -161,13 +181,17 @@ def build_provider_pool_from_env(
     }
 
     routes: list[ProviderRoute] = []
-    for provider in route_names:
-        _, model_name = _PROVIDER_ENV[provider]
-        factory = client_factories.get(provider)
-        if factory is None:
-            raise RuntimeError(f"no client factory is registered for LLM provider {provider!r}")
-        client = factory(model=_value(model_name), runtime=runtime)
-        routes.append(ProviderRoute(provider, client))
+    try:
+        for provider in route_names:
+            _, model_name = _PROVIDER_ENV[provider]
+            factory = client_factories.get(provider)
+            if factory is None:
+                raise RuntimeError(f"no client factory is registered for LLM provider {provider!r}")
+            client = factory(model=_value(model_name), runtime=runtime)
+            routes.append(ProviderRoute(provider, client))
+    except BaseException:
+        _close_constructed_sync_clients(routes)
+        raise
 
     return ProviderFailoverClient(routes, config=failover)
 
