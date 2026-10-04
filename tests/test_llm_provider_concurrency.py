@@ -94,19 +94,25 @@ def test_sync_runtime_caps_high_concurrency_and_records_metrics() -> None:
     metrics = runtime.snapshot()
     assert observed_peak <= 8
     assert metrics.peak_in_flight <= 8
+    assert metrics.peak_waiting <= 56
     assert metrics.submitted_total == 160
     assert metrics.started_total == 160
     assert metrics.succeeded_total == 160
     assert metrics.failed_total == 0
     assert metrics.rejected_total == 0
     assert metrics.in_flight == 0
+    assert metrics.waiting == 0
     assert metrics.average_latency_ms > 0
 
 
 def test_async_runtime_caps_high_concurrency_without_blocking_event_loop() -> None:
     runtime = ProviderRuntime(
         "fake",
-        ProviderRuntimeConfig(max_concurrency=16, acquire_timeout_seconds=2.0),
+        ProviderRuntimeConfig(
+            max_concurrency=16,
+            max_queue_size=320,
+            acquire_timeout_seconds=2.0,
+        ),
     )
     in_flight = 0
     observed_peak = 0
@@ -130,9 +136,11 @@ def test_async_runtime_caps_high_concurrency_without_blocking_event_loop() -> No
     metrics = runtime.snapshot()
     assert observed_peak <= 16
     assert metrics.peak_in_flight <= 16
+    assert metrics.peak_waiting <= 304
     assert metrics.succeeded_total == 320
     assert metrics.rejected_total == 0
     assert metrics.in_flight == 0
+    assert metrics.waiting == 0
 
 
 def test_runtime_rejects_overload_after_bounded_queue_wait() -> None:
@@ -162,6 +170,58 @@ def test_runtime_rejects_overload_after_bounded_queue_wait() -> None:
     assert metrics.succeeded_total == 1
     assert metrics.rejected_total == 1
     assert metrics.in_flight == 0
+    assert metrics.waiting == 0
+
+
+def test_runtime_hard_bounds_waiter_population_and_rejects_extra_burst_immediately() -> None:
+    runtime = ProviderRuntime(
+        "fake",
+        ProviderRuntimeConfig(
+            max_concurrency=1,
+            max_queue_size=1,
+            acquire_timeout_seconds=1.0,
+        ),
+    )
+    first_entered = threading.Event()
+    release = threading.Event()
+
+    def hold_capacity() -> str:
+        first_entered.set()
+        assert release.wait(timeout=2.0)
+        return "first"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(runtime.run_sync, hold_capacity)
+        assert first_entered.wait(timeout=1.0)
+        second = pool.submit(runtime.run_sync, lambda: "second")
+
+        deadline = time.monotonic() + 1.0
+        while runtime.snapshot().waiting != 1 and time.monotonic() < deadline:
+            time.sleep(0.002)
+        assert runtime.snapshot().waiting == 1
+
+        started = time.perf_counter()
+        with pytest.raises(ProviderBusyError):
+            runtime.run_sync(lambda: "third")
+        assert time.perf_counter() - started < 0.2
+
+        metrics_during_burst = runtime.snapshot()
+        assert metrics_during_burst.in_flight == 1
+        assert metrics_during_burst.waiting == 1
+        assert metrics_during_burst.peak_waiting == 1
+        assert metrics_during_burst.rejected_total == 1
+
+        release.set()
+        assert first.result(timeout=1.0) == "first"
+        assert second.result(timeout=1.0) == "second"
+
+    metrics = runtime.snapshot()
+    assert metrics.submitted_total == 3
+    assert metrics.started_total == 2
+    assert metrics.succeeded_total == 2
+    assert metrics.rejected_total == 1
+    assert metrics.in_flight == 0
+    assert metrics.waiting == 0
 
 
 def test_runtime_releases_capacity_after_provider_failure() -> None:
@@ -181,6 +241,7 @@ def test_runtime_releases_capacity_after_provider_failure() -> None:
     assert metrics.failed_total == 1
     assert metrics.succeeded_total == 1
     assert metrics.in_flight == 0
+    assert metrics.waiting == 0
 
 
 def test_openai_async_adapter_uses_native_async_client_and_shared_runtime() -> None:
@@ -260,4 +321,6 @@ def test_async_custom_sync_client_fallback_is_bounded_before_thread_dispatch() -
     results = asyncio.run(scenario())
     assert results == [{"option": "retain"}] * 20
     assert capture.calls == 20
-    assert adapter.runtime_metrics().peak_in_flight <= 3
+    metrics = adapter.runtime_metrics()
+    assert metrics.peak_in_flight <= 3
+    assert metrics.peak_waiting <= 17
