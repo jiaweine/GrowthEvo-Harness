@@ -1,494 +1,206 @@
 <div align="center">
 
-# GrowthEvo-Harness
+# GrowthEvo
 
-### Causal Reinforcement Learning for Incremental User Growth
+### 因果驱动的增长操作系统
 
-**Optimize the incremental value created by an action, with support-aware policy learning and locked real-world evidence.**
-
-[![CI](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaweine/GrowthEvo-Harness/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-![Causal RL](https://img.shields.io/badge/Causal-Reinforcement%20Learning-7C3AED)
-![OPE](https://img.shields.io/badge/OPE-Cross--Fitted%20%CE%B2*--IPS%20%7C%20DR-0891B2)
-![Evidence](https://img.shields.io/badge/Evidence-Pre--Registered%20%7C%20Locked-059669)
-
-`Cross-Fitted DR` · `Safe Policy Improvement` · `Robust OPE` · `Locked Evaluation` · `Conformal Verification` · `Risk-Sensitive Planning`
+**从“谁更可能转化”走向“哪一次触达真正创造了增量”。**  
+把增长机会、策略设计、实验验证、审批与执行状态放进同一个工作空间，让每一次触达都更有依据。
 
 <br>
 
-[Overview](#overview) · [Highlights](#highlights) · [Locked Evidence](#locked-real-world-evidence) · [Capabilities](#capability-matrix) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Docs](#documentation)
+![Growth OS](https://img.shields.io/badge/Growth-OS-5B5CF6)
+![Incrementality](https://img.shields.io/badge/Focus-Incrementality-12B886)
+![Evidence First](https://img.shields.io/badge/Decision-Evidence%20First-0EA5E9)
+![Human in the Loop](https://img.shields.io/badge/Control-Human%20in%20the%20Loop-F59E0B)
+
+<br>
+
+[产品总览](#产品总览) · [增长机会](#增长机会) · [策略与实验](#策略与实验) · [Growth Agent](#growth-agent) · [效果证据](#效果证据) · [移动体验](#移动体验)
 
 </div>
 
+<br>
+
+<p align="center">
+  <img src="docs/assets/product/readme-dashboard.png" alt="GrowthEvo 增长驾驶舱" width="100%" />
+</p>
+
+<p align="center"><sub>GrowthEvo 增长驾驶舱 · 从增量结果、渠道贡献到策略与待办，一屏掌握增长状态</sub></p>
+
 ---
 
-## Overview
+## 产品总览
 
-GrowthEvo-Harness 是一个面向 **增量增长决策（incremental growth decision-making）** 的因果强化学习研究框架。
-
-传统 propensity / conversion model 更关注“谁更可能转化”；GrowthEvo 直接建模和评估 **某个动作相对 `NO_TREATMENT` 实际带来的增量价值**，并把数据支持度、安全约束、反事实评估与可审计实验协议统一到同一套 harness 中。
-
-核心对象是 conditional treatment effect：
-
-```math
-\tau(x,a)
-=
-\mathbb{E}[Y(a)-Y(a_0)\mid X=x],
-\qquad a_0=\mathrm{NO\_TREATMENT}.
-```
-
-`NO_TREATMENT` 在 GrowthEvo 中是一级动作。策略优化以因果增量、可执行性和证据质量为共同约束，而不是只对 raw prediction score 做排序。
+GrowthEvo 面向增长、生命周期、CRM、实验与智能运营团队，帮助团队回答五个真正影响结果的问题：
 
 <table>
 <tr>
-<td width="25%" valign="top"><b>Incrementality First</b><br><sub>直接优化 treatment effect 与 incremental value。</sub></td>
-<td width="25%" valign="top"><b>Support Aware</b><br><sub>把 overlap、positivity 与 distributional support 纳入决策。</sub></td>
-<td width="25%" valign="top"><b>Safe Improvement</b><br><sub>在 trust region、成本上界与保守价值下优化最终可执行策略。</sub></td>
-<td width="25%" valign="top"><b>Locked Evidence</b><br><sub>预注册候选、冻结验证选择，并使用独立 final holdout。</sub></td>
+<td width="20%" valign="top"><b>谁值得触达？</b><br><sub>发现高增量潜力人群，而不是只追逐高自然转化人群。</sub></td>
+<td width="20%" valign="top"><b>做什么动作？</b><br><sub>比较不同触达方式的预期增量价值、成本与风险。</sub></td>
+<td width="20%" valign="top"><b>何时不触达？</b><br><sub>把不打扰用户也当作一种正式决策，避免无效消耗。</sub></td>
+<td width="20%" valign="top"><b>结果真实吗？</b><br><sub>把实验与效果证据放进决策链路，区分相关性与真实增量。</sub></td>
+<td width="20%" valign="top"><b>如何持续变好？</b><br><sub>让每次实验、审批和执行结果反哺下一轮增长策略。</sub></td>
+</tr>
+</table>
+
+GrowthEvo 的核心体验是一条完整的增长闭环：
+
+> **Discover → Decide → Design → Validate → Approve → Execute → Learn**
+
+它不是单独的一张报表，也不是只会给建议的助手。你可以从机会发现开始，把人群、动作、证据、实验和后续动作连成一条清晰的增长路径。
+
+---
+
+## 增长机会
+
+### Opportunity Map · 先看“真实增量”，再决定把资源投向哪里
+
+<p align="center">
+  <img src="docs/assets/product/readme-opportunity-map.png" alt="GrowthEvo Opportunity Map" width="100%" />
+</p>
+
+Opportunity Map 把 **人群规模 × 增量提升 × 价值 × 可执行性** 放到同一张视图里。团队可以快速区分：
+
+- 规模大、增量高，值得优先行动的机会；
+- 自然转化已经很高，但继续触达价值有限的人群；
+- 有潜力但需要更多证据的机会；
+- 更适合保持 `NO_TREATMENT`、避免过度营销的人群。
+
+这样，增长资源不再只按照“谁最容易买”分配，而是围绕“哪里真的能多创造结果”分配。
+
+---
+
+## 策略与实验
+
+### Campaign Studio · 把洞察变成可执行的增长方案
+
+<p align="center">
+  <img src="docs/assets/product/readme-campaign-studio.png" alt="GrowthEvo Campaign Studio" width="100%" />
+</p>
+
+Campaign Studio 把一个增长想法拆成清晰的工作流：**目标、人群、策略、创意、实验、执行与证据**。团队可以在同一页检查预算、候选动作、边界条件和预期影响，再进入审批与验证。
+
+这让 Campaign 不再是“先上线、再看结果”的黑盒，而是从设计阶段就带着明确假设和成功标准。
+
+### Experiment Center · 让每个结论都有上下文
+
+<p align="center">
+  <img src="docs/assets/product/readme-experiments.png" alt="GrowthEvo Experiment Center" width="100%" />
+</p>
+
+实验中心集中展示正在运行与已经成熟的实验：覆盖人群、分组、观察周期、增量结果、业务影响、不确定性与保护指标都放在同一上下文中。
+
+对增长团队来说，重点不是“实验显著了吗”这一句话，而是 **这个结果是否值得继续扩大、是否需要更多观察，以及下一步应该做什么**。
+
+---
+
+## Growth Agent
+
+Growth Agent 是贯穿产品的增长协作助手。它会围绕当前目标，结合机会、证据、边界与工作状态，帮助团队整理下一步动作，而不是脱离上下文给出泛化建议。
+
+在 GrowthEvo 中，Agent 更像一名坐在驾驶舱里的增长搭档：
+
+<table>
+<tr>
+<td width="25%" valign="top"><b>读懂目标</b><br><sub>围绕真实增量，而不是表面指标优化。</sub></td>
+<td width="25%" valign="top"><b>检查证据</b><br><sub>在提出动作前先看人群、历史结果与可信度。</sub></td>
+<td width="25%" valign="top"><b>尊重边界</b><br><sub>把预算、频次、审批和不触达选择纳入建议。</sub></td>
+<td width="25%" valign="top"><b>推动行动</b><br><sub>把建议落到 Campaign、实验和审批流程，而不是停在聊天框。</sub></td>
+</tr>
+</table>
+
+> **目标不是让 AI 替团队做决定，而是让每个决定更快、更清楚、更有依据。**
+
+---
+
+## 一套产品，覆盖完整增长节奏
+
+| 场景 | GrowthEvo 帮你做什么 |
+| --- | --- |
+| **增长驾驶舱** | 聚合增量收入、增量利润、ROI、渠道贡献、运行中的策略与关键待办 |
+| **机会发现** | 识别值得干预的人群，比较潜在增量与价值 |
+| **策略设计** | 把目标、人群、动作、预算、创意和边界组织成完整方案 |
+| **实验验证** | 跟踪分组、成熟度、增量效果、业务影响与保护指标 |
+| **审批协作** | 把高影响动作进入明确的人工审批流程 |
+| **实时决策** | 在具体用户与具体时刻选择更合适的动作或不触达 |
+| **Growth Agent** | 基于当前上下文帮助梳理证据、方案和下一步行动 |
+| **复盘与进化** | 把历史实验和决策结果沉淀为下一轮增长的输入 |
+
+---
+
+## 效果证据
+
+GrowthEvo 的产品理念建立在一个简单原则上：**增长应该证明“多创造了什么”，而不只是“发生了什么”。**
+
+在公开增量数据上的冻结评估中，GrowthEvo 使用 **13,979,592** 条源数据完成目标人群评估：
+
+<table>
+<tr>
+<td width="33%" align="center"><h3>+0.94 pp</h3><sub>整体人群增量访问</sub></td>
+<td width="33%" align="center"><h3>+9.38 pp</h3><sub>Top 10% 目标人群增量访问</sub></td>
+<td width="33%" align="center"><h3>13.98M</h3><sub>公开数据源记录</sub></td>
+</tr>
+</table>
+
+评估过程先固定候选方案和选择规则，再进入最终结果验证，避免在看到最终答案之后反过来挑选最好看的结论。
+
+- [查看 Criteo 增量目标评估](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md)
+- [查看 Open Bandit 策略评估](benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/README.md)
+
+---
+
+## 移动体验
+
+GrowthEvo 的核心驾驶舱也适配移动场景，方便在会议、通勤或活动现场快速查看关键增长状态。
+
+<table>
+<tr>
+<td width="62%" valign="middle">
+<h3>随时知道增长发生了什么</h3>
+<p>移动视图保留最重要的增量收入、增量利润、ROI、趋势与渠道贡献，让团队不用回到桌面端才能回答“今天增长表现怎么样”。</p>
+<p>更适合快速查看、复盘和协作，而不是把复杂工作流硬塞进小屏幕。</p>
+</td>
+<td width="38%" align="center">
+<img src="docs/assets/product/readme-mobile.png" alt="GrowthEvo 移动端" width="280" />
+</td>
 </tr>
 </table>
 
 ---
 
-## Highlights
+## 为什么是 GrowthEvo
 
-### A unified causal decision harness
+GrowthEvo 不是把更多图表堆到增长团队面前，而是重新组织增长决策的顺序：
 
-GrowthEvo 将因果估计、策略改进、OPE、实验锁定、长期风险和轨迹 credit 组织成一套可组合研究栈：
+1. **先判断是否存在真实增量机会**，再决定是否行动；
+2. **先看证据与边界**，再选择动作；
+3. **把不触达视为有效选择**，减少无效营销；
+4. **让实验结果直接连接下一步决策**，而不是停留在复盘文档里；
+5. **让人和 Agent 在同一套上下文中协作**，保持目标、证据和执行一致。
 
-| Area | GrowthEvo capability |
-| --- | --- |
-| **Causal effect estimation** | Group-aware cross-fitted Doubly Robust CATE，支持可替换 nuisance / effect learners |
-| **Support modeling** | Strict positivity、practical overlap、propensity handling、distributional support |
-| **Safe policy improvement** | Calibrated pessimistic value、conservative cost、TV trust region、final-feasible ranking |
-| **Off-policy evaluation** | Cross-fitted β*-IPS、DM、IPS、SNIPS、DR、SWITCH-DR、DR-OS、Meta-OPE |
-| **Evidence protocol** | Pre-registered plans、realized manifests、evidence gates、frozen validation winner、final holdout |
-| **Verification** | One-sided conformal margins 与多约束 family-wise correction |
-| **Long-horizon planning** | Stochastic rollout、downside CVaR、constraint-aware model-based planning |
-| **Trajectory learning** | Potential shaping、GAE、dynamics-aware bootstrap boundaries |
-| **Optional LLM proposals** | GPT / Claude / Gemini adapters、shadow evaluation、model+harness identity、typed causal evidence |
-| **Production operator** | Non-secret preregistration、provider doctor、deferred holdout labels、locked shadow-run CLI |
-| **Online promotion** | Randomized canary、continuous safety、frozen CUPED、planned sequential looks、promotion / rollback |
+最终希望回答的不是“我们做了多少 Campaign”，而是：
 
-### Research principles
-
-- **Incrementality before ranking**：优先比较可归因增量，而不是 raw conversion probability。
-- **Support-aware optimization**：让可观测数据支持度参与动作选择和策略改进。
-- **Calibration-aware confidence**：置信边界来自明确的校准或推断协议。
-- **Feasibility-aware selection**：直接比较满足约束后的 final-feasible policies。
-- **Validation-governed model selection**：候选方法在预声明 validation 上竞争，赢家冻结后进入 final holdout。
-- **Artifact-backed evidence**：实验计划、数据清单、候选配置、环境和结果通过 fingerprint chain 绑定。
+> **哪些动作真正创造了增量，为什么值得继续，以及下一次应该怎么做得更好。**
 
 ---
 
-## Locked real-world evidence
-
-GrowthEvo 的 headline benchmark 使用预注册实验计划、独立 validation selection 和冻结 final holdout。完整结果与 provenance artifact 均保存在仓库中。
-
-### Criteo Uplift v2.1 · locked targeting
-
-预注册 `visit` / top-10% targeting 实验使用 **13,979,592** 条源数据。五个固定的 LightGBM 4.7.0 CATE candidates 在 training split 上训练，并在 randomized validation 上完成冻结选择。
-
-| Metric | Locked result |
-| --- | ---: |
-| Source rows | **13,979,592** |
-| Training / validation / holdout | `6,990,168 / 3,494,354 / 3,495,070` |
-| Predeclared CATE candidates | **5** |
-| Validation winner | **S-Learner** |
-| Final locked-policy value | **0.0474849889** |
-| Treat-none value | `0.0381058865` |
-| Population incremental visit | **+0.93791 pp** |
-| Population 95% CI | **[+0.89584 pp, +0.97998 pp]** |
-| Selected top-10% incremental visit | **+9.37910 pp** |
-| Selected-group 95% CI | **[+8.95844 pp, +9.79976 pp]** |
-
-**Evidence commit:** `7ac26a5aebde2c70e1b43264b89f08dddcff0245`
-
-[View the complete Criteo evidence bundle](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md)
-
-### Open Bandit Dataset · locked OPE
-
-Full OBD benchmark evaluates a BernoulliTS target policy from randomized logged data with a predeclared estimator grid, 3-fold logistic Q model, evidence gates and an independent final holdout.
-
-| Metric | Locked result |
-| --- | ---: |
-| Random-policy evidence rows | **1,374,327** |
-| BernoulliTS on-policy reference rows | **12,357,200** |
-| Predeclared estimator configurations | **9** |
-| Validation winner | **IPS** |
-| Final estimate | **0.0045295435** |
-| Final standard error | `0.0002042614` |
-| Final support coverage | **1.0000** |
-| Final ESS ratio | **0.16123** |
-
-**Evidence commit:** `7d538cea9698b5f0a48c585eed85e3ae526e5af6`
-
-[View the complete OBD evidence bundle](benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/README.md)
-
----
-
-## Capability matrix
-
-### 1. Group-Aware Cross-Fitted DR CATE
-
-GrowthEvo 使用 held-out folds 构造 doubly-robust pseudo-outcomes，并支持 repeated users / clusters 的 group-aware fold assignment。
-
-对于 treatment `a` 和 control `a₀`，multi-action logging propensity 在 pair 内归一化：
-
-```math
-e_a(x)
-=
-\frac{\mu(a\mid x)}{\mu(a\mid x)+\mu(a_0\mid x)}.
-```
-
-DR pseudo-outcome：
-
-```math
-\widetilde\tau_i
-=
-\widehat m_1(x_i)-\widehat m_0(x_i)
-+
-\frac{A_i(Y_i-\widehat m_1(x_i))}{\widehat e(x_i)}
--
-\frac{(1-A_i)(Y_i-\widehat m_0(x_i))}{1-\widehat e(x_i)}.
-```
-
-同时提供 OOF uncertainty diagnostic 与 regularized Mahalanobis distributional support，用于识别训练分布中的有效覆盖区域。
-
-### 2. Calibrated Safe Policy Improvement
-
-Safe PI 直接消费上游校准 / 推断得到的 pessimistic value 与 conservative cost：
-
-```math
-Q_a^- = L_a,
-\qquad
-C_a^+ = U_a.
-```
-
-策略改进在 behavior policy 周围执行，并同时考虑：
-
-- TV trust region；
-- conservative cost limit；
-- support-aware action feasibility；
-- `NO_TREATMENT` fallback；
-- final-feasible pessimistic policy value。
-
-这使策略选择直接发生在“可执行策略空间”中，而不是对未经约束的动作分数做后处理。
-
-### 3. Robust Off-Policy Evaluation
-
-GrowthEvo 默认提供 **cross-fitted β*-IPS**，并同时暴露一组 OPE estimators 供预注册 benchmark selection 与 robustness analysis 使用。
-
-Importance weight：
-
-```math
-w_i
-=
-\frac{\pi(a_i\mid x_i)}{\mu(a_i\mid x_i)}.
-```
-
-Doubly Robust：
-
-```math
-\widehat V_{DR}
-=
-\frac{1}{n}\sum_{i=1}^{n}
-\left[
-\widehat q_\pi(x_i)
-+w_i(r_i-\widehat q(x_i,a_i))
-\right].
-```
-
-Cross-fitted β*-IPS：
-
-```math
-\widehat V_{\beta,CF}
-=
-\frac{1}{n}\sum_{i=1}^{n}
-\left[
-w_i r_i
--\widehat\beta^*_{-f(i)}(w_i-1)
-\right].
-```
-
-OPE artifact 同时记录 estimator-specific SE、ESS、ESS ratio、support coverage、maximum importance weight、normalization diagnostics 与可选 cluster-robust statistics。
-
-### 4. Pre-Registered Locked Evaluation
-
-GrowthEvo 使用显式 experiment plan 固定实验定义，并将 validation selection 与 final holdout 分开。
-
-**OPEExperimentPlan** 可以锁定：
-
-- dataset source 与 policy direction；
-- reward definition 与 split；
-- Q model / folds；
-- target-policy Monte Carlo count；
-- support floor 与 evidence gates；
-- estimator / hyperparameter grid；
-- random seed 与 artifact fingerprints。
-
-**TargetingExperimentPlan** 可以锁定：
-
-- dataset source 与 outcome；
-- train / validation / holdout split；
-- treatment 与 selected fraction；
-- propensity protocol；
-- score-generation protocol；
-- complete candidate set；
-- candidate-config fingerprint。
-
-最终 evidence bundle 绑定 experiment plan、candidate config、realized export manifest、validation evidence、holdout evidence、环境信息与 code commit SHA。
-
-### 5. One-Sided Conformal Verification
-
-对 lower / upper residual 分别校准 one-sided quantile：
-
-```math
-q_{1-\alpha}
-=
-r_{(\lceil(n+1)(1-\alpha)\rceil)}.
-```
-
-可生成 conservative margins，并支持多约束 family-wise correction，便于将预测不确定性接入策略约束。
-
-### 6. Risk-Sensitive Long-Horizon Planning
-
-候选 action sequence 通过 stochastic rollout 估计 return distribution，并用 downside CVaR 与 violation probability 进行风险敏感排序：
-
-```math
-CVaR_\alpha(R)
-=
-\mathbb E[R\mid R\le VaR_\alpha(R)].
-```
-
-```math
-Score(\pi)
-=
-CVaR_\alpha(R_\pi)
--\lambda\Pr(\mathrm{constraint\ violation}\mid\pi).
-```
-
-### 7. Dynamics-Aware Process Credit
-
-GrowthEvo 提供 potential shaping 与 GAE，并依据真实 dynamics boundary 控制 bootstrap 与 recursive trace。
-
-```math
-\delta_t
-=
-r_t+\gamma V(s_{t+1})-V(s_t),
-```
-
-```math
-A_t
-=
-\delta_t+\gamma\lambda A_{t+1}.
-```
-
----
-
-## Quick start
-
-### Install for development
-
-```bash
-git clone https://github.com/jiaweine/GrowthEvo-Harness.git
-cd GrowthEvo-Harness
-
-python -m venv .venv
-source .venv/bin/activate
-
-pip install -e '.[dev]'
-pytest
-```
-
-Python requirement: **3.11+**.
-
-### Optional benchmark dependencies
-
-Criteo benchmark stack:
-
-```bash
-pip install -e '.[criteo]'
-```
-
-Open Bandit Dataset stack:
-
-```bash
-pip install -e '.[obd]'
-```
-
-### CLI entry points
-
-```bash
-growthevo-locked-ope --help
-growthevo-locked-targeting --help
-growthevo-operator --help
-```
-
-### Web dashboard
-
-GrowthEvo now includes an optional local web product surface backed by FastAPI and a bundled responsive UI:
-
-```bash
-pip install -e '.[web]'
-growthevo-web
-```
-
-Then open `http://127.0.0.1:8765`. The dashboard exposes project health, the capability map, architecture layers, and the two locked real-world evidence bundles. JSON endpoints are available under `/api/*`, with interactive API documentation at `/api/docs`.
-
-### Optional guarded LLM workflow
-
-通过 [`GuardedLLMGrowthPlanner`](docs/llm_proposal_plane.md) 显式启用高层增长目标建议；默认 `GrowthEvoRuntime()` 继续使用确定性 planner。可按需要安装 `.[llm-openai]`、`.[llm-anthropic]`、`.[llm-gemini]`，或通过 `.[llm]` 安装全部 provider SDK。
-
-完整流程包括 [shadow 与锁定候选选择](docs/llm_benchmark.md)、[带来源的因果证据](docs/causal_option_evidence.md)、[生产 operator](docs/production_operator.md)、[随机 canary](docs/online_canary_promotion.md) 和 [序贯晋升](docs/high_power_sequential_causal.md)。在线结果绑定首次曝光阶段；持续监测安全，只在预注册检验点晋升，到最终样本上限仍未通过全部门槛则回滚。
-
-在接入真实 provider 前，可以先纯离线冻结候选合同：
-
-```bash
-growthevo-operator validate --manifest examples/operator_manifest.example.json
-python examples/production_operator_demo.py
-```
-
-这些是经过合成契约测试的可选组件。真实模型获得线上晋升资格需要独立的 Tier-A/B 因果证据和预注册在线实验；现有 Criteo / OBD 结果不构成 LLM 策略的晋升证据。
-
----
-
-## Reproduce locked benchmarks
-
-### Full Criteo targeting
-
-```bash
-git checkout 7ac26a5aebde2c70e1b43264b89f08dddcff0245
-pip install -e '.[criteo]'
-python scripts/run_criteo_full_locked.py
-```
-
-对应 evidence 环境保存在：
-
-```text
-benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/environment.txt
-```
-
-### Full Open Bandit Dataset OPE
-
-```bash
-pip install -e '.[obd]'
-python scripts/run_obd_full_locked.py
-```
-
-如果本地已经准备好 full OBD：
-
-```bash
-python scripts/run_obd_full_locked.py --data-root /path/to/open_bandit_dataset
-```
-
----
-
-## Architecture
-
-GrowthEvo 的实现按 causal estimation、policy learning、evaluation、benchmark governance 和 trajectory learning 分层组织。
-
-| Layer | Main modules | Responsibility |
-| --- | --- | --- |
-| **Causal** | `growthevo/causal/dr_learner.py` | Group-aware cross-fitted DR CATE |
-| **Serving** | `growthevo/causal/serving.py` | CATE serving bridge |
-| **Policy** | `growthevo/rl/safe_policy_improvement.py` | Calibrated final-feasible Safe PI |
-| **OPE** | `growthevo/rl/ope.py` | β*-IPS and robust estimator panel |
-| **Verification** | `growthevo/rl/conformal.py` | One-sided conformal calibration |
-| **Planning** | `growthevo/rl/model_based.py` | Risk-sensitive MPC / CVaR |
-| **Trajectory** | `growthevo/training/trajectory.py` | Dynamics-aware GAE and shaping |
-| **Evidence gates** | `growthevo/bench/ope_evidence_gate.py` | Support and evidence eligibility |
-| **Experiment plans** | `growthevo/bench/*experiment_plan.py` | Pre-registration schemas and fingerprints |
-| **Locked CLIs** | `growthevo/bench/locked_*_cli.py` | Validation selection and final holdout execution |
-| **LLM operator** | `growthevo/operator_*.py` | Non-secret preregistration, provider preflight and deferred locked shadow execution |
-| **Web product surface** | `growthevo/web/` | FastAPI JSON API and bundled responsive evidence dashboard |
-| **Benchmark runners** | `scripts/run_*_full_locked.py` | Full-data research benchmark entry points |
-
-### Repository layout
-
-```text
-GrowthEvo-Harness/
-├── growthevo/
-│   ├── causal/
-│   ├── rl/
-│   ├── bench/
-│   ├── training/
-│   └── web/
-├── benchmarks/
-│   ├── targeting/
-│   └── ope/
-├── docs/
-├── examples/
-├── scripts/
-├── tests/
-├── pyproject.toml
-└── README.md
-```
-
----
-
-## Evidence & reproducibility
-
-GrowthEvo 将 benchmark evidence 当作一等 artifact 管理。
-
-每个 locked experiment 可以携带：
-
-- experiment-plan fingerprint；
-- candidate-config fingerprint；
-- realized export-manifest fingerprint；
-- validation / holdout fingerprints；
-- source provenance；
-- environment snapshot；
-- code commit SHA；
-- compact accepted evidence bundle。
-
-大型第三方数据与生成缓存不进入 git；可审计的 compact evidence 持久化在：
-
-```text
-benchmarks/targeting/results/
-benchmarks/ope/results/
-```
-
----
-
-## Documentation
-
-| Topic | Document |
-| --- | --- |
-| Frontier algorithm stack | [`docs/FRONTIER_ALGORITHM_STACK.md`](docs/FRONTIER_ALGORITHM_STACK.md) |
-| Real-world benchmark protocol | [`docs/REAL_WORLD_BENCHMARKS.md`](docs/REAL_WORLD_BENCHMARKS.md) |
-| OBD isolated export workflow | [`docs/OBD_ISOLATED_EXPORT.md`](docs/OBD_ISOLATED_EXPORT.md) |
-| Locked OPE schema | [`docs/LOCKED_OPE_RUN.md`](docs/LOCKED_OPE_RUN.md) |
-| Locked targeting schema | [`docs/LOCKED_TARGETING_RUN.md`](docs/LOCKED_TARGETING_RUN.md) |
-| Guarded LLM proposal plane | [`docs/llm_proposal_plane.md`](docs/llm_proposal_plane.md) |
-| Locked LLM benchmark | [`docs/llm_benchmark.md`](docs/llm_benchmark.md) |
-| Causal option evidence | [`docs/causal_option_evidence.md`](docs/causal_option_evidence.md) |
-| Production operator | [`docs/production_operator.md`](docs/production_operator.md) |
-| Operator file schemas | [`docs/operator_file_schemas.md`](docs/operator_file_schemas.md) |
-| Randomized online canary | [`docs/online_canary_promotion.md`](docs/online_canary_promotion.md) |
-| High-power sequential promotion | [`docs/high_power_sequential_causal.md`](docs/high_power_sequential_causal.md) |
-| Project completion boundary | [`docs/PROJECT_COMPLETION.md`](docs/PROJECT_COMPLETION.md) |
-| Self-hosting and disaster recovery | [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) |
-| Repository governance audit | [`docs/repository_governance_audit.md`](docs/repository_governance_audit.md) |
-| Release readiness checklist | [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) |
-| Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
-| Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Security | [`SECURITY.md`](SECURITY.md) |
-
----
-
-## Citation
-
-如果 GrowthEvo-Harness 对你的研究或实验有帮助，可以使用仓库中的 [`CITATION.cff`](CITATION.cff) 获取 citation metadata。
+## 进一步了解
+
+- [产品与项目文档](docs/)
+- [真实世界评估](docs/REAL_WORLD_BENCHMARKS.md)
+- [产品变更记录](CHANGELOG.md)
+- [参与贡献](CONTRIBUTING.md)
+- [安全说明](SECURITY.md)
 
 ---
 
 <div align="center">
 
-### GrowthEvo-Harness
+### GrowthEvo
 
-**Causal estimation · Safe improvement · Counterfactual evaluation · Locked evidence · Risk-sensitive learning**
+**From Insight to Impact.**
 
-<sub>Built for auditable incremental decision research.</sub>
+<sub>让每一次触达，都创造真实的增长。</sub>
 
 </div>
