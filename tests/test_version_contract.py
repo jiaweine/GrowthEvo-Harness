@@ -45,7 +45,7 @@ def test_installed_cli_entrypoints_use_version_aware_wrappers() -> None:
 
 def test_readme_keeps_product_identity_unversioned() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "# GrowthEvo-Harness" in readme
+    assert "# GrowthEvo\n" in readme
     assert f"version-{source_version}-" not in readme
 
 

@@ -6,22 +6,20 @@ from pathlib import Path
 _README = Path(__file__).resolve().parents[1] / "README.md"
 
 
-def test_readme_uses_balanced_github_math_fences() -> None:
+def test_readme_uses_balanced_github_math_fences_when_present() -> None:
     text = _README.read_text(encoding="utf-8")
 
-    # GitHub supports fenced `math` blocks and they proved more robust for this
-    # README than display-dollar delimiters. Keep the original rendering bug from
-    # reappearing during future documentation rewrites.
+    # Avoid the display-dollar rendering bug that previously affected the README.
+    # The product-first landing page does not require mathematical sections, but if
+    # fenced GitHub math is introduced again it must remain balanced and non-empty.
     assert "$$" not in text
 
     lines = text.splitlines()
-    math_blocks = 0
     index = 0
     while index < len(lines):
         if lines[index].strip() != "```math":
             index += 1
             continue
-        math_blocks += 1
         index += 1
         body_lines = 0
         while index < len(lines) and lines[index].strip() != "```":
@@ -30,5 +28,3 @@ def test_readme_uses_balanced_github_math_fences() -> None:
         assert index < len(lines), "README contains an unclosed fenced math block"
         assert body_lines > 0, "README contains an empty fenced math block"
         index += 1
-
-    assert math_blocks >= 10, "README unexpectedly lost the documented math sections"
