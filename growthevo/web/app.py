@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from growthevo.llm.agent_planner import GuardedLLMAgentPlanner
 from growthevo.llm.configuration import (
     activation_summary,
     build_provider_pool_from_env,
@@ -159,6 +160,7 @@ def create_app() -> Any:
     authenticator: Any | None = None
     persistence_store: Any | None = None
     llm_pool: Any | None = None
+    agent_planner: GuardedLLMAgentPlanner | None = None
 
     # Authentication activation requires the complete generic OIDC/JWKS contract.
     # Partial settings remain visible as configured_not_active and production stays
@@ -223,6 +225,12 @@ def create_app() -> Any:
                 persistence_store.close()
             raise RuntimeError("configured LLM provider runtime could not be initialized") from exc
 
+    # The same health-aware pool serves proposal and critic calls sequentially.
+    # They never race in parallel. The planner itself owns no network resources;
+    # provider clients remain process-long and are closed by the app lifespan.
+    if llm_pool is not None:
+        agent_planner = GuardedLLMAgentPlanner(llm_pool, critic=llm_pool)
+
     @asynccontextmanager
     async def lifespan(_: Any):
         try:
@@ -248,6 +256,7 @@ def create_app() -> Any:
     app.state.persistence_store = persistence_store
     app.state.authenticator = authenticator
     app.state.llm_pool = llm_pool
+    app.state.agent_planner = agent_planner
     app.state.runtime_settings = settings
 
     def persistence_healthy() -> bool:
@@ -319,6 +328,8 @@ def create_app() -> Any:
             "available_routes": llm_available_routes,
             "healthy": llm_healthy,
             "providers": list(llm_summary.providers),
+            "agent_planning": agent_planner is not None,
+            "critic": agent_planner is not None,
         }
         if llm_pool is not None:
             llm_payload["metrics"] = asdict(llm_pool.metrics())
@@ -490,8 +501,23 @@ def create_app() -> Any:
         return evolution_candidates()
 
     @app.post("/api/agent/plan", tags=["agent"])
-    def plan(request: AgentPlanRequest) -> dict[str, Any]:
-        return agent_plan(request.goal, request.budget_limit, request.primary_metric, request.guardrails)
+    async def plan(request: AgentPlanRequest) -> dict[str, Any]:
+        baseline = agent_plan(
+            request.goal,
+            request.budget_limit,
+            request.primary_metric,
+            request.guardrails,
+        )
+        if agent_planner is None:
+            return baseline
+        return await agent_planner.plan(
+            goal=request.goal,
+            budget_limit=request.budget_limit,
+            primary_metric=request.primary_metric,
+            guardrails=request.guardrails,
+            opportunities=opportunities(),
+            baseline=baseline,
+        )
 
     @app.get("/api/actions", tags=["decisioning"])
     def actions() -> list[dict[str, Any]]:
