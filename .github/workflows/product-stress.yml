@@ -57,9 +57,11 @@ jobs:
             tests/test_product_concurrency.py \
             tests/test_product_api.py \
             tests/test_product_configuration.py \
+            tests/test_product_agent_llm.py \
             tests/test_llm_provider_concurrency.py \
             tests/test_llm_provider_failover.py \
             tests/test_llm_runtime_activation.py \
+            tests/test_llm_agent_planner.py \
             tests/test_llm_planner_concurrency.py
       - name: Build production container
         run: docker build -t growthevo-api:stress .
@@ -75,7 +77,7 @@ jobs:
             -e GEMINI_API_KEY=test-gemini-key \
             -e GROWTHEVO_GEMINI_MODEL=test-gemini-snapshot \
             growthevo-api:stress \
-            python -c 'from growthevo.web.app import app; pool=app.state.llm_pool; assert pool is not None; assert [r.client.provider_name for r in pool.routes] == ["openai", "anthropic", "google"]; print("provider pool activation ok")'
+            python -c 'from growthevo.web.app import app; pool=app.state.llm_pool; planner=app.state.agent_planner; assert pool is not None; assert planner is not None; assert planner.client is pool; assert planner.critic is pool; assert [r.client.provider_name for r in pool.routes] == ["openai", "anthropic", "google"]; print("provider pool + agent planner activation ok")'
       - name: Run pressure test
         shell: bash
         run: |
