@@ -1,5 +1,6 @@
 const REFERENCE_FIXTURE_ROUTES=new Set(['campaigns','campaignStudio','execution','evidence','data','integrations','settings']);
 const baseRouteRender=render;
+const AGENT_PLAN_TIMEOUT_MS=30000;
 let routeRenderEpoch=0;
 
 function markReferenceFixture(route){
@@ -45,6 +46,7 @@ const CHANNEL_PRESETS=['全部渠道','App Push','站内消息','Email','短信'
 const AGENT_MODES=['策略模式','证据模式','执行模式'];
 let utilityMenuActions=[];
 let agentModeIndex=0;
+let agentRequestController=null;
 
 function closeUtilityMenu(){
   const pop=$('#utility-popover');
@@ -120,6 +122,86 @@ function appendAgentMessage(role,text){
   target.scrollTop=target.scrollHeight;
 }
 
+function appendAgentPending(){
+  const target=$('#agent-body');
+  if(!target)return null;
+  const row=document.createElement('div');
+  row.className='chat-row agent-pending-row';
+  row.innerHTML='<div class="chat-avatar agent">✦</div><div><div class="chat-name">Growth Agent</div><div class="bubble agent-pending"><span></span>正在读取机会证据并进行 Critic 复核…</div></div>';
+  target.appendChild(row);
+  target.scrollTop=target.scrollHeight;
+  return row;
+}
+
+function setAgentBusy(busy){
+  const form=$('#agent-form');
+  const submit=$('#agent-form button[type="submit"]');
+  if(form)form.classList.toggle('is-busy',busy);
+  if(!submit)return;
+  submit.disabled=false;
+  submit.dataset.busy=busy?'true':'false';
+  submit.textContent=busy?'■':'➤';
+  submit.setAttribute('aria-label',busy?'停止规划':'发送');
+  submit.title=busy?'停止这次规划':'发送';
+}
+
+function agentFallbackLabel(reason){
+  const value=String(reason||'');
+  if(value==='proposal_low_confidence')return '置信度不足，已采用安全基线';
+  if(value==='critic_veto')return 'Critic 未通过，已采用安全基线';
+  if(value==='agent_circuit_open')return '模型保护中，已采用安全基线';
+  if(value.startsWith('workspace_invalid'))return '工作区证据校验未通过，已采用安全基线';
+  if(value.startsWith('llm_failure'))return '模型暂不可用，已采用安全基线';
+  if(value==='no_workspace_opportunity')return '没有可用机会，已采用安全基线';
+  return '已采用 deterministic 安全规划';
+}
+
+function agentItem(items,type){
+  return Array.isArray(items)?items.find(item=>item&&item.type===type):null;
+}
+
+function renderAgentPlan(result){
+  const target=$('#agent-body');
+  if(!target)return;
+  const audit=result&&result.planner_audit?result.planner_audit:null;
+  const strategy=agentItem(result&&result.artifacts,'StrategyProposal');
+  const experiment=agentItem(result&&result.artifacts,'ExperimentDraft');
+  const hypothesis=agentItem(result&&result.claims,'HYPOTHESIS');
+  const estimate=agentItem(result&&result.claims,'ESTIMATE');
+  const accepted=Boolean(audit&&audit.accepted);
+  const usedLLM=Boolean(audit&&audit.used_llm);
+  const status=accepted?'AI + Critic 已通过':usedLLM?agentFallbackLabel(audit.reason):'Deterministic 安全规划';
+  const provider=accepted&&audit.provider?[audit.provider,audit.model].filter(Boolean).join(' · '):'';
+  const critic=accepted&&audit.critic_provider?[audit.critic_provider,audit.critic_model].filter(Boolean).join(' · '):'';
+  const gate=result&&result.next_gate?result.next_gate:'Shadow preflight';
+  const runId=result&&result.run_id?result.run_id:'proposal_ready';
+  const title=strategy&&strategy.title?strategy.title:'受控增长策略草案';
+  const hypothesisText=hypothesis&&hypothesis.text?hypothesis.text:'等待实验验证';
+  const experimentText=experiment&&experiment.title?experiment.title:'NO_TREATMENT 对照实验';
+  const estimateText=estimate&&estimate.text?estimate.text:'增量估计由工作区证据编译';
+  const meta=[provider?`Proposal · ${provider}`:'',critic?`Critic · ${critic}`:'',`Next · ${gate}`].filter(Boolean);
+  target.insertAdjacentHTML('beforeend',`
+    <div class="chat-row agent-plan-row">
+      <div class="chat-avatar agent">✦</div>
+      <div>
+        <div class="chat-name">Growth Agent</div>
+        <article class="agent-plan-card" data-agent-plan-status="${accepted?'ai':'safe'}">
+          <div class="agent-plan-head"><div><span class="agent-plan-status">${esc(status)}</span><strong>${esc(title)}</strong></div><small>${esc(runId)}</small></div>
+          <div class="agent-plan-block"><span>可证伪假设</span><p>${esc(hypothesisText)}</p></div>
+          <div class="agent-plan-grid"><div><span>实验方向</span><strong>${esc(experimentText)}</strong></div><div><span>证据判断</span><strong>${esc(estimateText)}</strong></div></div>
+          <div class="agent-plan-meta">${meta.map(item=>`<span>${esc(item)}</span>`).join('')}</div>
+          <div class="agent-plan-actions"><button type="button" data-agent-go="opportunities">查看机会</button><button type="button" data-agent-go="approvals">查看审批边界</button></div>
+        </article>
+      </div>
+    </div>`);
+  $$('[data-agent-go]',target).forEach(button=>{
+    if(button.dataset.boundAgentGo)return;
+    button.dataset.boundAgentGo='true';
+    button.onclick=()=>go(button.dataset.agentGo);
+  });
+  target.scrollTop=target.scrollHeight;
+}
+
 function demoAgentResponse(goal){
   if(/审批|风险/.test(goal))return '我会先检查影响用户、预算、证据等级和最大风险敞口，再把高影响动作送入审批路径。';
   if(/机会|增量|人群/.test(goal))return '我会优先按 Population × Incremental Lift × Support 排序，并保留 NO_TREATMENT 作为一等候选动作。';
@@ -129,27 +211,53 @@ function demoAgentResponse(goal){
 
 async function submitAgentPrompt(event){
   event.preventDefault();
+  if(agentRequestController){
+    agentRequestController.abort('user_cancelled');
+    return;
+  }
   const input=$('#agent-input');
   const goal=input.value.trim();
   if(!goal)return;
-  const submit=$('#agent-form button[type="submit"]');
-  if(submit)submit.disabled=true;
   appendAgentMessage('user',goal);
   input.value='';
   if(useDemo){
     appendAgentMessage('agent',demoAgentResponse(goal));
     toast('Growth Agent 已生成下一步建议');
-    if(submit)submit.disabled=false;
     return;
   }
+
+  const controller=new AbortController();
+  agentRequestController=controller;
+  setAgentBusy(true);
+  const pending=appendAgentPending();
   try{
-    const result=await api('/api/agent/plan',{method:'POST',body:JSON.stringify({goal,primary_metric:'incremental_profit',guardrails:[]})});
-    appendAgentMessage('agent',`计划已生成：${result.run_id||'proposal_ready'}。请在审批与证据工作区继续确认执行边界。`);
-    toast(`Agent Plan 已生成 · ${result.run_id||'proposal_ready'}`);
+    const result=await api('/api/agent/plan',{
+      method:'POST',
+      body:JSON.stringify({goal,primary_metric:'incremental_profit',guardrails:[]}),
+      signal:controller.signal,
+      timeoutMs:AGENT_PLAN_TIMEOUT_MS,
+    });
+    if(pending)pending.remove();
+    renderAgentPlan(result);
+    const audit=result&&result.planner_audit?result.planner_audit:null;
+    toast(audit&&audit.accepted?'AI 策略已通过 Critic':'安全计划已生成');
   }catch(error){
-    renderApiUnavailable(error);
+    if(pending)pending.remove();
+    if(error&&error.name==='AbortError'){
+      appendAgentMessage('agent','已停止这次规划。没有提交执行动作，也不会继续占用模型请求。');
+      toast('已停止 Growth Agent');
+    }else if(error&&error.name==='TimeoutError'){
+      appendAgentMessage('agent','这次规划超过响应预算，已停止等待。GrowthEvo 主工作区仍可继续使用，你可以稍后重试。');
+      toast('Agent 规划已超时');
+      void probeRuntime();
+    }else{
+      appendAgentMessage('agent','这次规划没有完成。GrowthEvo 会把 Agent 故障与主工作区隔离；确认 API 状态后可直接重试。');
+      toast('Agent 请求未完成');
+      void probeRuntime();
+    }
   }finally{
-    if(submit)submit.disabled=false;
+    if(agentRequestController===controller)agentRequestController=null;
+    setAgentBusy(false);
   }
 }
 
@@ -237,7 +345,7 @@ function bindShellInteractions(){
   $('#agent-file-input').onchange=event=>{
     const file=event.target.files&&event.target.files[0];
     if(!file)return;
-    appendAgentMessage('agent',`已选择附件：${file.name}`);
+    appendAgentMessage('agent',`已选择附件：${file.name}。文件仅保留在当前浏览器选择中，本轮规划不会自动上传附件内容。`);
     toast(`已选择 ${file.name}`);
     event.target.value='';
   };
