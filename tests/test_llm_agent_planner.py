@@ -64,6 +64,15 @@ def _proposal(
     }
 
 
+def _critic(*, approved: bool = True, confidence: float = 0.94) -> dict[str, Any]:
+    return {
+        "approved": approved,
+        "confidence": confidence,
+        "rationale": "The proposal is bounded to a workspace opportunity and remains experimental.",
+        "risk_flags": [] if approved else ["overclaim"],
+    }
+
+
 class _AsyncClient:
     provider_name = "fixture-provider"
     model = "fixture-model"
@@ -82,6 +91,14 @@ class _AsyncClient:
         self.calls.append({"system": system, "user": user, "schema": schema})
         await asyncio.sleep(0)
         return dict(self.output)
+
+
+class _CriticClient(_AsyncClient):
+    provider_name = "fixture-critic"
+    model = "fixture-critic-model"
+
+    def __init__(self, *, approved: bool = True, confidence: float = 0.94) -> None:
+        super().__init__(_critic(approved=approved, confidence=confidence))
 
 
 class _GoalAwareClient(_AsyncClient):
@@ -120,13 +137,15 @@ class _FailingClient(_AsyncClient):
 class _CancellableClient(_AsyncClient):
     def __init__(self) -> None:
         super().__init__()
+        self.block = True
         self.entered = asyncio.Event()
 
     async def agenerate(self, **_: Any) -> Mapping[str, Any]:
         self.calls.append({})
-        self.entered.set()
-        await asyncio.Event().wait()
-        raise AssertionError("unreachable")
+        if self.block:
+            self.entered.set()
+            await asyncio.Event().wait()
+        return dict(self.output)
 
 
 async def _run(planner: GuardedLLMAgentPlanner, goal: str = "goal A") -> dict[str, Any]:
@@ -164,6 +183,7 @@ def test_agent_model_can_select_only_workspace_opportunity_and_cannot_write_fact
     assert result["next_gate"] == "Shadow preflight"
     assert result["planner_audit"]["accepted"] is True
     assert result["planner_audit"]["provider"] == "fixture-provider"
+    assert result["planner_audit"]["model"] == "fixture-model"
 
     sent = json.loads(client.calls[0]["user"])
     assert "best_action" not in client.calls[0]["user"]
@@ -205,7 +225,25 @@ def test_workspace_validation_failure_is_fail_closed_without_calling_model() -> 
     result = asyncio.run(scenario())
     assert result["claims"][0]["text"] == "baseline"
     assert result["planner_audit"]["reason"] == "workspace_invalid:ValueError"
+    assert result["planner_audit"]["used_llm"] is False
     assert client.calls == []
+
+
+def test_critic_can_veto_without_rewriting_or_escalating_plan() -> None:
+    proposer = _AsyncClient()
+    critic = _CriticClient(approved=False, confidence=0.97)
+    planner = GuardedLLMAgentPlanner(proposer, critic=critic)
+
+    result = asyncio.run(_run(planner))
+
+    assert result["claims"][0]["text"] == "baseline"
+    assert result["artifacts"][0]["title"] == "baseline"
+    assert result["next_gate"] == "Shadow preflight"
+    assert result["planner_audit"]["reason"] == "critic_veto"
+    assert result["planner_audit"]["provider"] == "fixture-provider"
+    assert result["planner_audit"]["critic_provider"] == "fixture-critic"
+    assert result["planner_audit"]["critic_confidence"] == 0.97
+    assert len(proposer.calls) == len(critic.calls) == 1
 
 
 def test_concurrent_async_plans_keep_trace_and_selection_request_local() -> None:
@@ -233,25 +271,28 @@ def test_concurrent_async_plans_keep_trace_and_selection_request_local() -> None
         assert confidence == (0.91 if expected == "opp_a" else 0.83)
 
 
-def test_cancellation_propagates_without_fallback_or_semantic_failure() -> None:
+def test_cancellation_propagates_and_does_not_poison_next_request() -> None:
     client = _CancellableClient()
     planner = GuardedLLMAgentPlanner(
         client,
         config=AgentPlannerConfig(max_consecutive_failures=1, circuit_cooldown_seconds=60),
     )
 
-    async def scenario() -> None:
+    async def cancelled() -> None:
         task = asyncio.create_task(_run(planner))
         await client.entered.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
-    asyncio.run(scenario())
-
-    # Cancellation did not open the semantic circuit. A subsequent low-confidence
-    # valid response still reaches the provider rather than being short-circuited.
+    asyncio.run(cancelled())
+    client.block = False
     client.output = _proposal(confidence=0.2)
+    result = asyncio.run(_run(planner))
+
+    assert len(client.calls) == 2
+    assert result["planner_audit"]["reason"] == "proposal_low_confidence"
+    assert result["planner_audit"]["used_llm"] is True
 
 
 def test_semantic_circuit_uses_single_half_open_probe_under_concurrency() -> None:
@@ -282,4 +323,5 @@ def test_semantic_circuit_uses_single_half_open_probe_under_concurrency() -> Non
     probe_result, burst_results = asyncio.run(scenario())
     assert probe_result["planner_audit"]["accepted"] is True
     assert all(item["planner_audit"]["reason"] == "agent_circuit_open" for item in burst_results)
+    assert all(item["planner_audit"]["used_llm"] is False for item in burst_results)
     assert len(client.calls) == 2
