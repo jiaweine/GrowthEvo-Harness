@@ -21,8 +21,8 @@
   };
 
   async function run() {
-    await waitFor(() => window.runtimeAvailability === 'ready' || document.body.dataset.runtimeMode === 'api', 4000);
-    check(runtimeAvailability === 'ready', `runtime not ready: ${runtimeAvailability}`);
+    const ready = await waitFor(() => runtimeAvailability === 'ready', 5000);
+    check(ready, `runtime not ready: ${runtimeAvailability}`);
     check(document.body.dataset.agentRuntime === 'safe', `expected safe agent runtime, got ${document.body.dataset.agentRuntime}`);
     check(document.querySelector('.online-text').textContent.includes('安全'), 'agent status did not expose safe mode');
 
@@ -43,7 +43,8 @@
     api = async () => { throw Error('isolated agent fixture failure'); };
     input.value = '触发一次隔离失败';
     document.querySelector('#agent-form').requestSubmit();
-    await waitFor(() => document.querySelector('#agent-body').textContent.includes('主工作区隔离'));
+    const isolated = await waitFor(() => document.querySelector('#agent-body').textContent.includes('主工作区隔离'));
+    check(isolated, 'agent-local failure message did not render');
     check(runtimeAvailability === 'ready', 'agent-local failure marked the whole runtime unavailable');
     check(!document.querySelector('#view').textContent.includes('GrowthEvo API 暂不可用'), 'agent-local failure replaced the main workspace');
     api = realApi;
@@ -70,7 +71,8 @@
     const stopButton = document.querySelector('#agent-form button[type="submit"]');
     check(stopButton.getAttribute('aria-label') === '停止规划', 'busy send button did not become stop control');
     stopButton.click();
-    await waitFor(() => document.querySelector('#agent-body').textContent.includes('已停止这次规划'));
+    const cancelled = await waitFor(() => document.querySelector('#agent-body').textContent.includes('已停止这次规划'));
+    check(cancelled, 'agent cancellation message did not render');
     check(!document.querySelector('#agent-form').classList.contains('is-busy'), 'agent stayed busy after cancellation');
     check(runtimeAvailability === 'ready', 'user cancellation polluted global runtime state');
     api = realApi;
