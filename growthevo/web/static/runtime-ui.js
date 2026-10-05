@@ -8,17 +8,26 @@ let runtimeBackend = useDemo ? {mode:'demo',environment:'static'} : null;
 async function runtimeFetch(url, options = {}, timeoutMs = RUNTIME_API_TIMEOUT_MS) {
   const controller = new AbortController();
   const upstream = options.signal;
-  const abortFromUpstream = () => controller.abort();
+  let timedOut = false;
+  const abortFromUpstream = () => controller.abort(upstream && upstream.reason ? upstream.reason : 'upstream');
   if (upstream) {
-    if (upstream.aborted) controller.abort();
+    if (upstream.aborted) controller.abort(upstream.reason || 'upstream');
     else upstream.addEventListener('abort', abortFromUpstream, {once:true});
   }
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort('timeout');
+  }, timeoutMs);
   try {
     const {signal: _ignored, ...rest} = options;
     return await fetch(url, {...rest, signal: controller.signal});
   } catch (error) {
-    if (error && error.name === 'AbortError') throw Error(`API request aborted or timed out after ${timeoutMs}ms`);
+    if (error && error.name === 'AbortError') {
+      const wrapped = Error(timedOut ? `API request timed out after ${timeoutMs}ms` : 'API request cancelled');
+      wrapped.name = timedOut ? 'TimeoutError' : 'AbortError';
+      wrapped.code = timedOut ? 'GROWTHEVO_API_TIMEOUT' : 'GROWTHEVO_API_CANCELLED';
+      throw wrapped;
+    }
     throw error;
   } finally {
     clearTimeout(timer);
@@ -28,19 +37,20 @@ async function runtimeFetch(url, options = {}, timeoutMs = RUNTIME_API_TIMEOUT_M
 
 api = async function runtimeAwareApi(path, options = {}) {
   if (useDemo) return demoApi(path, options);
-  const headers = new Headers(options.headers || {});
+  const {timeoutMs = RUNTIME_API_TIMEOUT_MS, ...requestOptions} = options;
+  const headers = new Headers(requestOptions.headers || {});
   if (!headers.has('Accept')) headers.set('Accept', 'application/json');
   // Avoid forcing application/json on GET/HEAD: doing so turns otherwise-simple
   // cross-origin reads into unnecessary CORS preflights. JSON write helpers pass
   // string bodies, so add Content-Type only when a body actually exists.
-  if (typeof options.body === 'string' && !headers.has('Content-Type')) {
+  if (typeof requestOptions.body === 'string' && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
   const response = await runtimeFetch(`${config.API_BASE || ''}${path}`, {
-    ...options,
+    ...requestOptions,
     headers,
     cache: 'no-store',
-  });
+  }, timeoutMs);
   if (!response.ok) {
     const detail = await response.text();
     throw Error(`HTTP ${response.status}: ${detail.slice(0, 600)}`);
@@ -62,11 +72,25 @@ function setRuntimeStatus(label, latency = null, freshness = null) {
   }
 }
 
-function setAgentAvailability(online) {
+function setAgentAvailability(state, detail = '') {
+  const labels = {
+    ai: 'AI 已连接',
+    safe: '安全模式',
+    demo: 'Demo',
+    checking: '检查中',
+    offline: 'API 不可用',
+  };
   const text = document.querySelector('.online-text');
-  if (text) text.textContent = online ? '在线' : 'API 不可用';
+  if (text) {
+    text.textContent = labels[state] || labels.safe;
+    text.title = detail || '';
+  }
   const dot = document.querySelector('.online-dot');
-  if (dot) dot.style.opacity = online ? '1' : '.35';
+  if (dot) {
+    dot.style.opacity = state === 'offline' ? '.35' : '1';
+    dot.style.background = state === 'ai' ? '#10b981' : state === 'offline' ? '#94a3b8' : '#6366f1';
+  }
+  document.body.dataset.agentRuntime = state;
 }
 
 function runtimeWorkspaceLabel() {
@@ -75,12 +99,13 @@ function runtimeWorkspaceLabel() {
     if (meta) meta.textContent = 'Demo Workspace · Synthetic Data';
     document.body.dataset.runtimeMode = 'demo';
     setRuntimeStatus('Demo · Synthetic Data', null, '非生产数据');
-    setAgentAvailability(true);
+    setAgentAvailability('demo', '静态演示不会连接外部模型');
     return;
   }
   if (meta) meta.textContent = 'API Workspace · Checking';
   document.body.dataset.runtimeMode = 'api';
   setRuntimeStatus('API 状态检查中');
+  setAgentAvailability('checking');
 }
 
 async function probeRuntime() {
@@ -110,12 +135,22 @@ async function probeRuntime() {
     }
     document.body.dataset.runtimeMode = mode;
     setRuntimeStatus(`API Ready · ${mode}${env}`, latency, durable ? 'Durable production' : `Data: ${dataMode}`);
-    setAgentAvailability(true);
+
+    const llm = payload && payload.llm ? payload.llm : null;
+    const agentActive = Boolean(llm && llm.agent_planning === true && llm.active === true && llm.healthy !== false);
+    if (agentActive) {
+      const available = Number(llm.available_routes || 0);
+      const total = Number(llm.route_count || 0);
+      const providers = Array.isArray(llm.providers) ? llm.providers.join(' / ') : '';
+      setAgentAvailability('ai', `${available}/${total || available} routes${providers ? ` · ${providers}` : ''}`);
+    } else {
+      setAgentAvailability('safe', '模型未激活或暂不可用时使用 deterministic 安全规划');
+    }
   } catch (error) {
     runtimeAvailability = 'unavailable';
     runtimeLastError = error;
     setRuntimeStatus('API 不可用');
-    setAgentAvailability(false);
+    setAgentAvailability('offline');
     renderApiUnavailable(error);
   }
 }
@@ -138,7 +173,7 @@ function renderApiUnavailable(error) {
       </div>
     </div>`;
   setRuntimeStatus('API 不可用');
-  setAgentAvailability(false);
+  setAgentAvailability('offline');
   const retry = document.querySelector('#runtime-retry');
   if (retry) retry.onclick = () => location.reload();
 }

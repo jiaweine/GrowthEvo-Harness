@@ -33,6 +33,7 @@ jobs:
         run: |
           for file in growthevo/web/static/*.js; do node --check "$file"; done
           node --check scripts/browser_interaction_smoke.js
+          node --check scripts/browser_agent_api_smoke.js
       - name: Build production container
         run: docker build -t growthevo-api:ci .
       - name: Smoke and stress the same production container
@@ -157,6 +158,17 @@ jobs:
           set -euo pipefail
           python scripts/build_pages.py --output _site-api
           for file in _site-api/assets/*.js; do node --check "$file"; done
+          cp scripts/browser_agent_api_smoke.js _site-api/assets/agent-api-smoke.js
+          python - <<'PY'
+          from pathlib import Path
+
+          index = Path('_site-api/index.html')
+          html = index.read_text(encoding='utf-8')
+          marker = '<script src="./assets/agent-api-smoke.js" defer></script>'
+          if marker not in html:
+              html = html.replace('</body>', f'{marker}\n</body>')
+          index.write_text(html, encoding='utf-8')
+          PY
           docker run --rm -d --name growthevo-api-browser -p 8765:8765 \
             -e GROWTHEVO_MODE=api \
             -e GROWTHEVO_ENV=browser-ci \
@@ -198,6 +210,13 @@ jobs:
           assert_live_route harness 'run_9081'
           assert_live_route approvals 'apr_281'
           assert_live_route evolution 'EV-281'
+          agent_out=/tmp/growthevo-agent-api-smoke.html
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:4174/?agent-api-smoke=1#dashboard" > "$agent_out"
+          if ! grep -Fq 'AGENT_API_SMOKE_PASS' "$agent_out"; then
+            echo 'GrowthEvo Agent API browser smoke failed:' >&2
+            grep -F 'AGENT_API_SMOKE_' "$agent_out" >&2 || cat "$agent_out" >&2
+            exit 1
+          fi
           "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=5000 --screenshot=ui-screenshots/growthevo-api-realtime.png http://127.0.0.1:4174/#realtime
           test -s ui-screenshots/growthevo-api-realtime.png
           docker rm -f "$API_PID" >/dev/null

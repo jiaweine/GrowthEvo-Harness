@@ -56,7 +56,11 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     assert "Demo Workspace · Synthetic Data" in runtime_ui
     assert "using demo mode because MODE=auto" not in runtime_ui
     assert "/api/ready" in runtime_ui
-    assert "typeof options.body === 'string'" in runtime_ui
+    assert "typeof requestOptions.body === 'string'" in runtime_ui
+    assert "timeoutMs = RUNTIME_API_TIMEOUT_MS" in runtime_ui
+    assert "GROWTHEVO_API_TIMEOUT" in runtime_ui
+    assert "GROWTHEVO_API_CANCELLED" in runtime_ui
+    assert "document.body.dataset.agentRuntime" in runtime_ui
     assert "Data: ${dataMode}" in runtime_ui
     for route in ("/api/opportunities", "/api/experiments", "/api/decisions/recent", "/api/harness/runs", "/api/approvals/", "/api/evolution/candidates"):
         assert route in live_pages
@@ -109,9 +113,23 @@ def test_mutable_dashboard_fields_are_html_escaped() -> None:
 
 def test_agent_composer_calls_real_api_outside_demo() -> None:
     app = (STATIC / "app.js").read_text(encoding="utf-8")
+    runtime_ui = (STATIC / "runtime-ui.js").read_text(encoding="utf-8")
+    smoke = (ROOT / "scripts" / "browser_agent_api_smoke.js").read_text(encoding="utf-8")
     assert "/api/agent/plan" in app
     assert "if(useDemo)" in app
-    assert "renderApiUnavailable(error)" in app
+    assert "AGENT_PLAN_TIMEOUT_MS=30000" in app
+    assert "agentRequestController.abort('user_cancelled')" in app
+    assert "timeoutMs:AGENT_PLAN_TIMEOUT_MS" in app
+    assert "renderAgentPlan(result)" in app
+    assert "Deterministic 安全规划" in app
+    assert "AI + Critic 已通过" in app
+    assert "主工作区隔离" in app
+    assert "void probeRuntime()" in app
+    assert "setAgentAvailability('safe'" in runtime_ui
+    assert "setAgentAvailability('ai'" in runtime_ui
+    assert "AGENT_API_SMOKE_PASS" in smoke
+    assert "runtimeAvailability === 'ready'" in smoke
+    assert "停止规划" in smoke
 
 
 def test_optional_decision_engine_contract() -> None:
