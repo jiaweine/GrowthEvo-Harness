@@ -1,5 +1,124 @@
-function sectionNav(items,active){return `<div class="section-nav">${items.map(([r,l])=>`<button class="${r===active?'active':''}" data-go="${r}">${l}</button>`).join('')}</div>`}
-function bindProductActions(){$$('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));$$('[data-toast]').forEach(b=>b.onclick=()=>toast(b.dataset.toast));}
+function sectionNav(items,active){return \`<div class="section-nav">\${items.map(([r,l])=>\`<button class="\${r===active?'active':''}" data-go="\${r}">\${l}</button>\`).join('')}</div>\`}
+const DEMO_DECISION_API_SAMPLE='POST /api/realtime/decision\\n\\n{\\n  "entity_id": "user_28419",\\n  "placement": "checkout_banner",\\n  "context": {"cart_value": 198, "session_intent": "high"},\\n  "candidate_action_ids": ["free_shipping", "NO_TREATMENT"]\\n}';
+
+function demoDownloadJson(filename,payload){
+ const blob=new Blob([JSON.stringify(payload,null,2)+'\\n'],{type:'application/json'});
+ const url=URL.createObjectURL(blob);
+ const link=document.createElement('a');
+ link.href=url;link.download=filename;link.hidden=true;
+ document.body.appendChild(link);
+ link.click();
+ link.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),0);
+ document.body.dataset.lastDownload=filename;
+ toast(filename+' 已导出');
+}
+
+async function demoCopyText(text,label){
+ try{
+  if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(text);
+  else{
+   const field=document.createElement('textarea');
+   field.value=text;field.setAttribute('readonly','');field.style.position='fixed';field.style.opacity='0';
+   document.body.appendChild(field);field.select();
+   if(!document.execCommand('copy'))throw Error('copy command rejected');
+   field.remove();
+  }
+  document.body.dataset.lastCopy=label;
+  toast(label+' 已复制');
+ }catch(error){toast('复制失败：'+(error&&error.message?error.message:'browser denied clipboard access'))}
+}
+
+function demoApprovalDecision(id,decision){
+ const item=(DEMO.approvalsFull||[]).find(row=>row.id===id);
+ if(!item)return;
+ item.status=decision;
+ item.decision_note='Demo workspace interaction';
+ item.decided_at=new Date().toISOString();
+ document.body.dataset.lastApproval=id+':'+decision;
+ approvals();
+}
+
+function runDemoAction(button){
+ const action=button.dataset.demoAction;
+ if(action==='evidence-export')return demoDownloadJson('growthevo-evidence-report.json',{kind:'GrowthEvoDemoEvidenceReport',generated_at:new Date().toISOString(),opportunities:DEMO.opportunityRows,evidence:DEMO.evidence||[]});
+ if(action==='trace-export')return demoDownloadJson('growthevo-trace-run-9081.json',{kind:'GrowthEvoDemoTrace',run_id:'RUN-9081',trace:DEMO.traces});
+ if(action==='connector-export')return demoDownloadJson('growthevo-connector-registry.json',{kind:'GrowthEvoDemoConnectorRegistry',connectors:DEMO.connectors});
+ if(action==='realtime-copy')return void demoCopyText(DEMO_DECISION_API_SAMPLE,'Decision API sample');
+ if(action==='save-campaign-draft'){
+  const payload={id:'CAM-842',goal:'春节前提升新用户 7 日首购增量',audience:'新用户 0–7 天未首购',budget:500000,candidate_action_ids:['NO_TREATMENT','free_shipping','coupon_10'],saved_at:new Date().toISOString()};
+  sessionStorage.setItem('growthevo.demo.campaign-draft.v1',JSON.stringify(payload));
+  document.body.dataset.lastDemoSave=payload.id;
+  button.textContent='✓ 已保存';
+  return toast('Campaign Draft 已保存到当前标签页');
+ }
+ if(action==='create-experiment'){
+  const id='EXP-DRAFT-'+String(Date.now()).slice(-6);
+  DEMO.experiments.unshift({id,name:'新实验草稿',status:'Draft',unit:'user_id',population:'—',variants:'2 arms',assignment:'50/50',metric:'待配置',guardrail:'待配置',maturity:'未开始',estimate:'—',impact:'—',uncertainty:'—'});
+  document.body.dataset.lastExperimentDraft=id;
+  return experiments();
+ }
+ if(action==='preflight'){
+  const result=$('#demo-preflight-result');
+  const ready=(DEMO.connectors||[]).filter(item=>item.status==='ready').length;
+  const total=(DEMO.connectors||[]).length;
+  if(result){result.hidden=false;result.textContent='PASS · '+DEMO.executions.length+' workflows checked · '+ready+'/'+total+' connectors ready · side effects remain simulated';}
+  document.body.dataset.lastPreflight='pass';
+  return toast('Preflight PASS');
+ }
+ if(action==='approval')return demoApprovalDecision(button.dataset.approvalId,button.dataset.decision);
+ if(action==='failure-miner'){
+  if(!(DEMO.evolution||[]).some(item=>item.id==='EV-DEMO')){
+   DEMO.evolution.unshift({id:'EV-DEMO',source:'Demo trace scan',problem:'审批前说明在少量轨迹中缺少明确的 blast-radius 摘要。',candidate:'在 ApprovalRequest 前固定生成 impact summary。',metrics:[['Coverage','+100%'],['Policy Violation','0%'],['Extra latency','+0.4%'],['Cost','+$0.00']],stage:'Offline replay'});
+  }
+  document.body.dataset.lastFailureMiner='EV-DEMO';
+  return evolution();
+ }
+ if(action==='reject-candidate'){
+  const item=(DEMO.evolution||[]).find(row=>row.id===button.dataset.candidateId);
+  if(item)item.stage='Rejected';
+  document.body.dataset.lastEvolutionDecision=String(button.dataset.candidateId||'')+':rejected';
+  return evolution();
+ }
+ if(action==='deployment-check'){
+  const cfg=window.GROWTHEVO_CONFIG||{};
+  const target=$('#demo-deployment-result');
+  const apiBase=cfg.API_BASE?'configured':'not configured';
+  const auth=cfg.AUTH&&cfg.AUTH.ENABLED?'enabled':'disabled';
+  const sw='serviceWorker' in navigator?'supported':'unsupported';
+  if(target){target.hidden=false;target.textContent='PASS · mode '+String(cfg.MODE||'demo')+' · API '+apiBase+' · auth '+auth+' · service worker '+sw;}
+  document.body.dataset.lastDeploymentCheck='pass';
+  return toast('部署检查完成');
+ }
+ if(action==='evidence-detail'){
+  if(!useDemo)return go('evidence');
+  const item=(DEMO.opportunityRows||[]).find(row=>row.segment===button.dataset.segment);
+  if(typeof openUtilityMenu==='function'&&item){
+   return openUtilityMenu('证据详情',[
+    {label:'Tier '+item.evidence_tier+' · support '+Math.round(item.support*100)+'%',detail:item.confidence||'Evidence snapshot'},
+    {label:'查看完整 Evidence 工作台',detail:item.best_action,action:()=>go('evidence')},
+    {label:'查看实时决策',detail:'NO_TREATMENT 仍保留为候选动作',action:()=>go('realtime')},
+   ]);
+  }
+  return go('evidence');
+ }
+}
+
+function bindProductActions(){
+ $('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
+ $('[data-toast]').forEach(b=>b.onclick=()=>toast(b.dataset.toast));
+ $('[data-demo-action]').forEach(b=>b.onclick=()=>runDemoAction(b));
+ $('[data-campaign-more]').forEach(b=>b.onclick=()=>{
+  const route=b.dataset.campaignRoute||'campaignStudio';
+  const name=b.dataset.campaignMore||'Campaign';
+  if(typeof openUtilityMenu!=='function')return go(route);
+  openUtilityMenu(name,[
+   {label:'打开工作台',detail:'查看 Campaign / Experiment 状态',action:()=>go(route)},
+   {label:'查看 Evidence',detail:'检查增量与支持度',action:()=>go('evidence')},
+   {label:'治理与审批',detail:'查看 blast radius 与 gate',action:()=>go('approvals')},
+  ]);
+ });
+}
 function money(n){return `¥${fmt(n)}`}
 function evidenceBadge(t){return `<span class="evidence-dot">${esc(t)}</span>`}
 function supportMeter(v){return `<div>${Math.round(v*100)}%</div><div class="support-meter"><i style="width:${Math.round(v*100)}%"></i></div>`}
