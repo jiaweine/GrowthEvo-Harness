@@ -78,8 +78,31 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     assert "capacity.in_flight" in runtime_ui
     assert "capacity.max_concurrency" in runtime_ui
     assert "Data: ${dataMode}" in runtime_ui
-    for route in ("/api/opportunities", "/api/experiments", "/api/decisions/recent", "/api/harness/runs", "/api/approvals/", "/api/evolution/candidates"):
+    for route in (
+        "/api/campaigns",
+        "/api/campaigns/draft",
+        "/api/evidence",
+        "/api/system/connectors",
+        "/api/system/runtime",
+        "/api/opportunities",
+        "/api/experiments",
+        "/api/decisions/recent",
+        "/api/harness/runs",
+        "/api/approvals/",
+        "/api/evolution/candidates",
+    ):
         assert route in live_pages
+    for marker in (
+        "liveCampaigns",
+        "liveCampaignStudio",
+        "liveEvidence",
+        "liveExecution",
+        "liveDataCenter",
+        "liveIntegrations",
+        "liveSettings",
+    ):
+        assert marker in live_pages
+    assert "const REFERENCE_FIXTURE_ROUTES=new Set();" in app
 
 
 def test_core_product_workbenches_are_real_routes() -> None:
@@ -96,6 +119,19 @@ def test_core_product_workbenches_are_real_routes() -> None:
     assert "Replay" in pages and "Shadow" in pages and "Canary" in pages
     assert "creatives" in advanced_data and "journeys" in advanced_data and "memories" in advanced_data
     assert "models" in advanced_data and "policies" in advanced_data and "entities" in advanced_data
+
+
+def test_api_mode_live_workbench_smoke_covers_all_reference_routes() -> None:
+    smoke = (ROOT / "scripts" / "browser_live_workbench_smoke.js").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github" / "workflows" / "product-surface.yml").read_text(encoding="utf-8")
+    for route in ("campaigns", "campaignStudio", "evidence", "execution", "data", "integrations", "settings"):
+        assert "visit('" + route + "'" in smoke
+    assert "Browser Live Draft" in smoke
+    assert "/api/campaigns" in smoke
+    assert "LIVE_WORKBENCH_SMOKE_PASS" in smoke
+    assert "browser_live_workbench_smoke.js" in workflow
+    assert "live-workbench-smoke=1" in workflow
+    assert "Reference UI Fixture" in workflow
 
 
 def test_pages_builder_packages_all_product_assets() -> None:
