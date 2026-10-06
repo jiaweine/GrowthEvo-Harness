@@ -90,6 +90,7 @@
     const experimentCount = DEMO.experiments.length;
     click('[data-demo-action="create-experiment"]');
     await sleep(40);
+    check(Boolean(document.body.dataset.lastExperimentDraft), 'experiment draft id was not recorded');
     check(DEMO.experiments.length === experimentCount + 1, 'experiment draft did not mutate demo state');
     check(document.querySelector('#view').textContent.includes('新实验草稿'), 'experiment draft did not render');
 
