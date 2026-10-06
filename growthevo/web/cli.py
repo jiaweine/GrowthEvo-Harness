@@ -25,6 +25,38 @@ def _default_port() -> int:
         raise ValueError(f"invalid PORT/GROWTHEVO_PORT: {exc}") from exc
 
 
+def _bounded_int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be in [{minimum}, {maximum}]")
+    return value
+
+
+def _default_workers() -> int:
+    # Do not inherit hosting-platform WEB_CONCURRENCY implicitly. Every worker
+    # owns independent DB/provider pools and circuit state, so process
+    # multiplication must be an explicit GrowthEvo capacity decision.
+    return _bounded_int_env("GROWTHEVO_WEB_WORKERS", 1, minimum=1, maximum=16)
+
+
+def _default_limit_concurrency() -> int:
+    return _bounded_int_env(
+        "GROWTHEVO_HTTP_LIMIT_CONCURRENCY", 512, minimum=16, maximum=65535
+    )
+
+
+def _default_graceful_shutdown_seconds() -> int:
+    return _bounded_int_env(
+        "GROWTHEVO_HTTP_GRACEFUL_SHUTDOWN_SECONDS", 55, minimum=1, maximum=300
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the GrowthEvo web dashboard.")
     parser.add_argument("--host", default=os.getenv("GROWTHEVO_HOST", "127.0.0.1"))
@@ -45,6 +77,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         host=args.host,
         port=args.port,
         reload=args.reload,
+        workers=1 if args.reload else _default_workers(),
+        limit_concurrency=_default_limit_concurrency(),
+        timeout_graceful_shutdown=_default_graceful_shutdown_seconds(),
     )
     return 0
 
