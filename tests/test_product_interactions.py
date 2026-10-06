@@ -66,7 +66,9 @@ def test_strategy_rows_have_actionable_controls() -> None:
     views = read("views.js")
 
     assert 'class="action-view" type="button" data-go="${route}"' in views
-    assert 'class="row-more" type="button" data-toast=' in views
+    assert 'class="row-more" type="button" data-campaign-more=' in views
+    assert 'data-campaign-route="${route}"' in views
+    assert 'data-toast=' not in views
     assert "trendChart(values,options={})" in views
 
 
