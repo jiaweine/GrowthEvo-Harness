@@ -11,8 +11,15 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from growthevo.web.app import MAX_API_BODY_BYTES, create_app
-from growthevo.web.cli import _default_port, _port
+from growthevo.web.cli import (
+    _default_graceful_shutdown_seconds,
+    _default_limit_concurrency,
+    _default_port,
+    _default_workers,
+    _port,
+)
 from growthevo.web.decisioning import ACTION_REGISTRY
+from growthevo.web.persistence import postgres_pool_config_from_env
 from growthevo.web.schemas import ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest, KNOWN_ACTION_IDS
 from scripts.build_pages import normalize_api_base, normalize_oidc_config
 
@@ -81,6 +88,48 @@ def test_configured_port_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     for value in ("0", "65536", "-1", "abc"):
         with pytest.raises(argparse.ArgumentTypeError):
             _port(value)
+
+
+def test_production_capacity_controls_are_explicit_and_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "GROWTHEVO_WEB_WORKERS",
+        "GROWTHEVO_HTTP_LIMIT_CONCURRENCY",
+        "GROWTHEVO_HTTP_GRACEFUL_SHUTDOWN_SECONDS",
+        "GROWTHEVO_DB_POOL_MIN_SIZE",
+        "GROWTHEVO_DB_POOL_MAX_SIZE",
+        "GROWTHEVO_DB_POOL_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    assert _default_workers() == 1
+    assert _default_limit_concurrency() == 512
+    assert _default_graceful_shutdown_seconds() == 55
+    pool = postgres_pool_config_from_env()
+    assert (pool.min_size, pool.max_size, pool.timeout_seconds) == (1, 8, 5.0)
+
+    monkeypatch.setenv("WEB_CONCURRENCY", "8")
+    assert _default_workers() == 1
+
+    monkeypatch.setenv("GROWTHEVO_WEB_WORKERS", "2")
+    monkeypatch.setenv("GROWTHEVO_HTTP_LIMIT_CONCURRENCY", "768")
+    monkeypatch.setenv("GROWTHEVO_HTTP_GRACEFUL_SHUTDOWN_SECONDS", "60")
+    monkeypatch.setenv("GROWTHEVO_DB_POOL_MIN_SIZE", "2")
+    monkeypatch.setenv("GROWTHEVO_DB_POOL_MAX_SIZE", "12")
+    monkeypatch.setenv("GROWTHEVO_DB_POOL_TIMEOUT_SECONDS", "3.5")
+    assert _default_workers() == 2
+    assert _default_limit_concurrency() == 768
+    assert _default_graceful_shutdown_seconds() == 60
+    pool = postgres_pool_config_from_env()
+    assert (pool.min_size, pool.max_size, pool.timeout_seconds) == (2, 12, 3.5)
+
+    monkeypatch.setenv("GROWTHEVO_DB_POOL_MIN_SIZE", "20")
+    monkeypatch.setenv("GROWTHEVO_DB_POOL_MAX_SIZE", "8")
+    with pytest.raises(ValueError, match="MAX_SIZE must be >= GROWTHEVO_DB_POOL_MIN_SIZE"):
+        postgres_pool_config_from_env()
+
+    monkeypatch.setenv("GROWTHEVO_WEB_WORKERS", "0")
+    with pytest.raises(ValueError, match="GROWTHEVO_WEB_WORKERS"):
+        _default_workers()
 
 
 def test_decision_request_rejects_unknown_safety_fields() -> None:
