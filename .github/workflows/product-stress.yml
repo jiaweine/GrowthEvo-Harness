@@ -57,6 +57,7 @@ jobs:
             tests/test_product_concurrency.py \
             tests/test_product_api.py \
             tests/test_product_configuration.py \
+            tests/test_product_deployment_contract.py \
             tests/test_product_agent_llm.py \
             tests/test_llm_provider_concurrency.py \
             tests/test_llm_provider_failover.py \
@@ -69,6 +70,7 @@ jobs:
         run: |
           docker run --rm \
             -e GROWTHEVO_MODE=api \
+            -e WEB_CONCURRENCY=8 \
             -e GROWTHEVO_LLM_ROUTES=openai,anthropic,gemini \
             -e OPENAI_API_KEY=test-openai-key \
             -e GROWTHEVO_OPENAI_MODEL=test-openai-snapshot \
@@ -77,7 +79,7 @@ jobs:
             -e GEMINI_API_KEY=test-gemini-key \
             -e GROWTHEVO_GEMINI_MODEL=test-gemini-snapshot \
             growthevo-api:stress \
-            python -c 'from growthevo.web.app import app; pool=app.state.llm_pool; planner=app.state.agent_planner; assert pool is not None; assert planner is not None; assert planner.client is pool; assert planner.critic is pool; assert [r.client.provider_name for r in pool.routes] == ["openai", "anthropic", "google"]; print("provider pool + agent planner activation ok")'
+            python -c 'from growthevo.web.app import app; from growthevo.web.cli import _default_workers, _default_limit_concurrency; pool=app.state.llm_pool; planner=app.state.agent_planner; assert _default_workers() == 1; assert _default_limit_concurrency() == 512; assert pool is not None; assert planner is not None; assert planner.client is pool; assert planner.critic is pool; assert [r.client.provider_name for r in pool.routes] == ["openai", "anthropic", "google"]; print("explicit HTTP capacity + provider pool + agent planner activation ok")'
       - name: Run pressure test
         shell: bash
         run: |

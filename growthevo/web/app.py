@@ -31,7 +31,7 @@ from .product_data import (
     harness_runs,
     opportunities,
 )
-from .runtime import RuntimeSettings
+from .runtime import RuntimeSettings, postgres_pool_config_from_env
 from .schemas import AgentPlanRequest, ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -200,9 +200,13 @@ def create_app() -> Any:
             or ""
         ).strip()
         try:
+            pool_config = postgres_pool_config_from_env()
             persistence_store = PostgresStore(
                 database_url,
                 seed_reference=not settings.production,
+                min_size=pool_config.min_size,
+                max_size=pool_config.max_size,
+                timeout_seconds=pool_config.timeout_seconds,
             )
         except Exception as exc:
             raise RuntimeError("configured PostgreSQL persistence could not be initialized") from exc

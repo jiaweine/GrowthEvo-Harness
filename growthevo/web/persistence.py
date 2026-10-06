@@ -75,6 +75,7 @@ _DURABLE_CORE_STATEMENTS = (
 _MIGRATIONS = (("durable_core", _DURABLE_CORE_STATEMENTS),)
 
 
+
 class PostgresStore:
     """Durable PostgreSQL state for the product surface.
 

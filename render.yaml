@@ -1,0 +1,90 @@
+# GrowthEvo production topology for Render.
+# Secret values are intentionally never committed. sync: false prompts for them
+# during Blueprint creation and keeps them managed by Render.
+services:
+  - type: web
+    name: growthevo-api
+    runtime: docker
+    region: singapore
+    plan: 1c-2g
+    numInstances: 2
+    branch: main
+    autoDeployTrigger: checksPass
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/ready
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - key: GROWTHEVO_MODE
+        value: production
+      - key: GROWTHEVO_ENV
+        value: render-production
+      - key: GROWTHEVO_CORS_ORIGINS
+        value: https://jiaweine.github.io
+      - key: GROWTHEVO_DATABASE_URL
+        fromDatabase:
+          name: growthevo-postgres
+          property: connectionPoolString
+      - key: GROWTHEVO_DB_POOL_MIN_SIZE
+        value: "1"
+      - key: GROWTHEVO_DB_POOL_MAX_SIZE
+        value: "8"
+      - key: GROWTHEVO_DB_POOL_TIMEOUT_SECONDS
+        value: "5"
+      - key: GROWTHEVO_WEB_WORKERS
+        value: "1"
+      - key: GROWTHEVO_HTTP_LIMIT_CONCURRENCY
+        value: "512"
+      - key: GROWTHEVO_HTTP_GRACEFUL_SHUTDOWN_SECONDS
+        value: "55"
+
+      # Required production identity boundary.
+      - key: GROWTHEVO_AUTH_ISSUER
+        sync: false
+      - key: GROWTHEVO_AUTH_JWKS_URL
+        sync: false
+      - key: GROWTHEVO_AUTH_AUDIENCE
+        sync: false
+
+      # Optional guarded model routes. Set a key and its pinned model together.
+      # GROWTHEVO_LLM_ROUTES may be left empty to auto-discover complete pairs.
+      - key: GROWTHEVO_LLM_ROUTES
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GROWTHEVO_OPENAI_MODEL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GROWTHEVO_ANTHROPIC_MODEL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROWTHEVO_GEMINI_MODEL
+        sync: false
+      - key: GROWTHEVO_LLM_TIMEOUT_SECONDS
+        value: "45"
+      - key: GROWTHEVO_LLM_MAX_RETRIES
+        value: "2"
+      - key: GROWTHEVO_LLM_MAX_CONCURRENCY
+        value: "32"
+      - key: GROWTHEVO_LLM_MAX_QUEUE_SIZE
+        value: "128"
+      - key: GROWTHEVO_LLM_ACQUIRE_TIMEOUT_SECONDS
+        value: "1"
+      - key: GROWTHEVO_LLM_FAILURE_THRESHOLD
+        value: "3"
+      - key: GROWTHEVO_LLM_COOLDOWN_SECONDS
+        value: "30"
+      - key: GROWTHEVO_LLM_MAX_PROVIDER_ATTEMPTS
+        value: "2"
+
+databases:
+  - name: growthevo-postgres
+    databaseName: growthevo
+    user: growthevo
+    region: singapore
+    plan: 1c-2g
+    postgresMajorVersion: "17"
+    connectionPool: pgbouncer
+    ipAllowList: []

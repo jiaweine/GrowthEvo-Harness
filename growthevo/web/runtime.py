@@ -58,6 +58,67 @@ def _configured(*names: str) -> bool:
     return any(bool(os.getenv(name, "").strip()) for name in names)
 
 
+def _bounded_int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be in [{minimum}, {maximum}]")
+    return value
+
+
+def _bounded_float_env(name: str, default: float, *, minimum: float, maximum: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be in [{minimum}, {maximum}]")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class PostgresPoolConfig:
+    min_size: int = 1
+    max_size: int = 8
+    timeout_seconds: float = 5.0
+
+    def __post_init__(self) -> None:
+        if self.min_size <= 0:
+            raise ValueError("PostgreSQL pool min_size must be positive")
+        if self.max_size < self.min_size:
+            raise ValueError("PostgreSQL pool max_size must be >= min_size")
+        if self.timeout_seconds <= 0:
+            raise ValueError("PostgreSQL pool timeout_seconds must be positive")
+
+
+def postgres_pool_config_from_env() -> PostgresPoolConfig:
+    min_size = _bounded_int_env(
+        "GROWTHEVO_DB_POOL_MIN_SIZE", 1, minimum=1, maximum=64
+    )
+    max_size = _bounded_int_env(
+        "GROWTHEVO_DB_POOL_MAX_SIZE", 8, minimum=1, maximum=256
+    )
+    if max_size < min_size:
+        raise ValueError(
+            "GROWTHEVO_DB_POOL_MAX_SIZE must be >= GROWTHEVO_DB_POOL_MIN_SIZE"
+        )
+    return PostgresPoolConfig(
+        min_size=min_size,
+        max_size=max_size,
+        timeout_seconds=_bounded_float_env(
+            "GROWTHEVO_DB_POOL_TIMEOUT_SECONDS", 5.0, minimum=0.1, maximum=60.0
+        ),
+    )
+
+
 def _environment(value: str | None) -> str:
     environment = (value or "local").strip().lower() or "local"
     if _ENVIRONMENT_RE.fullmatch(environment) is None:
