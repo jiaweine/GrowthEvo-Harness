@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -73,6 +75,63 @@ _DURABLE_CORE_STATEMENTS = (
 )
 
 _MIGRATIONS = (("durable_core", _DURABLE_CORE_STATEMENTS),)
+
+
+
+@dataclass(frozen=True, slots=True)
+class PostgresPoolConfig:
+    min_size: int = 1
+    max_size: int = 8
+    timeout_seconds: float = 5.0
+
+    def __post_init__(self) -> None:
+        if self.min_size <= 0:
+            raise ValueError("PostgreSQL pool min_size must be positive")
+        if self.max_size < self.min_size:
+            raise ValueError("PostgreSQL pool max_size must be >= min_size")
+        if self.timeout_seconds <= 0:
+            raise ValueError("PostgreSQL pool timeout_seconds must be positive")
+
+
+def _pool_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be in [{minimum}, {maximum}]")
+    return value
+
+
+def _pool_float(name: str, default: float, *, minimum: float, maximum: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be in [{minimum}, {maximum}]")
+    return value
+
+
+def postgres_pool_config_from_env() -> PostgresPoolConfig:
+    config = PostgresPoolConfig(
+        min_size=_pool_int("GROWTHEVO_DB_POOL_MIN_SIZE", 1, minimum=1, maximum=64),
+        max_size=_pool_int("GROWTHEVO_DB_POOL_MAX_SIZE", 8, minimum=1, maximum=256),
+        timeout_seconds=_pool_float(
+            "GROWTHEVO_DB_POOL_TIMEOUT_SECONDS", 5.0, minimum=0.1, maximum=60.0
+        ),
+    )
+    if config.max_size < config.min_size:
+        raise ValueError(
+            "GROWTHEVO_DB_POOL_MAX_SIZE must be >= GROWTHEVO_DB_POOL_MIN_SIZE"
+        )
+    return config
 
 
 class PostgresStore:
