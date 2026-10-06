@@ -15,18 +15,22 @@ function demoDownloadJson(filename,payload){
 }
 
 async function demoCopyText(text,label){
- try{
-  if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(text);
-  else{
-   const field=document.createElement('textarea');
-   field.value=text;field.setAttribute('readonly','');field.style.position='fixed';field.style.opacity='0';
-   document.body.appendChild(field);field.select();
-   if(!document.execCommand('copy'))throw Error('copy command rejected');
-   field.remove();
-  }
+ let copied=false;
+ let clipboardError=null;
+ if(navigator.clipboard&&window.isSecureContext){
+  try{await navigator.clipboard.writeText(text);copied=true}
+  catch(error){clipboardError=error}
+ }
+ if(!copied){
+  const field=document.createElement('textarea');
+  field.value=text;field.setAttribute('readonly','');field.style.position='fixed';field.style.opacity='0';
+  document.body.appendChild(field);field.select();
+  try{copied=Boolean(document.execCommand('copy'))}finally{field.remove()}
+ }
+ if(copied){
   document.body.dataset.lastCopy=label;
   toast(label+' 已复制');
- }catch(error){toast('复制失败：'+(error&&error.message?error.message:'browser denied clipboard access'))}
+ }else toast('复制失败：'+(clipboardError&&clipboardError.message?clipboardError.message:'browser denied clipboard access'));
 }
 
 function demoApprovalDecision(id,decision){
