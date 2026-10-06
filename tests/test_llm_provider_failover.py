@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 import threading
 import time
 from typing import Any, Mapping
@@ -42,6 +43,27 @@ class _SuccessClient:
             self.calls += 1
         await asyncio.sleep(0)
         return {"route": self.provider_name}
+
+
+class _CapacityClient(_SuccessClient):
+    def __init__(
+        self,
+        provider_name: str,
+        model: str,
+        *,
+        max_concurrency: int,
+        max_queue_size: int,
+        metrics: SimpleNamespace,
+    ) -> None:
+        super().__init__(provider_name, model)
+        self.runtime_config = SimpleNamespace(
+            max_concurrency=max_concurrency,
+            max_queue_size=max_queue_size,
+        )
+        self._metrics = metrics
+
+    def runtime_metrics(self) -> SimpleNamespace:
+        return self._metrics
 
 
 class _FailureClient(_SuccessClient):
@@ -170,6 +192,51 @@ def test_busy_primary_spills_over_without_poisoning_provider_health() -> None:
     assert metrics.provider_attempts_total == 1
     assert metrics.busy_skipped_total == 1
     assert metrics.failover_succeeded_total == 1
+
+
+def test_capacity_snapshot_aggregates_redacted_process_load() -> None:
+    primary = _CapacityClient(
+        "openai",
+        "private-model-a",
+        max_concurrency=8,
+        max_queue_size=16,
+        metrics=SimpleNamespace(
+            in_flight=8,
+            waiting=3,
+            peak_in_flight=8,
+            peak_waiting=7,
+            rejected_total=2,
+        ),
+    )
+    backup = _CapacityClient(
+        "anthropic",
+        "private-model-b",
+        max_concurrency=4,
+        max_queue_size=8,
+        metrics=SimpleNamespace(
+            in_flight=1,
+            waiting=0,
+            peak_in_flight=3,
+            peak_waiting=2,
+            rejected_total=1,
+        ),
+    )
+    pool = _pool(primary, backup)
+
+    capacity = pool.capacity_snapshot()
+
+    assert capacity.route_count == 2
+    assert capacity.observed_routes == 2
+    assert capacity.max_concurrency == 12
+    assert capacity.max_queue_size == 24
+    assert capacity.in_flight == 9
+    assert capacity.waiting == 3
+    assert capacity.peak_in_flight == 11
+    assert capacity.peak_waiting == 9
+    assert capacity.rejected_total == 3
+    assert capacity.busy_routes == 1
+    assert capacity.saturated_routes == 0
+    assert "private-model" not in repr(capacity)
 
 
 def test_provider_attempt_budget_is_bounded_and_errors_do_not_leak_messages() -> None:

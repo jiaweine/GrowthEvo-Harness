@@ -73,6 +73,10 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     assert "grant_type:'authorization_code'" in auth
     assert "AUTH_TRANSACTION_MAX_AGE_MS=10*60*1000" in auth
     assert "document.body.dataset.agentRuntime" in runtime_ui
+    assert "AI 繁忙" in runtime_ui
+    assert "llm.load_state === 'busy'" in runtime_ui
+    assert "capacity.in_flight" in runtime_ui
+    assert "capacity.max_concurrency" in runtime_ui
     assert "Data: ${dataMode}" in runtime_ui
     for route in ("/api/opportunities", "/api/experiments", "/api/decisions/recent", "/api/harness/runs", "/api/approvals/", "/api/evolution/candidates"):
         assert route in live_pages
@@ -153,7 +157,9 @@ def test_agent_composer_calls_real_api_outside_demo() -> None:
     assert "主工作区隔离" in app
     assert "void probeRuntime()" in app
     assert "setAgentAvailability('safe'" in runtime_ui
-    assert "setAgentAvailability('ai'" in runtime_ui
+    assert "llm.load_state === 'busy' ? 'busy' : 'ai'" in runtime_ui
+    assert "busy: 'AI 繁忙'" in runtime_ui
+    assert "ai: 'AI 已连接'" in runtime_ui
     assert "AGENT_API_SMOKE_PASS" in smoke
     assert "runtimeAvailability === 'ready'" in smoke
     assert "停止规划" in smoke

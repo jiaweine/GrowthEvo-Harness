@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
@@ -15,12 +16,14 @@ class _ProductAgentClient:
     provider_name = "fixture-provider"
     model = "fixture-model"
 
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(self, *, fail: bool = False, reported_waiting: int = 0) -> None:
         self.fail = fail
         self.calls = 0
         self.in_flight = 0
         self.peak_in_flight = 0
         self.closed = 0
+        self.reported_waiting = reported_waiting
+        self.runtime_config = SimpleNamespace(max_concurrency=48, max_queue_size=96)
 
     def generate(self, **_: Any) -> Mapping[str, Any]:
         raise AssertionError("product agent route must use native async generation")
@@ -57,6 +60,15 @@ class _ProductAgentClient:
             }
         finally:
             self.in_flight -= 1
+
+    def runtime_metrics(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            in_flight=self.in_flight,
+            waiting=self.reported_waiting,
+            peak_in_flight=self.peak_in_flight,
+            peak_waiting=self.reported_waiting,
+            rejected_total=0,
+        )
 
     async def aclose(self) -> None:
         self.closed += 1
@@ -109,8 +121,32 @@ def test_product_agent_uses_async_proposal_and_critic_without_execution_authorit
         assert runtime["llm"]["agent_planning"] is True
         assert runtime["llm"]["critic"] is True
         assert runtime["llm"]["metrics"]["provider_attempts_total"] == 2
+        assert runtime["llm"]["load_state"] == "ready"
+        assert runtime["llm"]["capacity"]["max_concurrency"] == 48
+        assert runtime["llm"]["capacity"]["max_queue_size"] == 96
+        assert runtime["llm"]["capacity"]["in_flight"] == 0
+        assert runtime["llm"]["capacity"]["waiting"] == 0
 
     assert route_client.closed == 1
+
+
+def test_runtime_reports_busy_agent_capacity_without_failing_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    route_client = _ProductAgentClient(reported_waiting=5)
+    app, _ = _configured_app(monkeypatch, route_client)
+
+    with TestClient(app) as client:
+        ready = client.get("/api/ready")
+        assert ready.status_code == 200
+        llm = ready.json()["llm"]
+        assert llm["healthy"] is True
+        assert llm["load_state"] == "busy"
+        assert llm["capacity"]["waiting"] == 5
+        assert llm["capacity"]["busy_routes"] == 1
+        assert llm["capacity"]["saturated_routes"] == 0
 
 
 def test_product_agent_provider_failure_returns_deterministic_plan_and_redacted_audit(

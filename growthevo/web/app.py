@@ -337,6 +337,20 @@ def create_app() -> Any:
         }
         if llm_pool is not None:
             llm_payload["metrics"] = asdict(llm_pool.metrics())
+            capacity = llm_pool.capacity_snapshot()
+            llm_payload["capacity"] = asdict(capacity)
+            if llm_available_routes <= 0:
+                llm_payload["load_state"] = "safe"
+            elif capacity.observed_routes and (
+                capacity.waiting > 0 or capacity.saturated_routes > 0
+            ):
+                llm_payload["load_state"] = "busy"
+            elif llm_available_routes < llm_summary.route_count:
+                llm_payload["load_state"] = "degraded"
+            else:
+                llm_payload["load_state"] = "ready"
+        else:
+            llm_payload["load_state"] = "inactive"
         payload["llm"] = llm_payload
         for connector in connectors:
             if connector.get("id") == "llm":

@@ -83,6 +83,29 @@ class ProviderPoolMetrics:
     busy_skipped_total: int
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderPoolCapacity:
+    """Redacted, process-local provider capacity snapshot.
+
+    Route snapshots are intentionally aggregated and omit prompts, responses,
+    credentials and model ids. The snapshot is operational rather than
+    transactional: each adapter owns its own lock, so values may move slightly
+    while this aggregate is being assembled.
+    """
+
+    route_count: int
+    observed_routes: int
+    max_concurrency: int
+    max_queue_size: int
+    in_flight: int
+    waiting: int
+    peak_in_flight: int
+    peak_waiting: int
+    rejected_total: int
+    busy_routes: int
+    saturated_routes: int
+
+
 @dataclass(slots=True)
 class _RouteState:
     consecutive_failures: int = 0
@@ -274,6 +297,59 @@ class ProviderFailoverClient:
                 circuit_skipped_total=self._circuit_skipped_total,
                 busy_skipped_total=self._busy_skipped_total,
             )
+
+    def capacity_snapshot(self) -> ProviderPoolCapacity:
+        observed_routes = 0
+        max_concurrency = 0
+        max_queue_size = 0
+        in_flight = 0
+        waiting = 0
+        peak_in_flight = 0
+        peak_waiting = 0
+        rejected_total = 0
+        busy_routes = 0
+        saturated_routes = 0
+
+        for route in self.routes:
+            runtime_metrics = getattr(route.client, "runtime_metrics", None)
+            runtime_config = getattr(route.client, "runtime_config", None)
+            if not callable(runtime_metrics) or runtime_config is None:
+                continue
+            metrics = runtime_metrics()
+            route_max_concurrency = int(getattr(runtime_config, "max_concurrency", 0))
+            route_max_queue = int(getattr(runtime_config, "max_queue_size", 0))
+            if route_max_concurrency <= 0 or route_max_queue < 0:
+                continue
+
+            observed_routes += 1
+            max_concurrency += route_max_concurrency
+            max_queue_size += route_max_queue
+            in_flight += int(metrics.in_flight)
+            waiting += int(metrics.waiting)
+            peak_in_flight += int(metrics.peak_in_flight)
+            peak_waiting += int(metrics.peak_waiting)
+            rejected_total += int(metrics.rejected_total)
+
+            route_busy = metrics.waiting > 0 or metrics.in_flight >= route_max_concurrency
+            if route_busy:
+                busy_routes += 1
+            queue_full = route_max_queue == 0 or metrics.waiting >= route_max_queue
+            if metrics.in_flight >= route_max_concurrency and queue_full:
+                saturated_routes += 1
+
+        return ProviderPoolCapacity(
+            route_count=len(self.routes),
+            observed_routes=observed_routes,
+            max_concurrency=max_concurrency,
+            max_queue_size=max_queue_size,
+            in_flight=in_flight,
+            waiting=waiting,
+            peak_in_flight=peak_in_flight,
+            peak_waiting=peak_waiting,
+            rejected_total=rejected_total,
+            busy_routes=busy_routes,
+            saturated_routes=saturated_routes,
+        )
 
     def health_snapshot(self) -> tuple[ProviderRouteHealth, ...]:
         now = time.monotonic()
