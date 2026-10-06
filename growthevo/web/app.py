@@ -31,7 +31,7 @@ from .product_data import (
     harness_runs,
     opportunities,
 )
-from .runtime import RuntimeSettings
+from .runtime import RuntimeSettings, postgres_pool_config_from_env
 from .schemas import AgentPlanRequest, ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -192,7 +192,6 @@ def create_app() -> Any:
             PersistentReferenceDecisionEngine,
             PostgresProductState,
             PostgresStore,
-            postgres_pool_config_from_env,
         )
 
         database_url = (
