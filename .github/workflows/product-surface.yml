@@ -34,6 +34,7 @@ jobs:
           for file in growthevo/web/static/*.js; do node --check "$file"; done
           node --check scripts/browser_interaction_smoke.js
           node --check scripts/browser_agent_api_smoke.js
+          node --check scripts/browser_auth_api_smoke.js
       - name: Build production container
         run: docker build -t growthevo-api:ci .
       - name: Smoke and stress the same production container
@@ -154,19 +155,29 @@ jobs:
         shell: bash
         env:
           GROWTHEVO_API_BASE: http://127.0.0.1:8765
+          GROWTHEVO_OIDC_AUTHORIZATION_ENDPOINT: https://identity.example.test/authorize
+          GROWTHEVO_OIDC_TOKEN_ENDPOINT: https://identity.example.test/token
+          GROWTHEVO_OIDC_CLIENT_ID: growthevo-browser-smoke
+          GROWTHEVO_OIDC_AUDIENCE: growthevo-api
+          GROWTHEVO_OIDC_SCOPE: openid profile email
         run: |
           set -euo pipefail
           python scripts/build_pages.py --output _site-api
           for file in _site-api/assets/*.js; do node --check "$file"; done
           cp scripts/browser_agent_api_smoke.js _site-api/assets/agent-api-smoke.js
+          cp scripts/browser_auth_api_smoke.js _site-api/assets/auth-api-smoke.js
           python - <<'PY'
           from pathlib import Path
 
           index = Path('_site-api/index.html')
           html = index.read_text(encoding='utf-8')
-          marker = '<script src="./assets/agent-api-smoke.js" defer></script>'
-          if marker not in html:
-              html = html.replace('</body>', f'{marker}\n</body>')
+          auth_script = '<script src="./assets/auth.js" defer></script>'
+          auth_smoke = '<script src="./assets/auth-api-smoke.js" defer></script>'
+          if auth_smoke not in html:
+              html = html.replace(auth_script, f'{auth_smoke}\n  {auth_script}')
+          agent_marker = '<script src="./assets/agent-api-smoke.js" defer></script>'
+          if agent_marker not in html:
+              html = html.replace('</body>', f'{agent_marker}\n</body>')
           index.write_text(html, encoding='utf-8')
           PY
           docker run --rm -d --name growthevo-api-browser -p 8765:8765 \
@@ -210,6 +221,13 @@ jobs:
           assert_live_route harness 'run_9081'
           assert_live_route approvals 'apr_281'
           assert_live_route evolution 'EV-281'
+          auth_out=/tmp/growthevo-auth-api-smoke.html
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:4174/?auth-api-smoke=1#dashboard" > "$auth_out"
+          if ! grep -Fq 'AUTH_API_SMOKE_PASS' "$auth_out"; then
+            echo 'GrowthEvo Auth API browser smoke failed:' >&2
+            grep -F 'AUTH_API_SMOKE_' "$auth_out" >&2 || cat "$auth_out" >&2
+            exit 1
+          fi
           agent_out=/tmp/growthevo-agent-api-smoke.html
           "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:4174/?agent-api-smoke=1#dashboard" > "$agent_out"
           if ! grep -Fq 'AGENT_API_SMOKE_PASS' "$agent_out"; then
