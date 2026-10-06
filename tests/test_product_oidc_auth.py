@@ -55,6 +55,82 @@ def _auth(jwk, *, fetcher=None):
     )
 
 
+def test_readiness_health_does_not_refresh_expired_jwks() -> None:
+    _, jwk = _key("primary")
+    calls: list[str] = []
+
+    def fetcher(url: str):
+        calls.append(url)
+        if len(calls) == 1:
+            return {"keys": [jwk]}
+        raise AuthenticationUnavailable("identity provider offline")
+
+    auth = _auth(jwk, fetcher=fetcher)
+    auth._expires_monotonic = 0.0
+
+    assert auth.readiness_healthy() is True
+    assert calls == [JWKS_URL]
+    assert auth.healthy() is False
+    assert calls == [JWKS_URL, JWKS_URL]
+
+
+def test_expired_jwks_request_still_fails_closed_when_idp_is_unavailable() -> None:
+    private_key, jwk = _key("primary")
+    calls: list[str] = []
+
+    def fetcher(url: str):
+        calls.append(url)
+        if len(calls) == 1:
+            return {"keys": [jwk]}
+        raise AuthenticationUnavailable("identity provider offline")
+
+    auth = _auth(jwk, fetcher=fetcher)
+    auth._expires_monotonic = 0.0
+
+    with pytest.raises(AuthenticationUnavailable):
+        auth.verify(_token(private_key, "primary"))
+
+    assert calls == [JWKS_URL, JWKS_URL]
+
+
+def test_api_readiness_uses_local_auth_state_without_active_idp_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    httpx = pytest.importorskip("httpx")
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from growthevo.web.app import create_app
+
+    class LocalReadyAuthenticator:
+        backend = "oidc-jwks"
+
+        def __init__(self, **_: object) -> None:
+            self.readiness_calls = 0
+
+        def readiness_healthy(self) -> bool:
+            self.readiness_calls += 1
+            return True
+
+        def healthy(self) -> bool:
+            raise AssertionError("platform readiness must not actively probe the IdP")
+
+    monkeypatch.setattr(auth_module, "OidcJwksAuthenticator", LocalReadyAuthenticator)
+    monkeypatch.setenv("GROWTHEVO_MODE", "api")
+    monkeypatch.setenv("GROWTHEVO_AUTH_ISSUER", ISSUER)
+    monkeypatch.setenv("GROWTHEVO_AUTH_JWKS_URL", JWKS_URL)
+    monkeypatch.setenv("GROWTHEVO_AUTH_AUDIENCE", AUDIENCE)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("GROWTHEVO_DATABASE_URL", raising=False)
+
+    with TestClient(create_app()) as client:
+        ready = client.get("/api/ready")
+        runtime = client.get("/api/system/runtime")
+
+    assert ready.status_code == 200
+    assert ready.json()["authentication"]["healthy"] is True
+    assert runtime.json()["authentication"]["healthy"] is True
+
+
 def test_valid_rs256_bearer_is_verified() -> None:
     private_key, jwk = _key("primary")
     auth = _auth(jwk)
