@@ -39,17 +39,19 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
     index = (STATIC / "index.html").read_text(encoding="utf-8")
+    auth = (STATIC / "auth.js").read_text(encoding="utf-8")
     runtime_ui = (STATIC / "runtime-ui.js").read_text(encoding="utf-8")
     live_pages = (STATIC / "live-pages.js").read_text(encoding="utf-8")
     assert "DOMContentLoaded" not in pages
     assert "document.addEventListener('DOMContentLoaded',init)" in app
     assert "fidelity.css" in styles
     assert "product-pages.css" in styles
+    assert "auth.js" in index
     assert "runtime-ui.js" in index
     assert "product-data.js" in index
     assert "product-advanced-data.js" in index
     assert "live-pages.js" in index
-    assert index.index("data.js") < index.index("runtime-ui.js") < index.index("product-data.js")
+    assert index.index("data.js") < index.index("auth.js") < index.index("runtime-ui.js") < index.index("product-data.js")
     assert index.index("product-data.js") < index.index("product-advanced-data.js") < index.index("pages.js")
     assert index.index("pages.js") < index.index("live-pages.js") < index.index("app.js")
     assert "不会把 synthetic demo 数据伪装成真实生产数据" in runtime_ui
@@ -60,6 +62,16 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     assert "timeoutMs = RUNTIME_API_TIMEOUT_MS" in runtime_ui
     assert "GROWTHEVO_API_TIMEOUT" in runtime_ui
     assert "GROWTHEVO_API_CANCELLED" in runtime_ui
+    assert "Authorization" in runtime_ui
+    assert "GROWTHEVO_AUTH_REQUIRED" in runtime_ui
+    assert "renderAuthRequired" in runtime_ui
+    assert "sessionStorage" in auth
+    assert "localStorage" not in auth
+    assert "client_secret" not in auth
+    assert "crypto.subtle.digest('SHA-256'" in auth
+    assert "code_challenge_method','S256'" in auth
+    assert "grant_type:'authorization_code'" in auth
+    assert "AUTH_TRANSACTION_MAX_AGE_MS=10*60*1000" in auth
     assert "document.body.dataset.agentRuntime" in runtime_ui
     assert "Data: ${dataMode}" in runtime_ui
     for route in ("/api/opportunities", "/api/experiments", "/api/decisions/recent", "/api/harness/runs", "/api/approvals/", "/api/evolution/candidates"):
@@ -85,7 +97,7 @@ def test_core_product_workbenches_are_real_routes() -> None:
 def test_pages_builder_packages_all_product_assets() -> None:
     build_script = (ROOT / "scripts" / "build_pages.py").read_text(encoding="utf-8")
     service_worker = (STATIC / "service-worker.js").read_text(encoding="utf-8")
-    for asset in ("product-pages.css", "runtime-ui.js", "product-data.js", "product-advanced-data.js", "live-pages.js"):
+    for asset in ("product-pages.css", "auth.js", "runtime-ui.js", "product-data.js", "product-advanced-data.js", "live-pages.js"):
         assert asset in build_script
         assert asset in service_worker
     assert "isApi(url)" in service_worker
@@ -109,6 +121,21 @@ def test_mutable_dashboard_fields_are_html_escaped() -> None:
     assert "esc(liveText(x.title))" in live_pages
     assert "esc(liveText(x.task))" in live_pages
     assert "esc(liveText(x.problem))" in live_pages
+
+
+def test_browser_auth_smoke_covers_bearer_and_401_reauthentication() -> None:
+    auth = (STATIC / "auth.js").read_text(encoding="utf-8")
+    runtime_ui = (STATIC / "runtime-ui.js").read_text(encoding="utf-8")
+    smoke = (ROOT / "scripts" / "browser_auth_api_smoke.js").read_text(encoding="utf-8")
+    assert "authAuthorizationValue()" in runtime_ui
+    assert "authClearSession('unauthorized')" in runtime_ui
+    assert "runtimeAvailability = 'auth_required'" in runtime_ui
+    assert "登录生产工作区" in runtime_ui
+    assert "authProfileMenuItems" in auth
+    assert "退出生产工作区" in auth
+    assert "AUTH_API_SMOKE_PASS" in smoke
+    assert "browser-smoke-token" in smoke
+    assert "GROWTHEVO_AUTH_REQUIRED" in smoke
 
 
 def test_agent_composer_calls_real_api_outside_demo() -> None:
