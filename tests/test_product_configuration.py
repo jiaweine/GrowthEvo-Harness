@@ -19,7 +19,7 @@ from growthevo.web.cli import (
     _port,
 )
 from growthevo.web.decisioning import ACTION_REGISTRY
-from growthevo.web.persistence import postgres_pool_config_from_env
+from growthevo.web.runtime import postgres_pool_config_from_env
 from growthevo.web.schemas import ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest, KNOWN_ACTION_IDS
 from scripts.build_pages import normalize_api_base, normalize_oidc_config
 
