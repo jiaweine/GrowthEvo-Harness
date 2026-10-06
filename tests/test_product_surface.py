@@ -134,6 +134,43 @@ def test_api_mode_live_workbench_smoke_covers_all_reference_routes() -> None:
     assert "Reference UI Fixture" in workflow
 
 
+def test_demo_product_actions_have_real_browser_effects() -> None:
+    pages = (STATIC / "pages.js").read_text(encoding="utf-8")
+    views = (STATIC / "views.js").read_text(encoding="utf-8")
+    smoke = (ROOT / "scripts" / "browser_interaction_smoke.js").read_text(encoding="utf-8")
+
+    assert 'data-toast=' not in pages
+    assert 'data-toast=' not in views
+    assert 'data-candidate-id="${esc(x.id)}"' not in pages
+    assert "data-candidate-id=\"'+esc(x.id)+'\"" in pages
+    for marker in (
+        "demoDownloadJson",
+        "demoCopyText",
+        "sessionStorage.setItem('growthevo.demo.campaign-draft.v1'",
+        "data-demo-action=\"approval\"",
+        "data-demo-action=\"failure-miner\"",
+        "data-demo-action=\"deployment-check\"",
+        "data-campaign-more",
+    ):
+        assert marker in pages or marker in views
+
+    for marker in (
+        "growthevo-evidence-report.json",
+        "growthevo-trace-run-9081.json",
+        "growthevo-connector-registry.json",
+        "lastDemoSave",
+        "lastExperimentDraft",
+        "lastPreflight",
+        "lastCopy",
+        "lastApproval",
+        "lastFailureMiner",
+        "lastEvolutionDecision",
+        "lastDeploymentCheck",
+        "campaign overflow menu did not open",
+    ):
+        assert marker in smoke
+
+
 def test_pages_builder_packages_all_product_assets() -> None:
     build_script = (ROOT / "scripts" / "build_pages.py").read_text(encoding="utf-8")
     service_worker = (STATIC / "service-worker.js").read_text(encoding="utf-8")

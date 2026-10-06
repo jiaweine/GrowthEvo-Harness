@@ -3,6 +3,7 @@
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const failures = [];
+  try { Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async text => { window.__interactionClipboard = text; }}}); } catch (_) { document.execCommand = command => command === 'copy'; }
   const check = (condition, message) => { if (!condition) failures.push(message); };
   const click = selector => {
     const element = document.querySelector(selector);
@@ -68,6 +69,85 @@
     click('.quick-card[data-go="opportunities"]');
     await sleep(60);
     check(location.hash === '#opportunities', 'quick action did not navigate');
+
+    click('[data-demo-action="evidence-detail"]');
+    check(!document.querySelector('#utility-popover').hidden, 'evidence detail menu closed immediately');
+    check(document.querySelector('#utility-popover').textContent.includes('证据详情'), 'evidence detail did not open');
+    document.querySelector('#utility-popover').hidden = true;
+
+    click('[data-route="evidence"]');
+    await sleep(60);
+    click('[data-demo-action="evidence-export"]');
+    check(document.body.dataset.lastDownload === 'growthevo-evidence-report.json', 'evidence report did not download');
+
+    go('campaignStudio');
+    await sleep(60);
+    click('[data-demo-action="save-campaign-draft"]');
+    check(document.body.dataset.lastDemoSave === 'CAM-842', 'campaign draft was not saved');
+    check(Boolean(sessionStorage.getItem('growthevo.demo.campaign-draft.v1')), 'saved campaign draft missing from sessionStorage');
+
+    go('experiments');
+    await sleep(60);
+    const experimentCount = DEMO.experiments.length;
+    click('[data-demo-action="create-experiment"]');
+    await sleep(40);
+    check(Boolean(document.body.dataset.lastExperimentDraft), 'experiment draft id was not recorded');
+    check(DEMO.experiments.length === experimentCount + 1, 'experiment draft did not mutate demo state');
+    check(document.querySelector('#view').textContent.includes('新实验草稿'), 'experiment draft did not render');
+
+    go('execution');
+    await sleep(60);
+    click('[data-demo-action="preflight"]');
+    check(document.body.dataset.lastPreflight === 'pass', 'preflight did not run');
+    check(document.querySelector('#demo-preflight-result').textContent.includes('PASS'), 'preflight result did not render');
+
+    go('realtime');
+    await sleep(60);
+    click('[data-demo-action="realtime-copy"]');
+    await sleep(20);
+    check(document.body.dataset.lastCopy === 'Decision API sample', 'Decision API sample did not copy');
+
+    click('[data-route="harness"]');
+    await sleep(60);
+    click('[data-demo-action="trace-export"]');
+    check(document.body.dataset.lastDownload === 'growthevo-trace-run-9081.json', 'trace bundle did not download');
+
+    go('approvals');
+    await sleep(60);
+    const approval = click('[data-demo-action="approval"][data-decision="approve_5"]');
+    const approvalId = approval && approval.dataset.approvalId;
+    await sleep(40);
+    check(document.body.dataset.lastApproval === approvalId + ':approve_5', 'approval decision did not mutate demo state');
+    check(document.querySelector('#view').textContent.includes('已决定 · approve_5'), 'approval decision did not render');
+
+    go('evolution');
+    await sleep(60);
+    click('[data-demo-action="failure-miner"]');
+    await sleep(40);
+    check(document.body.dataset.lastFailureMiner === 'EV-DEMO', 'failure miner did not create a candidate');
+    check(document.querySelector('#view').textContent.includes('EV-DEMO'), 'mined candidate did not render');
+    click('[data-demo-action="reject-candidate"][data-candidate-id="EV-DEMO"]');
+    await sleep(40);
+    check(document.body.dataset.lastEvolutionDecision === 'EV-DEMO:rejected', 'evolution reject did not mutate state');
+    check(document.querySelector('#view').textContent.includes('Rejected'), 'rejected candidate status did not render');
+
+    click('[data-route="integrations"]');
+    await sleep(60);
+    click('[data-demo-action="connector-export"]');
+    check(document.body.dataset.lastDownload === 'growthevo-connector-registry.json', 'connector registry did not download');
+
+    click('[data-route="settings"]');
+    await sleep(60);
+    click('[data-demo-action="deployment-check"]');
+    check(document.body.dataset.lastDeploymentCheck === 'pass', 'deployment check did not run');
+    check(document.querySelector('#demo-deployment-result').textContent.includes('PASS'), 'deployment check result did not render');
+
+    click('[data-route="dashboard"]');
+    await sleep(60);
+    click('#dashboard-strategies .row-more');
+    check(!document.querySelector('#utility-popover').hidden, 'campaign overflow menu closed immediately');
+    check(document.querySelector('#utility-popover').textContent.includes('查看 Evidence'), 'campaign overflow menu did not open');
+    document.querySelector('#utility-popover').hidden = true;
 
     click('[data-route="agent"]');
     click('#agent-close');
