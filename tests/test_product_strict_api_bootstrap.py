@@ -40,5 +40,7 @@ def test_api_bootstrap_cannot_silently_fall_back_to_demo() -> None:
     assert "catch (" not in api_impl
     assert "catch(" not in api_impl
     assert "API unavailable; using demo mode" not in api_impl
-    assert "throw Error(`HTTP ${response.status}:" in api_impl
+    assert "const error = Error(`HTTP ${response.status}:" in api_impl
+    assert "throw error;" in api_impl
+    assert "error.code = 'GROWTHEVO_AUTH_REQUIRED'" in api_impl
     assert "return await response.json();" in api_impl
