@@ -29,7 +29,7 @@ def test_render_blueprint_is_fail_closed_and_capacity_explicit() -> None:
     assert "key: GROWTHEVO_CORS_ORIGINS\n        value: https://jiaweine.github.io" in blueprint
     assert "key: GROWTHEVO_DATABASE_URL" in blueprint
     assert "fromDatabase:" in blueprint
-    assert "property: connectionString" in blueprint
+    assert "property: connectionPoolString" in blueprint
 
     for key in (
         "GROWTHEVO_AUTH_ISSUER",
