@@ -275,13 +275,18 @@ def create_app() -> Any:
         if authenticator is None:
             return True
         try:
-            return bool(authenticator.healthy())
+            # Readiness must be local and bounded. OIDC initialization already
+            # fetched JWKS fail-fast; bearer verification owns later refreshes and
+            # returns 503 fail-closed if the IdP is unavailable.
+            return bool(authenticator.readiness_healthy())
         except Exception:
             return False
 
     def runtime_ready() -> bool:
         # LLMs are intentionally not a readiness dependency: the guarded planner
         # fails closed to deterministic policy when every model route is unavailable.
+        # Authentication readiness is also local-only so a remote IdP incident
+        # cannot turn Render's platform health probe into an instance restart loop.
         return settings.ready and persistence_healthy() and authentication_healthy()
 
     def runtime_payload() -> dict[str, object]:
