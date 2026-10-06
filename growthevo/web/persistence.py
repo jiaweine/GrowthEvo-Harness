@@ -120,18 +120,19 @@ def _pool_float(name: str, default: float, *, minimum: float, maximum: float) ->
 
 
 def postgres_pool_config_from_env() -> PostgresPoolConfig:
-    config = PostgresPoolConfig(
-        min_size=_pool_int("GROWTHEVO_DB_POOL_MIN_SIZE", 1, minimum=1, maximum=64),
-        max_size=_pool_int("GROWTHEVO_DB_POOL_MAX_SIZE", 8, minimum=1, maximum=256),
+    min_size = _pool_int("GROWTHEVO_DB_POOL_MIN_SIZE", 1, minimum=1, maximum=64)
+    max_size = _pool_int("GROWTHEVO_DB_POOL_MAX_SIZE", 8, minimum=1, maximum=256)
+    if max_size < min_size:
+        raise ValueError(
+            "GROWTHEVO_DB_POOL_MAX_SIZE must be >= GROWTHEVO_DB_POOL_MIN_SIZE"
+        )
+    return PostgresPoolConfig(
+        min_size=min_size,
+        max_size=max_size,
         timeout_seconds=_pool_float(
             "GROWTHEVO_DB_POOL_TIMEOUT_SECONDS", 5.0, minimum=0.1, maximum=60.0
         ),
     )
-    if config.max_size < config.min_size:
-        raise ValueError(
-            "GROWTHEVO_DB_POOL_MAX_SIZE must be >= GROWTHEVO_DB_POOL_MIN_SIZE"
-        )
-    return config
 
 
 class PostgresStore:
