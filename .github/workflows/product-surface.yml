@@ -35,6 +35,7 @@ jobs:
           node --check scripts/browser_interaction_smoke.js
           node --check scripts/browser_agent_api_smoke.js
           node --check scripts/browser_auth_api_smoke.js
+          node --check scripts/browser_live_workbench_smoke.js
       - name: Build production container
         run: docker build -t growthevo-api:ci .
       - name: Smoke and stress the same production container
@@ -166,6 +167,7 @@ jobs:
           for file in _site-api/assets/*.js; do node --check "$file"; done
           cp scripts/browser_agent_api_smoke.js _site-api/assets/agent-api-smoke.js
           cp scripts/browser_auth_api_smoke.js _site-api/assets/auth-api-smoke.js
+          cp scripts/browser_live_workbench_smoke.js _site-api/assets/live-workbench-smoke.js
           python - <<'PY'
           from pathlib import Path
 
@@ -178,6 +180,9 @@ jobs:
           agent_marker = '<script src="./assets/agent-api-smoke.js" defer></script>'
           if agent_marker not in html:
               html = html.replace('</body>', f'{agent_marker}\n</body>')
+          live_marker = '<script src="./assets/live-workbench-smoke.js" defer></script>'
+          if live_marker not in html:
+              html = html.replace('</body>', f'{live_marker}\n</body>')
           index.write_text(html, encoding='utf-8')
           PY
           docker run --rm -d --name growthevo-api-browser -p 8765:8765 \
@@ -215,6 +220,13 @@ jobs:
               exit 1
             fi
           }
+          assert_live_route campaigns 'Campaign Registry'
+          assert_live_route campaignStudio 'Campaign Draft'
+          assert_live_route evidence 'Locked Evidence'
+          assert_live_route execution 'Execution Boundary'
+          assert_live_route data 'Recent Decision Log'
+          assert_live_route integrations 'Runtime Connector Registry'
+          assert_live_route settings 'Runtime Configuration'
           assert_live_route opportunities 'Live API'
           assert_live_route experiments 'Live API'
           assert_live_route realtime 'free_shipping'
@@ -226,6 +238,17 @@ jobs:
           if ! grep -Fq 'AUTH_API_SMOKE_PASS' "$auth_out"; then
             echo 'GrowthEvo Auth API browser smoke failed:' >&2
             grep -F 'AUTH_API_SMOKE_' "$auth_out" >&2 || cat "$auth_out" >&2
+            exit 1
+          fi
+          live_out=/tmp/growthevo-live-workbench-smoke.html
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=10000 --dump-dom "http://127.0.0.1:4174/?live-workbench-smoke=1#dashboard" > "$live_out"
+          if ! grep -Fq 'LIVE_WORKBENCH_SMOKE_PASS' "$live_out"; then
+            echo 'GrowthEvo live workbench browser smoke failed:' >&2
+            grep -F 'LIVE_WORKBENCH_SMOKE_' "$live_out" >&2 || cat "$live_out" >&2
+            exit 1
+          fi
+          if grep -Fq 'Reference UI Fixture' "$live_out"; then
+            echo 'API mode still exposed a Reference UI Fixture' >&2
             exit 1
           fi
           agent_out=/tmp/growthevo-agent-api-smoke.html
