@@ -36,6 +36,11 @@ jobs:
       - name: Build static Pages artifact
         env:
           GROWTHEVO_API_BASE: ${{ vars.GROWTHEVO_API_BASE }}
+          GROWTHEVO_OIDC_AUTHORIZATION_ENDPOINT: ${{ vars.GROWTHEVO_OIDC_AUTHORIZATION_ENDPOINT }}
+          GROWTHEVO_OIDC_TOKEN_ENDPOINT: ${{ vars.GROWTHEVO_OIDC_TOKEN_ENDPOINT }}
+          GROWTHEVO_OIDC_CLIENT_ID: ${{ vars.GROWTHEVO_OIDC_CLIENT_ID }}
+          GROWTHEVO_OIDC_AUDIENCE: ${{ vars.GROWTHEVO_OIDC_AUDIENCE }}
+          GROWTHEVO_OIDC_SCOPE: ${{ vars.GROWTHEVO_OIDC_SCOPE }}
         run: python scripts/build_pages.py --output _site
       - name: Validate browser JavaScript
         run: |
