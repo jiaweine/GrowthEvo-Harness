@@ -1,3 +1,10 @@
+const fixtureCampaignsPage=campaigns;
+const fixtureCampaignStudioPage=campaignStudio;
+const fixtureEvidencePage=evidence;
+const fixtureExecutionPage=execution;
+const fixtureDataCenterPage=dataCenter;
+const fixtureIntegrationsPage=integrations;
+const fixtureSettingsPage=settings;
 const fixtureOpportunitiesPage=opportunities;
 const fixtureExperimentsPage=experiments;
 const fixtureRealtimePage=realtime;
@@ -96,5 +103,179 @@ evolution=async function liveEvolution(){
  if(useDemo)return fixtureEvolutionPage();
  const rows=await api('/api/evolution/candidates');const items=Array.isArray(rows)?rows:[];
  $('#view').innerHTML=`${head('Evolution Lab','服务端 Evolution candidates：候选改进必须沿 Replay → Eval → Shadow → Canary → Promote 边界演进。')}${sectionNav(RUNTIME_NAV,'evolution')}${items.length?`<div class="evolution-list">${items.map(x=>`<div class="card evo-card"><div class="evo-head"><div><strong>${esc(liveText(x.id))}</strong><div class="evo-source">Source runs: ${esc(liveText(x.source_runs))}</div></div>${liveBadge(x.status)}</div><div class="evo-problem"><strong>问题</strong><br>${esc(liveText(x.problem))}<br><br><strong>候选改进</strong><br>${esc(liveText(x.candidate))}</div><div class="eval-grid">${Object.entries(x.offline_replay||{}).map(([key,value])=>`<div class="eval-cell"><span>${esc(key)}</span><strong>${esc(liveText(value))}</strong></div>`).join('')}</div><div class="promotion-line"><div class="promotion-stage done">Offline Replay</div><span class="promotion-arrow">→</span><div class="promotion-stage done">Eval</div><span class="promotion-arrow">→</span><div class="promotion-stage ${x.shadow==='PASS'?'done':''}">Shadow</div><span class="promotion-arrow">→</span><div class="promotion-stage active">Canary Gate</div><span class="promotion-arrow">→</span><div class="promotion-stage">Promote</div></div></div>`).join('')}</div>`:emptyState('暂无进化候选','Evolution API 当前没有返回 candidate。')}`;
+ bindProductActions();
+};
+
+
+campaigns=async function liveCampaigns(){
+ if(useDemo)return fixtureCampaignsPage();
+ const raw=await api('/api/campaigns');
+ const items=Array.isArray(raw)?raw:[];
+ const drafts=items.filter(item=>String(item.status||'').toLowerCase()==='draft').length;
+ const nonDraft=items.length-drafts;
+ const summary='<div class="stat-strip">'
+  +'<div class="stat-box"><span>Campaign records</span><strong>'+items.length+'</strong><em>Live API</em></div>'
+  +'<div class="stat-box"><span>Draft</span><strong>'+drafts+'</strong><em>等待证据与审批</em></div>'
+  +'<div class="stat-box"><span>Non-draft</span><strong>'+nonDraft+'</strong><em>服务端当前状态</em></div>'
+  +'<div class="stat-box"><span>Source</span><strong>Server</strong><em>不使用浏览器 fixture</em></div>'
+  +'</div>';
+ const content=items.length
+  ?'<div class="card table-card"><div class="surface-title"><div><h2>Campaign Registry</h2><p>当前 API 返回的 Campaign 列表。</p></div><span class="soft-badge green">Live API</span></div>'+campaignsTable(items)+'</div>'
+  :emptyState('暂无 Campaign','当前 API 尚未创建 Campaign。');
+ $('#view').innerHTML=head('策略与执行','服务端 Campaign state：草稿、目标、候选动作与持久化状态来自当前 API。','<button class="primary" data-go="campaignStudio">＋ 新建 Campaign Draft</button>')
+  +sectionNav(STRATEGY_NAV,'campaigns')+summary+content;
+ bindProductActions();
+};
+
+campaignStudio=async function liveCampaignStudio(){
+ if(useDemo)return fixtureCampaignStudioPage();
+ const rawActions=await api('/api/actions');
+ const actions=Array.isArray(rawActions)?rawActions:[];
+ const actionInputs=actions.map(item=>{
+  const actionId=liveText(item.action_id);
+  const control=actionId==='NO_TREATMENT';
+  const checked=control||actionId==='free_shipping';
+  return '<label class="token '+(control?'control':'action')+'" style="cursor:pointer">'
+   +'<input type="checkbox" data-live-campaign-action value="'+esc(actionId)+'" '+(checked?'checked ':'')+(control?'disabled':'')+'/> '
+   +esc(liveText(item.label,actionId))+'</label>';
+ }).join('');
+ $('#view').innerHTML=head('Campaign Studio','创建真实服务端 Campaign Draft。此步骤只写入草稿，不产生外部营销副作用。')
+  +sectionNav(STRATEGY_NAV,'campaignStudio')
+  +'<form id="live-campaign-form" class="studio-shell">'
+  +'<div class="studio-canvas">'
+  +'<div class="card form-section"><div class="surface-title"><div><h2>Campaign Draft</h2><p>字段直接匹配 /api/campaigns/draft contract。</p></div><span class="soft-badge green">Live API</span></div>'
+  +'<div class="form-grid">'
+  +'<div class="field"><label for="live-campaign-name">Name</label><input id="live-campaign-name" class="field-value" style="width:100%;box-sizing:border-box" required minlength="2" maxlength="200" value="新用户增量计划"/></div>'
+  +'<div class="field"><label for="live-campaign-budget">Budget</label><input id="live-campaign-budget" class="field-value" style="width:100%;box-sizing:border-box" required type="number" min="0" step="1" value="500000"/></div>'
+  +'<div class="field"><label for="live-campaign-goal">Goal</label><textarea id="live-campaign-goal" class="field-value multi" style="width:100%;box-sizing:border-box" required minlength="3" maxlength="1000">提高新用户 7 日首购真实增量</textarea></div>'
+  +'<div class="field"><label for="live-campaign-audience">Audience</label><textarea id="live-campaign-audience" class="field-value multi" style="width:100%;box-sizing:border-box" required minlength="2" maxlength="500">新用户 0–7 天未首购</textarea></div>'
+  +'</div></div>'
+  +'<div class="card form-section"><div class="surface-title"><div><h2>Candidate Actions</h2><p>NO_TREATMENT 固定保留；其它动作来自服务端 Action Registry。</p></div></div><div class="token-row">'+(actionInputs||'<span class="soft-badge">No server actions</span>')+'</div></div>'
+  +'</div>'
+  +'<div class="card evidence-panel"><div class="surface-title"><div><h2>Write Boundary</h2><p>提交只创建 Draft，不执行外部 side effect。</p></div><span class="soft-badge green">Draft only</span></div>'
+  +'<div class="evidence-row"><span>Endpoint</span><strong>/api/campaigns/draft</strong></div>'
+  +'<div class="evidence-row"><span>NO_TREATMENT</span><strong>Required</strong></div>'
+  +'<div class="evidence-row"><span>External execution</span><strong>Disabled</strong></div>'
+  +'<button id="live-campaign-submit" class="primary" type="submit" style="width:100%;margin-top:14px">创建 Campaign Draft</button></div>'
+  +'</form>';
+ bindProductActions();
+ const form=$('#live-campaign-form');
+ if(form)form.onsubmit=async event=>{
+  event.preventDefault();
+  const submit=$('#live-campaign-submit');
+  if(submit)submit.disabled=true;
+  try{
+   const selected=Array.from(document.querySelectorAll('[data-live-campaign-action]:checked')).map(input=>input.value).filter(Boolean);
+   const candidateIds=[...new Set(['NO_TREATMENT',...selected])];
+   const created=await api('/api/campaigns/draft',{
+    method:'POST',
+    body:JSON.stringify({
+     name:$('#live-campaign-name').value.trim(),
+     goal:$('#live-campaign-goal').value.trim(),
+     audience:$('#live-campaign-audience').value.trim(),
+     budget:Number($('#live-campaign-budget').value),
+     candidate_action_ids:candidateIds,
+    }),
+   });
+   document.body.dataset.lastCampaignDraft=liveText(created&&created.id,'created');
+   state.dashboard=null;
+   toast('Campaign Draft '+liveText(created&&created.id)+' 已创建');
+   go('campaigns');
+  }catch(error){
+   toast('Campaign Draft 创建失败：'+(error&&error.message?error.message:'unknown error'));
+  }finally{
+   if(submit)submit.disabled=false;
+  }
+ };
+};
+
+evidence=async function liveEvidence(){
+ if(useDemo)return fixtureEvidencePage();
+ const raw=await api('/api/evidence');
+ const items=Array.isArray(raw)?raw:[];
+ const cards=items.map(item=>{
+  const metrics=(Array.isArray(item.metrics)?item.metrics:[]).map(metric=>'<div><span>'+esc(liveText(metric.label))+'</span><strong>'+esc(liveText(metric.value))+'</strong></div>').join('');
+  return '<article class="experiment-card"><div class="experiment-head"><div><strong>'+esc(liveText(item.name))+'</strong><div class="evo-source">'+esc(liveText(item.id))+' · '+esc(liveText(item.kind))+'</div></div><span class="soft-badge green">'+esc(liveText(item.winner))+'</span></div>'
+   +'<div class="result-box">'+metrics+'</div><p style="font-size:8px;color:#7d8899;word-break:break-all">commit · '+esc(liveText(item.commit))+'</p></article>';
+ }).join('');
+ $('#view').innerHTML=head('智能与证据','服务端锁定证据集合；结果、候选与 commit 身份从 API 读取。')
+  +sectionNav(EVIDENCE_NAV,'evidence')
+  +(items.length?'<div class="card surface-card"><div class="surface-title"><div><h2>Locked Evidence</h2><p>当前 API 暴露的可审计证据摘要。</p></div><span class="soft-badge green">Live API</span></div><div class="experiment-list">'+cards+'</div></div>':emptyState('暂无锁定证据','Evidence API 当前没有返回证据集合。'));
+ bindProductActions();
+};
+
+execution=async function liveExecution(){
+ if(useDemo)return fixtureExecutionPage();
+ const values=await Promise.all([api('/api/system/runtime'),api('/api/campaigns'),api('/api/approvals')]);
+ const runtime=values[0]||{};
+ const campaigns=Array.isArray(values[1])?values[1]:[];
+ const approvals=Array.isArray(values[2])?values[2]:[];
+ const pending=approvals.filter(item=>String(item.status||'pending')==='pending').length;
+ const sideEffects=Boolean(runtime.side_effects_enabled);
+ const summary='<div class="stat-strip">'
+  +'<div class="stat-box"><span>Execution mode</span><strong>'+esc(liveText(runtime.execution_mode))+'</strong><em>Live runtime</em></div>'
+  +'<div class="stat-box"><span>External side effects</span><strong>'+(sideEffects?'Enabled':'Disabled')+'</strong><em>'+(sideEffects?'受控执行已启用':'不会发送外部动作')+'</em></div>'
+  +'<div class="stat-box"><span>Campaign records</span><strong>'+campaigns.length+'</strong><em>服务端状态</em></div>'
+  +'<div class="stat-box"><span>Pending approvals</span><strong>'+pending+'</strong><em>治理边界</em></div>'
+  +'</div>';
+ const boundary='<div class="card surface-card"><div class="surface-title"><div><h2>Execution Boundary</h2><p>'
+  +(sideEffects?'外部执行已启用，仍受 approval / policy gate 约束。':'当前部署明确为 reference-only；Campaign 与审批可写，但不会产生外部营销副作用。')
+  +'</p></div><span class="soft-badge '+(sideEffects?'green':'amber')+'">'+(sideEffects?'Side effects enabled':'Reference only')+'</span></div></div>';
+ $('#view').innerHTML=head('执行中心','读取当前服务端执行边界；没有启用的外部 side effect 不会被伪装成 Running。')
+  +sectionNav(STRATEGY_NAV,'execution')+summary+boundary
+  +(campaigns.length?'<div class="card table-card" style="margin-top:10px">'+campaignsTable(campaigns)+'</div>':'');
+ bindProductActions();
+};
+
+dataCenter=async function liveDataCenter(){
+ if(useDemo)return fixtureDataCenterPage();
+ const values=await Promise.all([api('/api/system/runtime'),api('/api/decisions/recent?limit=20')]);
+ const runtime=values[0]||{};
+ const rows=Array.isArray(values[1])?values[1]:[];
+ const persistence=runtime.persistence||{};
+ const body=rows.map(item=>'<tr><td><code>'+esc(liveText(item.decision_id))+'</code></td><td>'+esc(liveText(item.placement))+'</td><td>'+esc(liveText(item.action_id))+'</td><td>'+esc(liveNumber(item.propensity)===null?'—':Number(item.propensity).toFixed(4))+'</td><td>'+esc(liveText(item.policy_id))+'</td><td>'+esc(liveText(item.evidence_tier))+'</td></tr>').join('');
+ $('#view').innerHTML=head('数据中心','当前运行时的数据边界、持久化后端与最近 Decision Log。')
+  +'<div class="stat-strip">'
+  +'<div class="stat-box"><span>Data mode</span><strong>'+esc(liveText(runtime.data_mode))+'</strong><em>Live runtime</em></div>'
+  +'<div class="stat-box"><span>Persistence</span><strong>'+esc(liveText(persistence.backend))+'</strong><em>'+(persistence.active?'active':'inactive')+'</em></div>'
+  +'<div class="stat-box"><span>Recent decisions</span><strong>'+rows.length+'</strong><em>最多 20 条</em></div>'
+  +'<div class="stat-box"><span>Environment</span><strong>'+esc(liveText(runtime.environment))+'</strong><em>'+esc(liveText(runtime.mode))+'</em></div>'
+  +'</div>'
+  +'<div class="card surface-card table-scroll"><div class="surface-title"><div><h2>Recent Decision Log</h2><p>来自 /api/decisions/recent，不使用浏览器 fixture。</p></div><span class="soft-badge green">Live API</span></div>'
+  +(rows.length?'<table class="log-table"><thead><tr><th>ID</th><th>Placement</th><th>Action</th><th>Propensity</th><th>Policy</th><th>Evidence</th></tr></thead><tbody>'+body+'</tbody></table>':'<p style="font-size:10px;color:#7d8899">当前服务端尚无决策记录。</p>')
+  +'</div>';
+ bindProductActions();
+};
+
+integrations=async function liveIntegrations(){
+ if(useDemo)return fixtureIntegrationsPage();
+ const raw=await api('/api/system/connectors');
+ const items=Array.isArray(raw)?raw:[];
+ const cards=items.map(item=>'<div class="connector"><div class="connector-logo">'+esc(liveText(item.id).slice(0,2).toUpperCase())+'</div><div><strong>'+esc(liveText(item.label))+'</strong><span>'+esc(liveText(item.id))+' · '+esc(liveText(item.state))+'</span></div><i style="background:'+(item.state==='connected'?'#0db17d':item.state==='error'?'#d64545':'#c7ced9')+'"></i></div>').join('');
+ $('#view').innerHTML=head('集成与渠道','当前服务端 Connector Registry 与真实激活状态。')
+  +'<div class="card surface-card"><div class="surface-title"><div><h2>Runtime Connector Registry</h2><p>状态来自 /api/system/connectors。</p></div><span class="soft-badge green">Live API</span></div><div class="connector-grid">'+cards+'</div></div>';
+ bindProductActions();
+};
+
+settings=async function liveSettings(){
+ if(useDemo)return fixtureSettingsPage();
+ const runtime=await api('/api/system/runtime');
+ const persistence=runtime&&runtime.persistence?runtime.persistence:{};
+ const authentication=runtime&&runtime.authentication?runtime.authentication:{};
+ const llm=runtime&&runtime.llm?runtime.llm:{};
+ $('#view').innerHTML=head('设置','当前 Workspace 的公开安全运行配置；不展示密钥、token 或私有端点。')
+  +'<div class="workbench-grid">'
+  +'<div class="card surface-card"><div class="surface-title"><div><h2>Runtime Configuration</h2><p>来自 /api/system/runtime。</p></div><span class="soft-badge green">Live API</span></div>'
+  +'<div class="evidence-row"><span>Mode</span><strong>'+esc(liveText(runtime&&runtime.mode))+'</strong></div>'
+  +'<div class="evidence-row"><span>Environment</span><strong>'+esc(liveText(runtime&&runtime.environment))+'</strong></div>'
+  +'<div class="evidence-row"><span>Ready</span><strong>'+(runtime&&runtime.ready?'Yes':'No')+'</strong></div>'
+  +'<div class="evidence-row"><span>Execution</span><strong>'+esc(liveText(runtime&&runtime.execution_mode))+'</strong></div>'
+  +'<div class="evidence-row"><span>Side effects</span><strong>'+(runtime&&runtime.side_effects_enabled?'Enabled':'Disabled')+'</strong></div></div>'
+  +'<div class="card surface-card"><div class="surface-title"><div><h2>Boundaries</h2><p>只显示公开安全状态。</p></div></div>'
+  +'<div class="evidence-row"><span>Persistence</span><strong>'+esc(liveText(persistence.backend))+' · '+(persistence.active?'active':'inactive')+'</strong></div>'
+  +'<div class="evidence-row"><span>Authentication</span><strong>'+esc(liveText(authentication.backend))+' · '+(authentication.active?'active':'inactive')+'</strong></div>'
+  +'<div class="evidence-row"><span>LLM routes</span><strong>'+esc(liveText(llm.available_routes,0))+' / '+esc(liveText(llm.route_count,0))+'</strong></div>'
+  +'<div class="evidence-row"><span>Agent planning</span><strong>'+(llm.agent_planning?'active':'safe fallback')+'</strong></div></div>'
+  +'</div>';
  bindProductActions();
 };
