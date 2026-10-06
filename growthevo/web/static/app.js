@@ -15,18 +15,24 @@ function markReferenceFixture(route){
   view.prepend(note);
 }
 
+function renderWorkspaceFailure(error){
+  if(typeof isAuthRequiredError==='function'&&isAuthRequiredError(error))renderAuthRequired(error);
+  else renderApiUnavailable(error);
+}
+
 render=async function guardedRender(){
   const epoch=++routeRenderEpoch;
   const route=state.route;
   if(useDemo)return baseRouteRender();
   if(runtimeAvailability==='unavailable'){renderApiUnavailable(runtimeLastError);return}
+  if(runtimeAvailability==='auth_required'){renderAuthRequired(runtimeLastError);return}
   if(route!=='dashboard'&&!state.dashboard){
     try{state.dashboard=await api('/api/dashboard')}
-    catch(error){if(epoch===routeRenderEpoch)renderApiUnavailable(error);return}
+    catch(error){if(epoch===routeRenderEpoch)renderWorkspaceFailure(error);return}
     if(epoch!==routeRenderEpoch||route!==state.route)return;
   }
   try{await baseRouteRender()}
-  catch(error){if(epoch===routeRenderEpoch)renderApiUnavailable(error);return}
+  catch(error){if(epoch===routeRenderEpoch)renderWorkspaceFailure(error);return}
   if(epoch===routeRenderEpoch&&route===state.route)markReferenceFixture(route);
 };
 
@@ -243,7 +249,11 @@ async function submitAgentPrompt(event){
     toast(audit&&audit.accepted?'AI 策略已通过 Critic':'安全计划已生成');
   }catch(error){
     if(pending)pending.remove();
-    if(error&&error.name==='AbortError'){
+    if(typeof isAuthRequiredError==='function'&&isAuthRequiredError(error)){
+      appendAgentMessage('agent','生产登录已失效。重新登录后再继续规划；当前不会提交任何执行动作。');
+      renderAuthRequired(error);
+      toast('生产工作区需要重新登录');
+    }else if(error&&error.name==='AbortError'){
       appendAgentMessage('agent','已停止这次规划。没有提交执行动作，也不会继续占用模型请求。');
       toast('已停止 Growth Agent');
     }else if(error&&error.name==='TimeoutError'){
@@ -322,7 +332,10 @@ function bindShellInteractions(){
 
   $('#profile-open').onclick=event=>{
     event.stopPropagation();
-    openUtilityMenu('李明 · 增长负责人',[
+    const authItems=typeof authProfileMenuItems==='function'?authProfileMenuItems():[];
+    const title=typeof authProfileLabel==='function'?authProfileLabel():'李明 · 增长负责人';
+    openUtilityMenu(title,[
+      ...authItems,
       {label:'工作区设置',detail:'权限、预算与安全策略',action:()=>go('settings')},
       {label:'数据与集成',detail:'数据源与执行渠道',action:()=>go('integrations')},
     ]);
