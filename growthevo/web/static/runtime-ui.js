@@ -196,16 +196,16 @@ function renderAuthRequired(error) {
   if (!view) return;
   const configured = typeof authIsConfigured === 'function' && authIsConfigured();
   const reason = error && error.message ? esc(error.message) : '';
-  view.innerHTML = \`
+  view.innerHTML = `
     <div class="runtime-error card">
       <div class="runtime-error-icon">↗</div>
       <div>
         <h1>登录生产工作区</h1>
         <p>此工作区需要组织身份验证。登录成功后，GrowthEvo 才会加载真实业务数据并连接受控 Growth Agent。</p>
-        \${reason ? \`<dl><div><dt>状态</dt><dd>\${reason}</dd></div></dl>\` : ''}
-        <button class="primary" id="runtime-login" type="button" \${configured ? '' : 'disabled'}>\${configured ? '使用组织身份登录' : '登录入口尚未配置'}</button>
+        ${reason ? `<dl><div><dt>状态</dt><dd>${reason}</dd></div></dl>` : ''}
+        <button class="primary" id="runtime-login" type="button" ${configured ? '' : 'disabled'}>${configured ? '使用组织身份登录' : '登录入口尚未配置'}</button>
       </div>
-    </div>\`;
+    </div>`;
   setRuntimeStatus('API Ready · 需要登录', null, configured ? '组织身份验证' : '部署配置未完成');
   setAgentAvailability('auth', configured ? '登录后连接受控 Agent' : '生产登录入口尚未配置');
   const login = document.querySelector('#runtime-login');
