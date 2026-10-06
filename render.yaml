@@ -24,7 +24,7 @@ services:
       - key: GROWTHEVO_DATABASE_URL
         fromDatabase:
           name: growthevo-postgres
-          property: connectionString
+          property: connectionPoolString
       - key: GROWTHEVO_DB_POOL_MIN_SIZE
         value: "1"
       - key: GROWTHEVO_DB_POOL_MAX_SIZE
