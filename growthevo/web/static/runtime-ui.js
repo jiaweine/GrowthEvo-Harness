@@ -92,6 +92,7 @@ function setRuntimeStatus(label, latency = null, freshness = null) {
 function setAgentAvailability(state, detail = '') {
   const labels = {
     ai: 'AI 已连接',
+    busy: 'AI 繁忙',
     safe: '安全模式',
     auth: '需要登录',
     demo: 'Demo',
@@ -106,7 +107,7 @@ function setAgentAvailability(state, detail = '') {
   const dot = document.querySelector('.online-dot');
   if (dot) {
     dot.style.opacity = state === 'offline' ? '.35' : '1';
-    dot.style.background = state === 'ai' ? '#10b981' : state === 'offline' ? '#94a3b8' : state === 'auth' ? '#f59e0b' : '#6366f1';
+    dot.style.background = state === 'ai' ? '#10b981' : state === 'busy' ? '#f59e0b' : state === 'offline' ? '#94a3b8' : state === 'auth' ? '#f59e0b' : '#6366f1';
   }
   document.body.dataset.agentRuntime = state;
 }
@@ -176,7 +177,16 @@ async function probeRuntime() {
       const available = Number(llm.available_routes || 0);
       const total = Number(llm.route_count || 0);
       const providers = Array.isArray(llm.providers) ? llm.providers.join(' / ') : '';
-      setAgentAvailability('ai', `${available}/${total || available} routes${providers ? ` · ${providers}` : ''}`);
+      const capacity = llm.capacity || {};
+      const inFlight = Number(capacity.in_flight || 0);
+      const maxConcurrency = Number(capacity.max_concurrency || 0);
+      const waiting = Number(capacity.waiting || 0);
+      const maxQueue = Number(capacity.max_queue_size || 0);
+      const capacityDetail = maxConcurrency > 0
+        ? ` · capacity ${inFlight}/${maxConcurrency} active · queue ${waiting}/${maxQueue}`
+        : '';
+      const detail = `${available}/${total || available} routes${providers ? ` · ${providers}` : ''}${capacityDetail}`;
+      setAgentAvailability(llm.load_state === 'busy' ? 'busy' : 'ai', detail);
     } else {
       setAgentAvailability('safe', '模型未激活或暂不可用时使用 deterministic 安全规划');
     }
