@@ -187,7 +187,21 @@ class OidcJwksAuthenticator:
             self._keys = keys
             self._expires_monotonic = time.monotonic() + self._cache_ttl_seconds
 
+    def readiness_healthy(self) -> bool:
+        """Return local authentication-boundary readiness without network I/O.
+
+        The constructor already bootstraps JWKS fail-fast, so a non-empty key set
+        proves that the production authentication boundary initialized correctly.
+        Platform readiness probes must not refresh JWKS: an IdP outage is an
+        external dependency incident and restarting a healthy application instance
+        cannot repair it. Individual bearer requests still refresh expired keys and
+        fail closed with AuthenticationUnavailable when the IdP cannot be reached.
+        """
+        with self._lock:
+            return bool(self._keys)
+
     def healthy(self) -> bool:
+        """Actively probe JWKS health, including a refresh when the cache expired."""
         try:
             self._refresh()
         except Exception:
