@@ -7,7 +7,7 @@ from growthevo.web.cli import (
     _default_limit_concurrency,
     _default_workers,
 )
-from growthevo.web.persistence import postgres_pool_config_from_env
+from growthevo.web.runtime import postgres_pool_config_from_env
 
 
 ROOT = Path(__file__).resolve().parents[1]
