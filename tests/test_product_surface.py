@@ -142,7 +142,7 @@ def test_demo_product_actions_have_real_browser_effects() -> None:
     assert 'data-toast=' not in pages
     assert 'data-toast=' not in views
     assert 'data-candidate-id="${esc(x.id)}"' not in pages
-    assert 'data-candidate-id="'+esc(x.id)+'"' in pages
+    assert "data-candidate-id=\"'+esc(x.id)+'\"" in pages
     for marker in (
         "demoDownloadJson",
         "demoCopyText",
