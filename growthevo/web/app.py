@@ -192,6 +192,7 @@ def create_app() -> Any:
             PersistentReferenceDecisionEngine,
             PostgresProductState,
             PostgresStore,
+            postgres_pool_config_from_env,
         )
 
         database_url = (
@@ -200,9 +201,13 @@ def create_app() -> Any:
             or ""
         ).strip()
         try:
+            pool_config = postgres_pool_config_from_env()
             persistence_store = PostgresStore(
                 database_url,
                 seed_reference=not settings.production,
+                min_size=pool_config.min_size,
+                max_size=pool_config.max_size,
+                timeout_seconds=pool_config.timeout_seconds,
             )
         except Exception as exc:
             raise RuntimeError("configured PostgreSQL persistence could not be initialized") from exc
