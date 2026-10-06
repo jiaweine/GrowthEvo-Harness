@@ -1,8 +1,8 @@
-function sectionNav(items,active){return \`<div class="section-nav">\${items.map(([r,l])=>\`<button class="\${r===active?'active':''}" data-go="\${r}">\${l}</button>\`).join('')}</div>\`}
-const DEMO_DECISION_API_SAMPLE='POST /api/realtime/decision\\n\\n{\\n  "entity_id": "user_28419",\\n  "placement": "checkout_banner",\\n  "context": {"cart_value": 198, "session_intent": "high"},\\n  "candidate_action_ids": ["free_shipping", "NO_TREATMENT"]\\n}';
+function sectionNav(items,active){return `<div class="section-nav">${items.map(([r,l])=>`<button class="${r===active?'active':''}" data-go="${r}">${l}</button>`).join('')}</div>`}
+const DEMO_DECISION_API_SAMPLE='POST /api/realtime/decision\n\n{\n  "entity_id": "user_28419",\n  "placement": "checkout_banner",\n  "context": {"cart_value": 198, "session_intent": "high"},\n  "candidate_action_ids": ["free_shipping", "NO_TREATMENT"]\n}';
 
 function demoDownloadJson(filename,payload){
- const blob=new Blob([JSON.stringify(payload,null,2)+'\\n'],{type:'application/json'});
+ const blob=new Blob([JSON.stringify(payload,null,2)+'\n'],{type:'application/json'});
  const url=URL.createObjectURL(blob);
  const link=document.createElement('a');
  link.href=url;link.download=filename;link.hidden=true;
