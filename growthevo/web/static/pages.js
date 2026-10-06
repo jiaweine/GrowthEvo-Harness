@@ -109,10 +109,14 @@ function runDemoAction(button){
 }
 
 function bindProductActions(){
- $('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
- $('[data-toast]').forEach(b=>b.onclick=()=>toast(b.dataset.toast));
- $('[data-demo-action]').forEach(b=>b.onclick=()=>runDemoAction(b));
- $('[data-campaign-more]').forEach(b=>b.onclick=()=>{
+ $$('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
+ $$('[data-toast]').forEach(b=>b.onclick=()=>toast(b.dataset.toast));
+ $$('[data-demo-action]').forEach(b=>b.onclick=event=>{
+  if(b.dataset.demoAction==='evidence-detail')event.stopPropagation();
+  runDemoAction(b);
+ });
+ $$('[data-campaign-more]').forEach(b=>b.onclick=event=>{
+  event.stopPropagation();
   const route=b.dataset.campaignRoute||'campaignStudio';
   const name=b.dataset.campaignMore||'Campaign';
   if(typeof openUtilityMenu!=='function')return go(route);
