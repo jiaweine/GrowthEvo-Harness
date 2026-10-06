@@ -157,7 +157,9 @@ def test_agent_composer_calls_real_api_outside_demo() -> None:
     assert "主工作区隔离" in app
     assert "void probeRuntime()" in app
     assert "setAgentAvailability('safe'" in runtime_ui
-    assert "setAgentAvailability('ai'" in runtime_ui
+    assert "llm.load_state === 'busy' ? 'busy' : 'ai'" in runtime_ui
+    assert "busy: 'AI 繁忙'" in runtime_ui
+    assert "ai: 'AI 已连接'" in runtime_ui
     assert "AGENT_API_SMOKE_PASS" in smoke
     assert "runtimeAvailability === 'ready'" in smoke
     assert "停止规划" in smoke
