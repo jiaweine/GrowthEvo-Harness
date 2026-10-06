@@ -73,6 +73,10 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     assert "grant_type:'authorization_code'" in auth
     assert "AUTH_TRANSACTION_MAX_AGE_MS=10*60*1000" in auth
     assert "document.body.dataset.agentRuntime" in runtime_ui
+    assert "AI 繁忙" in runtime_ui
+    assert "llm.load_state === 'busy'" in runtime_ui
+    assert "capacity.in_flight" in runtime_ui
+    assert "capacity.max_concurrency" in runtime_ui
     assert "Data: ${dataMode}" in runtime_ui
     for route in ("/api/opportunities", "/api/experiments", "/api/decisions/recent", "/api/harness/runs", "/api/approvals/", "/api/evolution/candidates"):
         assert route in live_pages
