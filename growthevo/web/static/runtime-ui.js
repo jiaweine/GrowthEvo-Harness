@@ -38,8 +38,11 @@ async function runtimeFetch(url, options = {}, timeoutMs = RUNTIME_API_TIMEOUT_M
 api = async function runtimeAwareApi(path, options = {}) {
   if (useDemo) return demoApi(path, options);
   const {timeoutMs = RUNTIME_API_TIMEOUT_MS, ...requestOptions} = options;
+  if (typeof authReadyPromise !== 'undefined') await authReadyPromise;
   const headers = new Headers(requestOptions.headers || {});
   if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+  const authorization = typeof authAuthorizationValue === 'function' ? authAuthorizationValue() : '';
+  if (authorization && !headers.has('Authorization')) headers.set('Authorization', authorization);
   // Avoid forcing application/json on GET/HEAD: doing so turns otherwise-simple
   // cross-origin reads into unnecessary CORS preflights. JSON write helpers pass
   // string bodies, so add Content-Type only when a body actually exists.
@@ -53,10 +56,24 @@ api = async function runtimeAwareApi(path, options = {}) {
   }, timeoutMs);
   if (!response.ok) {
     const detail = await response.text();
-    throw Error(`HTTP ${response.status}: ${detail.slice(0, 600)}`);
+    const error = Error(`HTTP ${response.status}: ${detail.slice(0, 600)}`);
+    error.status = response.status;
+    if (response.status === 401) {
+      if (typeof authClearSession === 'function') authClearSession('unauthorized');
+      error.name = 'AuthenticationError';
+      error.code = 'GROWTHEVO_AUTH_REQUIRED';
+    } else if (response.status === 503 && detail.toLowerCase().includes('identity provider')) {
+      error.name = 'IdentityUnavailableError';
+      error.code = 'GROWTHEVO_IDENTITY_UNAVAILABLE';
+    }
+    throw error;
   }
   return await response.json();
 };
+
+function isAuthRequiredError(error) {
+  return Boolean(error && error.code === 'GROWTHEVO_AUTH_REQUIRED');
+}
 
 function setRuntimeStatus(label, latency = null, freshness = null) {
   const status = document.querySelector('.status-right');
@@ -76,6 +93,7 @@ function setAgentAvailability(state, detail = '') {
   const labels = {
     ai: 'AI 已连接',
     safe: '安全模式',
+    auth: '需要登录',
     demo: 'Demo',
     checking: '检查中',
     offline: 'API 不可用',
@@ -88,7 +106,7 @@ function setAgentAvailability(state, detail = '') {
   const dot = document.querySelector('.online-dot');
   if (dot) {
     dot.style.opacity = state === 'offline' ? '.35' : '1';
-    dot.style.background = state === 'ai' ? '#10b981' : state === 'offline' ? '#94a3b8' : '#6366f1';
+    dot.style.background = state === 'ai' ? '#10b981' : state === 'offline' ? '#94a3b8' : state === 'auth' ? '#f59e0b' : '#6366f1';
   }
   document.body.dataset.agentRuntime = state;
 }
@@ -120,13 +138,29 @@ async function probeRuntime() {
       const mode = payload && payload.mode ? ` (${payload.mode})` : '';
       throw Error(`readiness returned HTTP ${response.status}${mode}`);
     }
-    runtimeAvailability = 'ready';
     runtimeLastError = null;
     runtimeBackend = payload || {};
+    if (typeof authReadyPromise !== 'undefined') await authReadyPromise;
     const mode = payload && payload.mode ? payload.mode : 'api';
     const env = payload && payload.environment ? ` · ${payload.environment}` : '';
     const durable = mode === 'production' && payload && payload.persistence && payload.persistence.active === true;
     const dataMode = payload && payload.data_mode ? payload.data_mode : 'reference-contract';
+    const backendAuth = payload && payload.authentication ? payload.authentication : null;
+    const loginRequired = Boolean(
+      backendAuth && backendAuth.active === true &&
+      typeof authIsAuthenticated === 'function' && !authIsAuthenticated()
+    );
+    if (loginRequired) {
+      runtimeAvailability = 'auth_required';
+      const meta = document.querySelector('.workspace-card .workspace-copy span');
+      if (meta) meta.textContent = 'Production Workspace · 需要登录';
+      document.body.dataset.runtimeMode = mode;
+      setRuntimeStatus(`API Ready · ${mode}${env}`, latency, '需要组织身份验证');
+      setAgentAvailability('auth', '登录生产工作区后连接受控 Growth Agent');
+      renderAuthRequired(authInitializationError);
+      return;
+    }
+    runtimeAvailability = 'ready';
     const meta = document.querySelector('.workspace-card .workspace-copy span');
     if (meta) {
       meta.textContent = durable
@@ -153,6 +187,29 @@ async function probeRuntime() {
     setAgentAvailability('offline');
     renderApiUnavailable(error);
   }
+}
+
+function renderAuthRequired(error) {
+  runtimeAvailability = 'auth_required';
+  runtimeLastError = error || runtimeLastError;
+  const view = document.querySelector('#view');
+  if (!view) return;
+  const configured = typeof authIsConfigured === 'function' && authIsConfigured();
+  const reason = error && error.message ? esc(error.message) : '';
+  view.innerHTML = `
+    <div class="runtime-error card">
+      <div class="runtime-error-icon">↗</div>
+      <div>
+        <h1>登录生产工作区</h1>
+        <p>此工作区需要组织身份验证。登录成功后，GrowthEvo 才会加载真实业务数据并连接受控 Growth Agent。</p>
+        ${reason ? `<dl><div><dt>状态</dt><dd>${reason}</dd></div></dl>` : ''}
+        <button class="primary" id="runtime-login" type="button" ${configured ? '' : 'disabled'}>${configured ? '使用组织身份登录' : '登录入口尚未配置'}</button>
+      </div>
+    </div>`;
+  setRuntimeStatus('API Ready · 需要登录', null, configured ? '组织身份验证' : '部署配置未完成');
+  setAgentAvailability('auth', configured ? '登录后连接受控 Agent' : '生产登录入口尚未配置');
+  const login = document.querySelector('#runtime-login');
+  if (login && configured) login.onclick = () => { void beginOidcLogin(); };
 }
 
 function renderApiUnavailable(error) {
@@ -185,5 +242,6 @@ window.addEventListener('DOMContentLoaded', () => {
 window.addEventListener('unhandledrejection', event => {
   if (!runtimeStrictApi) return;
   event.preventDefault();
-  renderApiUnavailable(event.reason);
+  if (isAuthRequiredError(event.reason)) renderAuthRequired(event.reason);
+  else renderApiUnavailable(event.reason);
 });

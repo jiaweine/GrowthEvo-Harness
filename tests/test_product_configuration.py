@@ -14,7 +14,7 @@ from growthevo.web.app import MAX_API_BODY_BYTES, create_app
 from growthevo.web.cli import _default_port, _port
 from growthevo.web.decisioning import ACTION_REGISTRY
 from growthevo.web.schemas import ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest, KNOWN_ACTION_IDS
-from scripts.build_pages import normalize_api_base
+from scripts.build_pages import normalize_api_base, normalize_oidc_config
 
 
 def test_pages_api_base_accepts_secure_remote_or_loopback_http_urls() -> None:
@@ -25,6 +25,48 @@ def test_pages_api_base_accepts_secure_remote_or_loopback_http_urls() -> None:
     for value in ("api.example.com", "javascript:alert(1)", "https://user:secret@example.com", "https://api.example.com?token=secret", "https://api.example.com/#fragment", "https://api.example.com/bad path", "http://api.example.com"):
         with pytest.raises(ValueError):
             normalize_api_base(value)
+
+
+def test_pages_oidc_config_is_public_pkce_metadata_only() -> None:
+    disabled = normalize_oidc_config()
+    assert disabled["ENABLED"] is False
+    assert disabled["SCOPE"] == "openid profile email"
+
+    enabled = normalize_oidc_config(
+        "https://identity.example.test/authorize",
+        "https://identity.example.test/token",
+        "growthevo-web",
+        "growthevo-api",
+        "openid profile email",
+    )
+    assert enabled == {
+        "ENABLED": True,
+        "AUTHORIZATION_ENDPOINT": "https://identity.example.test/authorize",
+        "TOKEN_ENDPOINT": "https://identity.example.test/token",
+        "CLIENT_ID": "growthevo-web",
+        "AUDIENCE": "growthevo-api",
+        "SCOPE": "openid profile email",
+    }
+
+    with pytest.raises(ValueError, match="requires authorization endpoint"):
+        normalize_oidc_config(
+            "https://identity.example.test/authorize",
+            None,
+            "growthevo-web",
+        )
+    with pytest.raises(ValueError, match="remote GROWTHEVO_OIDC_TOKEN_ENDPOINT must use https"):
+        normalize_oidc_config(
+            "https://identity.example.test/authorize",
+            "http://identity.example.test/token",
+            "growthevo-web",
+        )
+    with pytest.raises(ValueError, match="must include openid"):
+        normalize_oidc_config(
+            "https://identity.example.test/authorize",
+            "https://identity.example.test/token",
+            "growthevo-web",
+            scope="profile email",
+        )
 
 
 def test_configured_port_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
