@@ -1,4 +1,4 @@
-const REFERENCE_FIXTURE_ROUTES=new Set(['campaigns','campaignStudio','execution','evidence','data','integrations','settings']);
+const REFERENCE_FIXTURE_ROUTES=new Set();
 const baseRouteRender=render;
 const AGENT_PLAN_TIMEOUT_MS=30000;
 let routeRenderEpoch=0;
