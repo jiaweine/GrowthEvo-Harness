@@ -5,6 +5,8 @@ import os
 import re
 from urllib.parse import urlparse
 
+from .env import bounded_float_env, bounded_int_env
+
 
 _VALID_MODES = {"demo", "api", "production"}
 _ENVIRONMENT_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
@@ -58,32 +60,6 @@ def _configured(*names: str) -> bool:
     return any(bool(os.getenv(name, "").strip()) for name in names)
 
 
-def _bounded_int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-    if not minimum <= value <= maximum:
-        raise ValueError(f"{name} must be in [{minimum}, {maximum}]")
-    return value
-
-
-def _bounded_float_env(name: str, default: float, *, minimum: float, maximum: float) -> float:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be a number") from exc
-    if not minimum <= value <= maximum:
-        raise ValueError(f"{name} must be in [{minimum}, {maximum}]")
-    return value
-
-
 @dataclass(frozen=True, slots=True)
 class PostgresPoolConfig:
     min_size: int = 1
@@ -100,10 +76,10 @@ class PostgresPoolConfig:
 
 
 def postgres_pool_config_from_env() -> PostgresPoolConfig:
-    min_size = _bounded_int_env(
+    min_size = bounded_int_env(
         "GROWTHEVO_DB_POOL_MIN_SIZE", 1, minimum=1, maximum=64
     )
-    max_size = _bounded_int_env(
+    max_size = bounded_int_env(
         "GROWTHEVO_DB_POOL_MAX_SIZE", 8, minimum=1, maximum=256
     )
     if max_size < min_size:
@@ -113,7 +89,7 @@ def postgres_pool_config_from_env() -> PostgresPoolConfig:
     return PostgresPoolConfig(
         min_size=min_size,
         max_size=max_size,
-        timeout_seconds=_bounded_float_env(
+        timeout_seconds=bounded_float_env(
             "GROWTHEVO_DB_POOL_TIMEOUT_SECONDS", 5.0, minimum=0.1, maximum=60.0
         ),
     )
