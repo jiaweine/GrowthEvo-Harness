@@ -79,6 +79,8 @@ def test_self_host_compose_forwards_documented_runtime_controls() -> None:
     for key in forwarded:
         assert f"{key}=" in env_example
         assert f"{key}: ${{{key}" in compose
+    assert "GROWTHEVO_HTTP_GRACEFUL_SHUTDOWN_SECONDS: ${GROWTHEVO_HTTP_GRACEFUL_SHUTDOWN_SECONDS:-55}" in compose
+    assert "stop_grace_period: 60s" in compose
 
 
 def test_default_process_capacity_does_not_inherit_platform_web_concurrency(
