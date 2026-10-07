@@ -15,7 +15,6 @@ const fixtureEvolutionPage=evolution;
 function liveText(value,fallback='—'){return value===null||value===undefined||value===''?fallback:String(value)}
 function liveNumber(value){const n=Number(value);return Number.isFinite(n)?n:null}
 function liveMoney(value){const n=liveNumber(value);return n===null?'—':`¥${fmt(n)}`}
-function livePercent(value,digits=0){const n=liveNumber(value);return n===null?'—':`${(n*100).toFixed(digits)}%`}
 function liveBadge(value){return `<span class="soft-badge">${esc(liveText(value))}</span>`}
 function emptyState(title,detail){return `<div class="card surface-card"><div class="surface-title"><div><h2>${esc(title)}</h2><p>${esc(detail)}</p></div></div></div>`}
 
