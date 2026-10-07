@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import pytest
 
@@ -103,6 +104,30 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     ):
         assert marker in live_pages
     assert "const REFERENCE_FIXTURE_ROUTES=new Set();" in app
+
+
+
+def test_classic_browser_scripts_do_not_redeclare_top_level_globals() -> None:
+    index = (STATIC / "index.html").read_text(encoding="utf-8")
+    assets = re.findall(
+        r'<script\\b[^>]*\\bsrc="\\./assets/([^"]+\\.js)"[^>]*></script>',
+        index,
+    )
+    declaration = re.compile(
+        r"^function\\s+([A-Za-z_$][\\w$]*)\\s*\\("
+        r"|^(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\b",
+        re.MULTILINE,
+    )
+    owners: dict[str, str] = {}
+    collisions: list[tuple[str, str, str]] = []
+    for asset in assets:
+        source = (STATIC / asset).read_text(encoding="utf-8")
+        for match in declaration.finditer(source):
+            symbol = match.group(1) or match.group(2)
+            previous = owners.setdefault(symbol, asset)
+            if previous != asset:
+                collisions.append((symbol, previous, asset))
+    assert collisions == []
 
 
 def test_core_product_workbenches_are_real_routes() -> None:
