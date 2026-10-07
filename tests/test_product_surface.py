@@ -110,12 +110,12 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
 def test_classic_browser_scripts_do_not_redeclare_top_level_globals() -> None:
     index = (STATIC / "index.html").read_text(encoding="utf-8")
     assets = re.findall(
-        r'<script\\b[^>]*\\bsrc="\\./assets/([^"]+\\.js)"[^>]*></script>',
+        r'<script\b[^>]*\bsrc="\./assets/([^"]+\.js)"[^>]*></script>',
         index,
     )
     declaration = re.compile(
-        r"^function\\s+([A-Za-z_$][\\w$]*)\\s*\\("
-        r"|^(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\b",
+        r"^function\s+([A-Za-z_$][\w$]*)\s*\("
+        r"|^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\b",
         re.MULTILINE,
     )
     owners: dict[str, str] = {}
