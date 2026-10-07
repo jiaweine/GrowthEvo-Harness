@@ -50,6 +50,39 @@ def test_render_blueprint_is_fail_closed_and_capacity_explicit() -> None:
     assert "GEMINI_API_KEY\n        value:" not in blueprint
 
 
+def test_self_host_compose_forwards_documented_runtime_controls() -> None:
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+    env_example = (ROOT / ".env.self-host.example").read_text(encoding="utf-8")
+    forwarded = (
+        "GROWTHEVO_DB_POOL_MIN_SIZE",
+        "GROWTHEVO_DB_POOL_MAX_SIZE",
+        "GROWTHEVO_DB_POOL_TIMEOUT_SECONDS",
+        "GROWTHEVO_WEB_WORKERS",
+        "GROWTHEVO_HTTP_LIMIT_CONCURRENCY",
+        "GROWTHEVO_HTTP_GRACEFUL_SHUTDOWN_SECONDS",
+        "GROWTHEVO_LLM_ROUTES",
+        "OPENAI_API_KEY",
+        "GROWTHEVO_OPENAI_MODEL",
+        "ANTHROPIC_API_KEY",
+        "GROWTHEVO_ANTHROPIC_MODEL",
+        "GEMINI_API_KEY",
+        "GROWTHEVO_GEMINI_MODEL",
+        "GROWTHEVO_LLM_TIMEOUT_SECONDS",
+        "GROWTHEVO_LLM_MAX_RETRIES",
+        "GROWTHEVO_LLM_MAX_CONCURRENCY",
+        "GROWTHEVO_LLM_MAX_QUEUE_SIZE",
+        "GROWTHEVO_LLM_ACQUIRE_TIMEOUT_SECONDS",
+        "GROWTHEVO_LLM_FAILURE_THRESHOLD",
+        "GROWTHEVO_LLM_COOLDOWN_SECONDS",
+        "GROWTHEVO_LLM_MAX_PROVIDER_ATTEMPTS",
+    )
+    for key in forwarded:
+        assert f"{key}=" in env_example
+        assert f"{key}: ${{{key}" in compose
+    assert "GROWTHEVO_HTTP_GRACEFUL_SHUTDOWN_SECONDS: ${GROWTHEVO_HTTP_GRACEFUL_SHUTDOWN_SECONDS:-55}" in compose
+    assert "stop_grace_period: 60s" in compose
+
+
 def test_default_process_capacity_does_not_inherit_platform_web_concurrency(
     monkeypatch,
 ) -> None:
