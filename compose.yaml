@@ -69,7 +69,9 @@ services:
       timeout: 5s
       retries: 8
       start_period: 15s
-    stop_grace_period: 30s
+    # Keep Docker's termination window longer than the app's 55s default
+    # graceful-shutdown timeout so in-flight requests can drain cleanly.
+    stop_grace_period: 60s
 
 volumes:
   growthevo-postgres:
