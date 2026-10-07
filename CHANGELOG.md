@@ -6,6 +6,8 @@ Notable GrowthEvo-Harness changes are recorded here. The current development lin
 
 ### Production operator surface
 
+- Fixed self-host Docker Compose forwarding so documented PostgreSQL pool, HTTP capacity, and guarded LLM settings from `.env` reach the API container instead of being silently ignored.
+- Centralized bounded environment parsing and removed stale browser helpers, including a duplicate classic-script global declaration; added regression contracts for both configuration forwarding and global symbol collisions.
 - Added `growthevo-operator` as a thin executable layer over the existing guarded LLM and locked causal benchmark contracts.
 - Added strict, non-secret operator manifests with fully offline candidate preregistration and stable model+harness fingerprints; provider SDKs and credentials are not required to validate a plan.
 - Added physically separate planner-context and evaluator-evidence file contracts plus deferred holdout loading, preserving validation-winner freeze before final causal labels are opened.
