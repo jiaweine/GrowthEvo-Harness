@@ -188,13 +188,13 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
         }
 
     async def run(self, goal: str, *, allow_drafts: bool = False,
-                  max_steps: int = 6) -> dict[str, Any]:
-        if not 1 <= max_steps <= 8:
+                  max_steps: int | None = None) -> dict[str, Any]:
+        if max_steps is not None and not 1 <= max_steps <= 8:
             raise ValueError("max_steps outside server limit")
         policy = self.evolution.snapshot() if self.evolution is not None else {
             "step_budget": 6, "preferred_first_read": "none", "fingerprint": "baseline"
         }
-        max_steps = min(max_steps, policy["step_budget"])
+        max_steps = min(max_steps if max_steps is not None else policy["step_budget"], policy["step_budget"])
         run_id = "op_" + uuid4().hex[:16]
         events: list[dict[str, Any]] = []
         model_history: list[dict[str, Any]] = []
