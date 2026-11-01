@@ -175,6 +175,18 @@ Agent OS 操作的是已经存在的 GrowthEvo 增长与因果计算能力，不
 
 仓库包含已锁定协议的公开数据评估产物，属于增长建模能力的证据，**不是 Agent OS 或自进化带来的业绩提升**。
 
+在 **13,979,592** 条 Criteo 公开数据记录的冻结目标评估协议下，项目报告的证据指标为：
+
+<table>
+<tr>
+<td width="33%" align="center"><h3>+0.94 pp</h3><sub>整体人群增量访问</sub></td>
+<td width="33%" align="center"><h3>+9.38 pp</h3><sub>选定 Top 10% 人群增量访问</sub></td>
+<td width="33%" align="center"><h3>13.98M</h3><sub>公开数据源记录</sub></td>
+</tr>
+</table>
+
+这些数据属于特定的随机试验数据集与目标人群协议；并非实际投放回报或 Agent 自进化后的业务收益。
+
 | 公开数据评估 | 已记录结果 | 证据 |
 | --- | --- | --- |
 | Criteo Uplift v2.1（上游数据集标识） | 全体人群增量访问约 **+0.94 个百分点**；所选 Top 10% 人群约 **+9.38 个百分点** | [冻结评估记录](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md) |
