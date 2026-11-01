@@ -254,6 +254,53 @@ def test_evolution_rejects_unmeasured_or_regressive_changes():
     assert candidate.status == "rejected_by_eval"
 
 
+def test_paired_replay_evaluates_actual_agent_loops_and_candidate_budget():
+    from growthevo.agent_os.benchmark import BenchmarkTask, PairedReplayEvaluator
+    tasks = [
+        BenchmarkTask(f"heldout-{i}", f"Inspect opportunities and open experiments {i}",
+                      "experiments", "opportunities")
+        for i in range(30)
+    ]
+
+    def environment(task, policy):
+        assert task.required_section == "opportunities"
+        del policy
+        model = FakeModel(
+            step("workspace.read", {"section": "opportunities"}),
+            step("workspace.read", {"section": "dashboard"}),
+            step("workspace.read", {"section": "campaigns"}),
+            step("workspace.read", {"section": "experiments"}),
+            step("workspace.read", {"section": "approvals"}),
+            step("page.navigate", {"route": "experiments"}),
+            finish("Read five sections and requested the required route"),
+        )
+        return model, make_tools(ReferenceProductState())
+
+    benchmark = PairedReplayEvaluator(
+        tasks, environment, suite_id="locked-offline-operator-manifest"
+    )
+    authority = EvolutionAuthority()
+    candidate = authority.propose([
+        {"run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        for i in range(8)
+    ])
+    assert candidate is not None
+    metrics = benchmark(authority.active, candidate.proposal)
+    assert metrics["baseline_success"] == 0
+    assert metrics["candidate_success"] == 1
+    assert metrics["candidate_violations"] == 0
+    assert metrics["sample_size"] == 30
+    assert metrics["evidence_id"].startswith("replay:")
+    authority.evaluate(candidate.id, benchmark)
+    assert authority.candidates()[0]["status"] == "awaiting_shadow_canary"
+    # The offline benchmark alone cannot activate a policy.
+    assert authority.active.step_budget == 6
+    with pytest.raises(ValueError, match="required"):
+        authority.promote(candidate.id, operator_approved=True,
+                          shadow_passed=False, canary_passed=False,
+                          evidence_reference=metrics["evidence_id"])
+
+
 def test_web_operator_unconfigured_fails_closed(monkeypatch):
     pytest.importorskip("fastapi")
     pytest.importorskip("httpx")
