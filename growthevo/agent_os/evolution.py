@@ -105,10 +105,12 @@ class EvolutionAuthority:
     def evaluate(self, candidate_id: str,
                  heldout_evaluator: Callable[[OperatorPolicy, OperatorPolicy], Mapping[str, Any]]
                  ) -> EvolutionCandidate:
-        """Evaluation happens outside the model and must use an independent holdout.
+        """Run independent evaluation WITHOUT holding the policy control lock.
 
-        The evaluator must return measured baseline/candidate task success,
-        safety violation rates, normalized cost and a unique evidence identity.
+        Claim the candidate atomically, run the held-out suite on immutable
+        policy snapshots, then check lineage again before recording evidence.
+        Only one evaluator may claim a candidate at a time. Failed evaluators
+        release their claim, and a changed parent invalidates stale results.
         """
         with self._lock:
             candidate = next((c for c in self.archive if c.id == candidate_id), None)
@@ -116,18 +118,22 @@ class EvolutionAuthority:
                 raise ValueError("candidate is missing or no longer descended from active policy")
             if candidate.status != "requires_independent_eval":
                 raise ValueError("candidate has already been evaluated")
-            measured = dict(heldout_evaluator(self.active, candidate.proposal))
+            baseline, proposal = self.active, candidate.proposal
+            parent = baseline.fingerprint
+            candidate.status = "evaluating"
+
+        try:
+            measured = dict(heldout_evaluator(baseline, proposal))
             expected = {"baseline_success", "candidate_success", "baseline_violations",
                         "candidate_violations", "baseline_cost", "candidate_cost",
                         "sample_size", "evidence_id"}
             if set(measured) != expected:
                 raise ValueError("heldout evidence schema is incomplete")
+            from math import isfinite
             for key in expected - {"sample_size", "evidence_id"}:
                 value = measured[key]
-                if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise ValueError("invalid heldout measurement")
-                from math import isfinite
-                if not isfinite(value) or value < 0:
+                if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not isfinite(value) or value < 0):
                     raise ValueError("heldout measurements must be finite and nonnegative")
             if (not isinstance(measured["sample_size"], int)
                 or isinstance(measured["sample_size"], bool)
@@ -139,6 +145,20 @@ class EvolutionAuthority:
             if any(measured[k] > 1 for k in ("baseline_success", "candidate_success",
                                             "baseline_violations", "candidate_violations")):
                 raise ValueError("invalid probability metric")
+        except BaseException:
+            # Even if the evaluator is cancelled, the candidate remains safely
+            # retryable, with no fabricated result or partially promoted policy.
+            with self._lock:
+                if candidate.status == "evaluating":
+                    candidate.status = "requires_independent_eval"
+            raise
+
+        with self._lock:
+            if self.active.fingerprint != parent or candidate.parent != parent:
+                candidate.status = "stale_evaluation"
+                raise ValueError("active policy changed during independent evaluation")
+            if candidate.status != "evaluating":
+                raise ValueError("candidate evaluation claim was invalidated")
             candidate.evaluation = measured
             eligible = (
                 measured["candidate_success"] > measured["baseline_success"]
