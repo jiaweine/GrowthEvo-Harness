@@ -2,238 +2,231 @@
 
 # GrowthEvo
 
-### Agent Operating System · Recursive Evolution · Causal Growth
+### The Operating System for Intelligent Growth
 
-**智能体操作系统优先 · 证据驱动的递归自进化紧随其后。**
+**智能体操作系统 × 递归自进化 × 真实增长**
 
-让 Agent 在受控工作空间中真正观察、调用工具并验证结果；
-让每一次可审计的操作与失败，成为下一轮策略改进的输入。
+让 AI 不只告诉你该做什么，而是在可控的工作空间里帮助你把事情向前推进。  
+从发现机会、形成方案，到验证结果、持续改进，让增长变成一种可观察、可协作、可进化的工作方式。
 
-[智能体操作系统](#智能体操作系统--agent-operating-system) · [递归自进化](#递归自进化--recursive-evolution) · [Nightfall UI](#nightfall--赛博工作台) · [快速开始](#快速开始) · [因果增长](#因果增长与证据) · [架构与安全](#架构与安全边界)
+**Agent OS · Recursive Evolution · Nightfall Experience**
+
+[智能体操作系统](#智能体操作系统) · [自进化中心](#自进化中心) · [Nightfall 体验](#nightfall-体验) · [增长工作空间](#一个工作空间完成增长全流程) · [产品体验](#体验-growthevo)
 
 </div>
 
 ---
 
-## 智能体操作系统 · Agent Operating System
+## 智能体操作系统
 
-**GrowthEvo 的第一入口是 Agent OS，而不是传统报表或只能输出文字建议的聊天框。** 桌面端与移动端导航均以「智能体操作系统」「自进化中心」开头；增长驾驶舱、Campaign、实验与证据是 Agent 可以使用的业务工作空间。
+### 不只是聊天，而是让 AI 真正参与工作
 
-```mermaid
-flowchart LR
-    U["用户目标"] --> O["Observe<br/>读取工作区"]
-    O --> A["Act<br/>调用受控工具"]
-    A --> V["Verify<br/>检查真实反馈"]
-    V --> G{"审批 / 同意 / 安全边界"}
-    G -->|继续| O
-    G -->|人工确认| H["Human-in-the-loop"]
-    V --> T["真实运行轨迹"]
-    T --> E["Recursive Evolution"]
-```
+传统 AI 助手给你一段建议，然后把执行留给你。GrowthEvo 希望改变这一点。
 
-模型通过 `GrowthOperator` 发起**有界、多步、结构化的工具调用**，服务端使用现有 `ToolRegistry` 检查权限和参数，随后把执行反馈交回模型。模型不能运行任意 Python / JavaScript，不能指定站外 URL，也不能自行绕过安全策略。
+你只需要提出目标，Agent 就可以在 GrowthEvo 工作空间中查看相关信息、找到需要关注的业务页面、协助创建活动草案，并把每一步发生了什么展示给你。
 
-| 工具 | 真实能力 | 执行边界 |
-| --- | --- | --- |
-| `workspace.read` | 读取机会、Campaign、实验、审批、证据和运行记录 | 指定第一方数据分区，敏感决策字段过滤 |
-| `page.navigate` | 请求前端打开指定站内页面 | 路由白名单；**不是**任意网页的 DOM / 坐标控制 |
-| `campaign.draft` | 创建并核验 Campaign 草案 | 用户明确同意、先观察工作区；只保存 **Draft** |
-| `approval.review` | 进入人工审批流程 | 请求审核，不执行审批决定 |
+<table>
+<tr>
+<td width="25%" valign="top">
+<h4>理解你的目标</h4>
+从一句自然语言开始，不必先找到正确的页面或报表。
+</td>
+<td width="25%" valign="top">
+<h4>了解工作现场</h4>
+结合增长机会、活动、实验与审批信息，而不是脱离上下文回答。
+</td>
+<td width="25%" valign="top">
+<h4>推动下一步</h4>
+在授权范围内查看页面、推进任务，或生成等待确认的活动草案。
+</td>
+<td width="25%" valign="top">
+<h4>让过程看得见</h4>
+能够回看执行步骤、状态及反馈；遇到需要确认的操作会停下来。
+</td>
+</tr>
+</table>
 
-**内置保障：** 步数预算、重复调用拦截、受限工具参数、错误状态区分、可追踪执行步骤、草案写后核验和人工中断。模型生成 `finish` 文本本身不等于真实完成任务。
+> **例如，你可以说：**“帮我看看最近有哪些值得关注的增长机会，带我去相关实验页面，并整理下一步行动。”
 
-**当前边界：** 必须配置真实模型提供方才能启动实际的 Agent 工具循环；Demo 只展示样例，不伪装为真实执行。运行轨迹目前是**进程内有界记录**，尚不是可跨副本恢复的持久化任务日志。
+GrowthEvo 的 Agent 不只是回答这个问题，而是围绕目标开展可观察的站内操作。它不会绕过人的审批，也不会自行发布营销活动。
 
-源码入口：[`growthevo/agent_os/operator.py`](growthevo/agent_os/operator.py) · [Agent OS 架构与 API](docs/AGENT_OPERATING_SYSTEM.md)
-
-## 递归自进化 · Recursive Evolution
-
-第二核心能力是 **Evidence-Gated Recursive Evolution**，不是无条件地让模型修改自身源码。当前实现从真实运行轨迹中提出受限的 Operator 策略候选，然后用受控验证链判断是否值得采用。
-
-```mermaid
-flowchart LR
-    R["真实 Agent Trace"] --> M["候选挖掘"]
-    M --> C["父策略指纹 + 有界变更"]
-    C --> P["同题集配对 Replay"]
-    P --> Q{"成功 / 安全 / 成本"}
-    Q -->|不合格| X["拒绝"]
-    Q -->|合格| S["Shadow + Canary"]
-    S --> H["人工批准与独立证据"]
-    H --> N["激活新策略"]
-    N --> R
-```
-
-| 环节 | 仓库已实现 | 必须保持的约束 |
-| --- | --- | --- |
-| 轨迹挖掘 | 至少八条实际运行轨迹才能触发候选分析 | Demo 数据不能生成真实候选 |
-| 有界变更 | 可调整 Operator 步数预算、首个读取偏好 | 不修改法律动作集、因果证据校验或审批权 |
-| 配对离线评测 | `PairedReplayEvaluator` 在至少 30 个不同任务上运行当前与候选策略 | 两者必须使用同一套锁定任务、隔离环境；模型自称完成不算成功 |
-| 改进判定 | 检查任务成功率、违规率和调用成本代理指标 | 离线提升不等于线上因果收益 |
-| 晋升门槛 | 独立评测通过后仍要求 Shadow、Canary、人工批准 | 没有给模型开放自我晋升入口 |
-| 递归继承 | 获批策略成为后续候选的父节点 | 必须能追溯父策略指纹和证据 |
-
-**正在加强的并发正确性：** 评测采用「原子认领 → 锁外执行 → 复核父策略」机制，避免耗时 Replay 阻塞实时策略读取；重复评测被拒绝，失败后安全释放认领，父策略已变更时拒绝过期结果。这项改动位于独立审查分支，是否进入 `main` 以对应 PR 合并状态为准。
-
-**明确未实现：** 生产级持久化多租户轨迹、具备签名与独立身份的晋升证据、真实线上 Shadow / Canary 自动化工作流，以及可安全执行并审核的递归源码修改。现有 `promote` 接口的布尔条件并非线上审计证明，不能把它当作自动推广已落地。
-
-源码入口：[`growthevo/agent_os/evolution.py`](growthevo/agent_os/evolution.py) · [`benchmark.py`](growthevo/agent_os/benchmark.py) · [详细机制](docs/AGENT_OPERATING_SYSTEM.md)
-
-## Nightfall · 赛博工作台
-
-**不是堆叠霓虹特效，而是为真实操作提供高可读性、低噪声、高辨识度的界面。**
-
-- **信息层级：** Agent OS → 自进化 → 增长业务 → 证据 / 审批 / 基础设施。
-- **视觉语言：** 深海军蓝底色、克制的青色焦点、统一卡片与表格、强调排版和空间秩序。
-- **操作体验：** 首页 Agent 任务入口、可点击的任务建议、真实执行轨迹、证据观测面板与命令搜索。
-- **跨设备：** 桌面、窄屏和移动端导航适配，支持键盘焦点提示和减少动态效果偏好。
-- **数据真实性：** Demo 与实时 API 分离；真实模式下不再伪造 Agent 运行次数、进化候选或增长成绩。
-
-设计参考 Kimi Work 的任务与对话分流、Linear 的低噪声工作台，以及 OpenAI、Anthropic 的 Agent 交互与安全原则；产品本身以**可观测执行和可验证进化**形成差异化，而非照搬其他界面。
-
-[完整设计规范](docs/DESIGN_SYSTEM.md) · [Nightfall 样式源码](growthevo/web/static/cyber-surface.css)
-
-> README 不再将旧浅色截图当作当前 Nightfall 实际效果图。可通过浏览器体验或 CI 生成的桌面 / 移动截图审查真实界面。
+**产品体验的重点是：** 目标在同一个地方提出，任务在同一个地方推进，结果也在同一个地方核对。
 
 ---
 
-## 快速开始
+## 自进化中心
 
-要求 **Python 3.11+**。下面的 Demo 供本地了解产品，不调用真实模型，也不会开展外部营销动作。
+### 不只是完成今天的任务，还要让下一次更好
 
-```bash
-git clone https://github.com/jiaweine/GrowthEvo-Harness.git
-cd GrowthEvo-Harness
-python -m pip install -e '.[web,dev]'
-GROWTHEVO_MODE=demo growthevo-web --host 127.0.0.1 --port 8765
-```
+真正长期有价值的 Agent，不应该每一次都像第一次工作。
 
-浏览器打开 **http://127.0.0.1:8765**，即可查看 Nightfall 工作台、策略、实验、审批和演示数据。
+GrowthEvo 将执行过程中的有效经验、任务受阻的原因和可改进的工作方式，整理成可以追踪的改进候选。Evolution Lab 让团队看见 Agent **正在尝试改善什么、比较结果如何、是否值得采用**。
 
-### 连接真正的 Agent 执行
-
-以下是本地开发用的 **API 模式**，使用真实模型配置和第一方工具。请通过本机环境变量或安全密钥管理注入密钥，**不要提交到仓库**。
-
-```bash
-python -m pip install -e '.[web,llm-openai,dev]'
-export GROWTHEVO_MODE=api
-export OPENAI_API_KEY='your-secret-key'
-export GROWTHEVO_OPENAI_MODEL='your-explicit-model-id'
-growthevo-web --host 127.0.0.1 --port 8765
-```
-
-从前端 Agent 的「执行模式」提交任务，也可直接通过 API 请求：
-
-```bash
-curl -X POST http://127.0.0.1:8765/api/agent/run \
-  -H 'Content-Type: application/json' \
-  -d '{"goal":"读取增长机会并导航到实验中心","allow_draft_writes":false}'
-```
-
-常用接口：
-
-| 接口 | 用途 |
+| 你在产品中看到 | 对你意味着什么 |
 | --- | --- |
-| `GET /api/agent/tools` | 查看工具及作用范围 |
-| `POST /api/agent/run` | 执行受控 Agent 工具循环 |
-| `POST /api/agent/plan` | 只生成受约束策略建议 |
-| `GET /api/harness/runs` | 查看实际 Agent 运行轨迹（Demo 时为标识明确的样例） |
-| `GET /api/evolution/candidates` | 查看策略进化候选 |
-| `GET /api/evolution/policy` | 查看当前 Operator 策略 |
-| `GET /api/ready` | 检查运行就绪性 |
+| **运行轨迹** | 知道 Agent 实际做过哪些事情，而不只看最后一句回答 |
+| **改进候选** | 了解哪些工作方式可能值得调整，以及为什么 |
+| **对照验证** | 在采用新做法之前，先与现有表现进行比较 |
+| **审查与批准** | 关键变化经过检查与人工把关，不由 Agent 自行决定 |
+| **持续积累** | 被认可的改进成为下一次工作的新起点 |
 
-**生产部署不同于本地 API 模式：** `production` 必须激活 PostgreSQL 和有效的 OIDC/JWKS 身份验证，并采用 TLS 入口；配置字符串存在不代表组件已经激活。[自托管与安全部署指南](docs/SELF_HOSTING.md)。
+这是 GrowthEvo 对“自进化”的产品定义：**有记忆的改进方向、有证据的比较、有边界的采用。**
 
-### 测试
-
-```bash
-python -m pip install -e '.[dev]'
-pytest tests/test_agent_operating_system.py
-pytest tests/
-```
-
-GitHub Actions 同时检查 Python 多运行环境、Web 浏览器行为、移动端 Expo/TypeScript、持久化、认证、压力测试与 CodeQL。通过 CI 不代表接通了真实广告渠道或已经获得生产端进化结果。
+目前已具备真实轨迹驱动的受限改进候选和配对离线验证能力；完整的生产级自动推广与自主修改源码尚未开放。我们宁愿明确告诉你哪些改进还在验证，也不展示没有来源的“进化提升百分比”。
 
 ---
 
-## 因果增长与证据
+## Nightfall 体验
 
-Agent OS 操作的是已经存在的 GrowthEvo 增长与因果计算能力，不会重新造一套与业务脱节的任务系统。
+### 让复杂工作流拥有安静、精密的赛博界面
 
-| 业务空间 | 主要工作 |
+GrowthEvo 的 **Nightfall** 设计语言，不是用大量霓虹装饰来制造科技感，而是让你在信息密集的场景中，依然能迅速看清**目标、当前状态、下一步操作和风险边界**。
+
+<details>
+<summary><b>Nightfall 的设计关键词</b></summary>
+
+- **深色与克制：** 深海军蓝工作台，搭配少量青色高亮，减少长时间工作的视觉疲劳。
+- **任务优先：** Agent OS 与自进化中心位于产品导航最前面。
+- **清晰的层次：** 对话、任务、证据、活动与审批有明确的阅读顺序。
+- **桌面与移动兼顾：** 不只是把桌面页面缩小，也重视小屏幕上的导航与操作。
+- **真实状态：** 不用虚构的运行次数或增长成绩填满界面。
+
+</details>
+
+从首页的任务入口，到 Agent 侧栏、增长驾驶舱、实验和审批，Nightfall 把多个业务空间连接成一个统一的操作环境。
+
+[了解 Nightfall 设计语言](docs/DESIGN_SYSTEM.md)
+
+---
+
+## 一个工作空间，完成增长全流程
+
+增长不应该被拆散在聊天窗口、分析报表、活动工具和审批表格之间。GrowthEvo 把这些工作组织成一条自然的路径：
+
+**发现机会 → 制定方案 → 检查证据 → 设计实验 → 人工确认 → 跟踪结果 → 持续改进**
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<h3>Opportunity Map · 找到真正值得行动的机会</h3>
+知道哪些人群可能需要帮助、哪些机会值得投入资源，以及何时最好先不要打扰用户。
+</td>
+<td width="50%" valign="top">
+<h3>Campaign Studio · 让想法成为具体方案</h3>
+把目标、受众、动作、预算和限制条件汇集在一个地方，让方案可以讨论、修改与确认。
+</td>
+</tr>
+<tr>
+<td valign="top">
+<h3>Experiment Center · 不靠感觉判断结果</h3>
+在一个视图里了解实验进展、主要结果与需要继续观察的风险，帮助团队决定下一步。
+</td>
+<td valign="top">
+<h3>Approval Center · 关键动作有人把关</h3>
+对重要的业务动作保留清晰的审批过程，让团队知道谁需要确认，以及为什么。
+</td>
+</tr>
+<tr>
+<td valign="top">
+<h3>Growth Dashboard · 随时了解整体进展</h3>
+把增长趋势、活动状态、渠道表现和待办事项放到同一个驾驶舱，减少来回切换。
+</td>
+<td valign="top">
+<h3>Evolution Lab · 把经验带到下一次工作</h3>
+让改进建议、验证结果与采用状态可见，使 Agent 的工作方式能够逐步改善。
+</td>
+</tr>
+</table>
+
+### 一次真实的产品旅程
+
+你可以从一句“最近有哪些值得行动的机会？”开始。Agent 帮你查看工作空间，带你进入相关页面；你在 Campaign Studio 中完善方案，在 Experiment Center 中跟踪验证，在审批中心决定是否继续推进。所有关键步骤都留下可查看的状态，下一轮工作不必重新从零梳理。
+
+**不行动，也是一个值得认真考虑的决定。** GrowthEvo 支持将“不触达”作为正式选择，避免为了制造活动量而打扰本来无需干预的人群。
+
+---
+
+## 为谁而设计
+
+| 团队 | 可以如何使用 GrowthEvo |
 | --- | --- |
-| **Growth Dashboard** | 增量收入 / 利润 / ROI、渠道表现和关键待办 |
-| **Opportunity Map** | 发现可能具有因果增量的受众与行动机会 |
-| **Campaign Studio** | 设计目标、受众、动作、预算、创意及实验 |
-| **Experiment Center** | 验证实验成熟度、处理效果与保护指标 |
-| **Approval / Execution** | 人工审批、约束检查、执行记录 |
-| **Evidence Center** | 支持度、反事实评估、离线/在线验证 |
-| **Evolution Lab** | 进化候选、评测证据、推广门槛与策略谱系 |
+| **增长与生命周期团队** | 从发现机会到规划下一次用户互动，始终围绕实际业务目标行动 |
+| **CRM 与运营团队** | 让活动准备、内容协作、审批和执行进展有更清晰的上下文 |
+| **实验与分析团队** | 将实验和业务判断放在同一工作空间，方便共同讨论结果 |
+| **业务负责人** | 看到当前重点、潜在风险、待审批事项与持续改进的方向 |
+| **AI 产品与 Agent 团队** | 了解 Agent 实际采取的步骤，以及哪些改进已经得到验证 |
 
-**`NO_TREATMENT` 是正式动作**：不触达有时比继续营销更符合用户权益与真实增量目标。因果估计、离线策略评估（OPE）、安全策略改进、预算和同意限制由确定性业务层控制，而不是任模型修改。
+---
 
-### 可复核的公开数据证据
+## 为什么是 GrowthEvo
 
-仓库包含已锁定协议的公开数据评估产物，属于增长建模能力的证据，**不是 Agent OS 或自进化带来的业绩提升**。
+**我们不想再做一个“加了 AI 聊天框的 Dashboard”。**
 
-在 **13,979,592** 条 Criteo 公开数据记录的冻结目标评估协议下，项目报告的证据指标为：
+GrowthEvo 相信，下一代增长产品应该同时拥有三种能力：
+
+- **能够行动。** 从提建议走向受控的真实操作，减少人工在不同页面间重复搬运信息。
+- **能够解释。** 关键任务有过程可看，重要选择有证据可查，涉及风险时有人把关。
+- **能够进化。** 把工作过程积累成可验证的改进，而不是仅仅保存一段聊天记录。
+
+这也是为什么产品的前两个入口始终是 **智能体操作系统** 和 **自进化中心**。
+
+---
+
+## 产品证据
+
+GrowthEvo 重视真实结果，也重视证据适用的范围。下面是仓库中可复核的**公开数据评估记录**，用于展示项目在增长场景中的验证工作；它们**不是客户投放收益，也不是 Agent 自进化后的效果承诺**。
+
+以 **Criteo Uplift v2.1** 公开数据集为例，项目针对 **13,979,592** 条记录进行了已固定评估条件的验证：
 
 <table>
 <tr>
 <td width="33%" align="center"><h3>+0.94 pp</h3><sub>整体人群增量访问</sub></td>
 <td width="33%" align="center"><h3>+9.38 pp</h3><sub>选定 Top 10% 人群增量访问</sub></td>
-<td width="33%" align="center"><h3>13.98M</h3><sub>公开数据源记录</sub></td>
+<td width="33%" align="center"><h3>13.98M</h3><sub>公开数据记录</sub></td>
 </tr>
 </table>
 
-这些数据属于特定的随机试验数据集与目标人群协议；并非实际投放回报或 Agent 自进化后的业务收益。
+你可以直接查看原始记录：[Criteo 公开评估](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md) · [Open Bandit Dataset 公开评估](benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/README.md)。
 
-| 公开数据评估 | 已记录结果 | 证据 |
-| --- | --- | --- |
-| Criteo Uplift v2.1（上游数据集标识） | 全体人群增量访问约 **+0.94 个百分点**；所选 Top 10% 人群约 **+9.38 个百分点** | [冻结评估记录](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md) |
-| Open Bandit Dataset 离线策略评估 | 支持覆盖率 **1.0000**，最终选择的验证方案为 IPS | [冻结评估记录](benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/README.md) |
-
-这些测量结果有其特定任务、数据和评估协议，不应直接外推为真实用户业务收益。[证据方法与限制](docs/REAL_WORLD_BENCHMARKS.md)
+产品不应该把参考数据、演示画面和真实客户效果混为一谈。GrowthEvo 会持续保持这种区分。
 
 ---
 
-## 架构与安全边界
+## 体验 GrowthEvo
 
-```text
-Product UI / Nightfall       -> 任务、轨迹、候选、审批与证据
-Agent Operating System      -> 模型调度 + 有界 ToolRegistry + 运行轨迹
-Recursive Evolution         -> 轨迹挖掘 + 配对 Replay + 证据门槛 + 策略继承
-Causal Growth Runtime       -> CATE / OPE / Safe Policy Improvement / NO_TREATMENT
-Deterministic Governance    -> 同意、预算、权限、审批、外部副作用限制
-Production Foundations      -> PostgreSQL、OIDC、备份、恢复与 CI
+### 先从演示工作空间开始
+
+你可以在本地启动 Nightfall 界面，探索 Agent、增长驾驶舱、活动、实验、自进化和审批等页面。
+
+```bash
+git clone https://github.com/jiaweine/GrowthEvo-Harness.git
+cd GrowthEvo-Harness
+python -m pip install -e '.[web]'
+GROWTHEVO_MODE=demo growthevo-web --host 127.0.0.1 --port 8765
 ```
 
-| 已具备的能力 | 仍需进一步工程化 |
-| --- | --- |
-| 第一方受控 Agent 工具循环、显式草案同意、执行轨迹 | 隔离的通用浏览器执行器、持久化跨租户 Agent 任务 |
-| 有界策略候选、配对离线 Replay、推广校验接口 | 独立签名证据、真实 Shadow / Canary、自动回滚 |
-| PostgreSQL 业务状态、OIDC/JWKS 鉴权和恢复流程 | 分布式 Agent checkpoint / 租户隔离的进化档案 |
-| Nightfall 响应式 UI、浏览器冒烟测试和移动端应用 | 大规模可用性测试、真实客户与渠道的效果验证 |
+打开 **http://127.0.0.1:8765**。
 
-**原则：先执行与观测，再学习；先独立验证，再考虑推广。** 所有新工具、运行环境和进化机制都不得绕过同意、因果证据和人工审批。
+演示工作空间使用明确标识的样例数据；体验真实 Agent 执行需要另行配置模型服务。当前的 Agent 操作范围是 **GrowthEvo 内部的受控业务工具和站内导航**，不是任意网站的通用浏览器自动控制。草案创建需要用户明确同意，审批与发布不会由 Agent 自行决定。
 
-## 设计与研究参考
+需要接入真实工作区或进行正式部署？请查看 [运行与部署指南](docs/SELF_HOSTING.md) 以及 [Agent OS 使用说明](docs/AGENT_OPERATING_SYSTEM.md)。
 
-- **工业实践：** [OpenAI Agents](https://developers.openai.com/api/docs/guides/agents/running-agents)、[Anthropic Building Effective Agents](https://www.anthropic.com/research/building-effective-agents)、[Microsoft Agent Framework](https://learn.microsoft.com/en-us/agent-framework/overview)、[Google ADK](https://google.github.io/adk-docs/)。
-- **可验证自改进：** [Reflexion（NeurIPS）](https://papers.neurips.cc/paper_files/paper/2023/hash/1b44b878bb782e6954cd888628510e90-Abstract-Conference.html)、[SWE-agent（NeurIPS）](https://proceedings.nips.cc/paper_files/paper/2024/hash/5a7c947568c1b1328ccc5230172e1e7c-Abstract-Conference.html)、[DSPy（ICLR）](https://proceedings.iclr.cc/paper_files/paper/2024/hash/f1cf02ce09757f57c3b93c0db83181e0-Abstract-Conference.html)、[AlphaEvolve](https://deepmind.google/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)。
-- **具体实现与边界：** [Agent OS 与自进化说明](docs/AGENT_OPERATING_SYSTEM.md) · [运行状态](docs/IMPLEMENTATION_STATUS.md) · [架构](docs/ARCHITECTURE.md) · [Nightfall 设计系统](docs/DESIGN_SYSTEM.md)。
+---
 
-研究资料用于指导架构、接口和评测设计，不代表本项目复现了对应论文的实验成绩。
+## 更多关于 GrowthEvo
 
-## 参与项目
+[产品架构与能力边界](docs/AGENT_OPERATING_SYSTEM.md) · [Nightfall 设计规范](docs/DESIGN_SYSTEM.md) · [项目当前状态](docs/IMPLEMENTATION_STATUS.md) · [技术与研究资料](docs/ARCHITECTURE.md)
 
-[Issues](https://github.com/jiaweine/GrowthEvo-Harness/issues) · [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md) · [变更记录](CHANGELOG.md)
+[参与贡献](CONTRIBUTING.md) · [问题与建议](https://github.com/jiaweine/GrowthEvo-Harness/issues) · [安全政策](SECURITY.md)
 
 ---
 
 <div align="center">
 
-**GrowthEvo — Operate with evidence. Evolve with verification.**
+### GrowthEvo
 
-<sub>真实操作 · 可验证自进化 · 因果增量</sub>
+**From insight to action. From action to evolution.**
+
+<sub>让 AI 真正参与工作，让每一次行动成为下一次进步的起点。</sub>
 
 </div>
