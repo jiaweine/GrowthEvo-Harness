@@ -158,6 +158,17 @@ def test_evolution_archives_descendants_only_after_external_evidence():
                           canary_passed=True, evidence_reference="real-evidence-digest")
     authority.promote(first.id, operator_approved=True, shadow_passed=True,
                       canary_passed=True, evidence_reference="real-evidence-digest")
+    # The descendant actually changes subsequent operator execution budget.
+    sections = ("dashboard", "opportunities", "campaigns", "experiments",
+                "evidence", "approvals")
+    model = FakeModel(*(step("workspace.read", {"section": section}) for section in sections),
+                      finish("Completed after six tool observations"))
+    updated_operator = GrowthOperator(model, make_tools(ReferenceProductState()),
+                                      AgentTraceStore(), authority)
+    updated_run = run(updated_operator)
+    assert updated_run["status"] == "completed"
+    assert updated_run["tool_calls"] == 6
+    assert model.inputs[0]["operator_policy"]["preferred_first_read"] == "none"
     second = authority.propose(traces(9))
     assert second is not None
     assert second.parent == first.proposal.fingerprint
