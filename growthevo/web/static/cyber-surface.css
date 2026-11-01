@@ -286,3 +286,38 @@ body.sidebar-collapsed .brand-name:after{color:#e3fcfa}
 .os-flow-last strong{color:#8ef2de}
 @media(max-width:1400px){.os-hero{grid-template-columns:minmax(0,1fr)}.os-flow{border-left:0;border-top:1px solid #305362;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:14px 20px}.os-flow-heading{grid-column:1/-1;margin:0}.os-flow-step{padding:9px 1px}}
 @media(max-width:760px){.os-hero{margin-bottom:20px;border-radius:13px}.os-hero-copy{padding:24px 20px}.os-hero h2{font-size:28px;margin-top:17px}.os-hero p{font-size:11px}.os-hero-actions{width:100%}.os-cta,.os-cta-secondary{flex:1;padding:0 11px;white-space:nowrap}.os-flow{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;padding:13px 17px}.os-flow-step{padding:11px 0}.os-flow-heading{font-size:9px}}
+
+
+/* Useful, restrained first-run Agent experience. */
+.agent-onboarding{margin:6px 0 13px;padding:19px 17px 18px;border:1px solid #355567;border-radius:13px;background:
+ radial-gradient(ellipse at top right,rgba(105,222,210,.10),transparent 66%),#142435}
+.agent-onboarding-eyebrow{font-size:9px;letter-spacing:.1em;color:#86e8dd;display:flex;align-items:center;gap:9px}
+.agent-onboarding h3{font-size:clamp(18px,1.5vw,23px);letter-spacing:-.055em;line-height:1.4;font-weight:720;color:#f2fcff;margin:18px 0 12px}
+.agent-onboarding h3 span{color:#84e9de}
+.agent-onboarding p{font-size:11px;line-height:1.8;color:#b0c6d8;margin:0 0 19px}
+.agent-onboarding-label{font-size:9px;letter-spacing:.08em;color:#94acc0;margin:0 0 10px}
+.agent-task-list{display:grid;gap:8px}
+.agent-task-list button{height:38px;border-radius:8px;padding:0 12px;border:1px solid #3a576a;background:#1b3143;color:#dbeef6;display:flex;align-items:center;justify-content:space-between;font-size:11px;text-align:left}
+.agent-task-list button:hover{background:#244459;border-color:#6cc9c3;color:#f6ffff}
+.agent-task-list button span{color:#7fe8de}
+.agent-msg{border:1px solid #30465e;border-radius:11px;padding:12px;background:#172638;color:#bfcee0;font-size:11px}
+.agent-msg strong{color:#ebf7ff;font-size:12px}
+.agent-msg p{line-height:1.7;color:#aec3d6;font-size:11px}
+.donut{background:conic-gradient(#75e6d7 0 32%,#5db1cc 32% 56%,#678ec7 56% 74%,#7986b8 74% 86%,#4aaf9b 86% 95%,#466c8e 95% 99%,#486079 99%)}
+#view .field-value,#view .token,#view .studio-step,#view .studio-step .n,
+#view .version-pill,#view .change-box,#view .approval-buttons button,
+#view .risk-level em,#view .trace-time,#view .trace-cost,
+#view .section-nav button,#view .opportunity-table .segment-cell strong,
+#view .mini-action,#view .log-table code{color:#c4d8e8}
+#view .studio-step,#view .field-value,#view .token,#view .approval-buttons button,
+#view .version-pill,#view .change-box,#view .trace-row,#view .decision-node,
+#view .experiment-card,#view .risk-level{background:#18283b;border-color:#33495f}
+#view .mini-action,#view .approval-buttons button{background:#1e3145;border:1px solid #3c576b}
+#view .evidence-dot,#view .token.control{background:#173a34;color:#8af4c3}
+#view .token.action{background:#273852;color:#a8bbff}
+#view .decision-node .icon,#view .trace-glyph,#view .risk-level b{background:#234354;color:#91e7df}
+#view .studio-step.active .n{background:#335767;color:#b0f9eb}
+#view .value-positive,#view .guardrail .pass{color:var(--green)}
+#view .form-grid label,#view .studio-form label{color:#acc3d8}
+#view .opportunity-table td,#view .data-table td{background:transparent}
+#view .opportunity-table tr:hover td,#view .data-table tr:hover td{background:rgba(91,181,195,.045)}
