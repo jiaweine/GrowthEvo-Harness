@@ -253,7 +253,12 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                 if kind == "finish":
                     if tool != "none" or response["arguments_json"] != "{}":
                         raise ToolDenied("finish must not request an operation")
-                    message, status = response["message"], "completed"
+                    message = response["message"]
+                    # A model can finish with no observed steps; do not mislabel
+                    # such a response as verified completion of a workspace task.
+                    status = "completed" if events else "unverified"
+                    if not events:
+                        message = "No workspace operation was performed. " + message
                     break
                 if tool not in {t.name for t in TOOL_DEFINITIONS}:
                     raise ToolDenied("model selected an unknown tool")
@@ -289,7 +294,7 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                     break
             except asyncio.CancelledError:
                 raise
-            except (ToolDenied, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+            except (ValueError, TypeError, KeyError) as exc:
                 status, message = "blocked", str(exc)[:240]
                 break
             except Exception:
