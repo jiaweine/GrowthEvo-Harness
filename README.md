@@ -2,265 +2,244 @@
 
 # GrowthEvo
 
-### 智能体操作系统 · 递归自进化 · 因果增长
+### The Operating System for Intelligent Growth
 
-**让 AI 真实操作增长工作空间，并让经过验证的执行经验持续改进 Agent 本身。**  
-把增长机会、策略设计、实验验证、审批与执行状态放进同一个工作空间，让每一次触达都更有依据。
+**智能体操作系统 × 递归自进化 × 真实增长**
 
-<br>
+让 AI 不只告诉你该做什么，而是在可控的工作空间里帮助你把事情向前推进。  
+从发现机会、形成方案，到验证结果、持续改进，让增长变成一种可观察、可协作、可进化的工作方式。
 
-![Growth OS](https://img.shields.io/badge/Growth-OS-5B5CF6)
-![Incrementality](https://img.shields.io/badge/Focus-Incrementality-12B886)
-![Evidence First](https://img.shields.io/badge/Decision-Evidence%20First-0EA5E9)
-![Human in the Loop](https://img.shields.io/badge/Control-Human%20in%20the%20Loop-F59E0B)
+**Agent OS · Recursive Evolution · Nightfall Experience**
 
-<br>
-
-[智能体操作系统](#智能体操作系统) · [递归自进化](#递归自进化) · [产品总览](#产品总览) · [增长机会](#增长机会) · [策略与实验](#策略与实验) · [Growth Agent](#growth-agent) · [治理与进化](#治理与进化) · [效果证据](#效果证据) · [移动体验](#移动体验)
+[智能体操作系统](#智能体操作系统) · [自进化中心](#自进化中心) · [Nightfall 体验](#nightfall-体验) · [增长工作空间](#一个工作空间完成增长全流程) · [产品体验](#体验-growthevo)
 
 </div>
 
-<br>
-
 <p align="center">
-  <img src="docs/assets/product/readme-dashboard.png" alt="GrowthEvo 增长驾驶舱" width="100%" />
+  <img src="docs/assets/product/nightfall-dashboard.png" alt="GrowthEvo Nightfall 智能体操作系统主界面：任务控制台、增长驾驶舱与 Agent 操作侧栏" width="100%" />
 </p>
-
-<p align="center"><sub>GrowthEvo 增长驾驶舱 · 从增量结果、渠道贡献到策略与待办，一屏掌握增长状态</sub></p>
+<p align="center"><sub>Nightfall 桌面工作台 · 真实浏览器截图（示例业务数据）</sub></p>
 
 ---
 
 ## 智能体操作系统
 
-GrowthEvo 的第一能力是 **Agent Operating System**：从目标出发，自主读取工作区、选择受控工具、执行后观察真实结果，再继续推进任务，而不仅仅生成一份建议。
+### 不只是聊天，而是让 AI 真正参与工作
 
-**当前主线已接入的操作闭环：**
+传统 AI 助手给你一段建议，然后把执行留给你。GrowthEvo 希望改变这一点。
 
-1. **Observe**：通过工作区工具读取机会、Campaign、实验、证据、审批和执行轨迹。
-2. **Act**：AI 自主选择第一方业务工具，完成站内页面导航；获得明确授权后可创建 Campaign 草案。
-3. **Verify**：把每一步真实调用、失败和导航结果返回模型并记录运行轨迹。
-4. **Govern**：禁止任意网页脚本和外部发送；审批、发布和高风险业务动作由人及现有治理边界控制。
-
-前端 Growth Agent 默认使用执行模式，策略模式仍可独立使用。**站内导航不等于任意网站的浏览器自动化**；实际运行需要激活模型，演示模式不会把固定样例冒充真实执行。
-
-[操作系统架构与 API 说明](docs/AGENT_OPERATING_SYSTEM.md)
-
-**界面设计：** Nightfall 深色赛博工作台已覆盖导航、主页任务控制台、Agent 侧栏、表格、命令面板和移动端；保留深色低噪声、清晰字号和完整的可访问交互。设计依据与色彩/布局规范见 [Nightfall Design System](docs/DESIGN_SYSTEM.md)。
-
-## 递归自进化
-
-第二能力是 **Evidence-Gated Recursive Evolution**：把真实 Agent 轨迹作为改进输入，在受限可变空间中形成候选，通过独立证据门槛再推广，随后以新的有效策略继续形成后代候选。
-
-| 阶段 | 当前能力与边界 |
-| --- | --- |
-| 真实轨迹 | Agent 操作记录由实际调用生成，而非固定的 Harness Run 展示样例 |
-| 失败分析与候选 | 可依据步数耗尽、成功任务的工具读取模式生成带父指纹的候选 |
-| 独立评测 | 定义了对照/候选成功率、安全率、成本和样本量的校验契约 |
-| 受控推广 | 独立评测、Shadow、Canary 与人工授权缺一不可 |
-| 递归继承 | 通过授权推广的策略成为后续 Operator 的有效策略与下一轮候选的起点 |
-
-**状态说明：** 目前上线的是受限策略自改进基础设施；独立生产评测服务、跨实例持久化和自修改源码仍需后续实现，不能宣称已完成无人监管的代码递归进化。增长指标、同意约束、证据校验器和审批权不会交给进化模块自改写。
-
-本项目参考 OpenAI / Anthropic / Microsoft / Google 的 Agent 执行与治理体系，以及 NeurIPS、ICLR 的反馈学习与可评估程序优化研究，同时保留因果证据驱动的业务创新路线。
-
-[自进化机制、实验门槛与研究参考](docs/AGENT_OPERATING_SYSTEM.md)
-
-已补充**同题集配对离线 Replay Evaluator**：候选与当前策略使用相同的隔离任务集实际运行、比较真实工具动作和安全违规；对照结果仅用于候选筛选，正式推广仍必须另外满足 Shadow、Canary 与人工批准。
-
----
-
-## 产品总览
-
-GrowthEvo 面向增长、生命周期、CRM、实验与智能运营团队，帮助团队回答五个真正影响结果的问题：
+你只需要提出目标，Agent 就可以在 GrowthEvo 工作空间中查看相关信息、找到需要关注的业务页面、协助创建活动草案，并把每一步发生了什么展示给你。
 
 <table>
 <tr>
-<td width="20%" valign="top"><b>谁值得触达？</b><br><sub>发现高增量潜力人群，而不是只追逐高自然转化人群。</sub></td>
-<td width="20%" valign="top"><b>做什么动作？</b><br><sub>比较不同触达方式的预期增量价值、成本与风险。</sub></td>
-<td width="20%" valign="top"><b>何时不触达？</b><br><sub>把不打扰用户也当作一种正式决策，避免无效消耗。</sub></td>
-<td width="20%" valign="top"><b>结果真实吗？</b><br><sub>把实验与效果证据放进决策链路，区分相关性与真实增量。</sub></td>
-<td width="20%" valign="top"><b>如何持续变好？</b><br><sub>让每次实验、审批和执行结果反哺下一轮增长策略。</sub></td>
-</tr>
-</table>
-
-GrowthEvo 的核心体验是一条完整的增长闭环：
-
-> **Discover → Decide → Design → Validate → Approve → Execute → Learn**
-
-它不是单独的一张报表，也不是只会给建议的助手。你可以从机会发现开始，把人群、动作、证据、实验和后续动作连成一条清晰的增长路径。
-
----
-
-## 增长机会
-
-### Opportunity Map · 先看“真实增量”，再决定把资源投向哪里
-
-<p align="center">
-  <img src="docs/assets/product/readme-opportunity-map.png" alt="GrowthEvo Opportunity Map" width="100%" />
-</p>
-
-Opportunity Map 把 **人群规模 × 增量提升 × 价值 × 可执行性** 放到同一张视图里。团队可以快速区分：
-
-- 规模大、增量高，值得优先行动的机会；
-- 自然转化已经很高，但继续触达价值有限的人群；
-- 有潜力但需要更多证据的机会；
-- 更适合保持“不触达”、避免过度营销的人群。
-
-这样，增长资源不再只按照“谁最容易买”分配，而是围绕“哪里真的能多创造结果”分配。
-
----
-
-## 策略与实验
-
-### Campaign Studio · 把洞察变成可执行的增长方案
-
-<p align="center">
-  <img src="docs/assets/product/readme-campaign-studio.png" alt="GrowthEvo Campaign Studio" width="100%" />
-</p>
-
-Campaign Studio 把一个增长想法拆成清晰的工作流：**目标、人群、策略、创意、实验、执行与证据**。团队可以在同一页检查预算、候选动作、边界条件和预期影响，再进入审批与验证。
-
-这让 Campaign 不再是“先上线、再看结果”的黑盒，而是从设计阶段就带着明确假设和成功标准。
-
-### Experiment Center · 让每个结论都有上下文
-
-<p align="center">
-  <img src="docs/assets/product/readme-experiments.png" alt="GrowthEvo Experiment Center" width="100%" />
-</p>
-
-实验中心集中展示正在运行与已经成熟的实验：覆盖人群、分组、观察周期、增量结果、业务影响、不确定性与保护指标都放在同一上下文中。
-
-对增长团队来说，重点不是“实验显著了吗”这一句话，而是 **这个结果是否值得继续扩大、是否需要更多观察，以及下一步应该做什么**。
-
----
-
-## Growth Agent
-
-Growth Agent 是贯穿产品的增长协作助手。它会围绕当前目标，结合机会、证据、边界与工作状态，帮助团队整理下一步动作，而不是脱离上下文给出泛化建议。
-
-<p align="center">
-  <img src="docs/assets/product/readme-agent.png" alt="GrowthEvo Growth Agent 工作空间" width="100%" />
-</p>
-
-<p align="center"><sub>Growth Agent · 目标、上下文、证据、约束与行动过程保持在同一个工作空间</sub></p>
-
-在 GrowthEvo 中，Agent 更像一名坐在驾驶舱里的增长搭档：
-
-<table>
-<tr>
-<td width="25%" valign="top"><b>读懂目标</b><br><sub>围绕真实增量，而不是表面指标优化。</sub></td>
-<td width="25%" valign="top"><b>检查证据</b><br><sub>在提出动作前先看人群、历史结果与可信度。</sub></td>
-<td width="25%" valign="top"><b>尊重边界</b><br><sub>把预算、频次、审批和不触达选择纳入建议。</sub></td>
-<td width="25%" valign="top"><b>推动行动</b><br><sub>把建议落到 Campaign、实验和审批流程，而不是停在聊天框。</sub></td>
-</tr>
-</table>
-
-> **目标不是让 AI 替团队做决定，而是让每个决定更快、更清楚、更有依据。**
-
----
-
-## 治理与进化
-
-### 治理与审批 · 重要动作有依据，也有人把关
-
-<p align="center">
-  <img src="docs/assets/product/readme-approvals.png" alt="GrowthEvo 治理与审批" width="100%" />
-</p>
-
-高影响增长动作不应该藏在聊天记录或零散表格里。GrowthEvo 把受众、预算、预期影响、证据与风险放在同一处，让团队在扩大动作前清楚看到 **为什么要做、影响多大、谁来确认**。
-
-审批不是增长的刹车，而是让团队能够放心加速：低风险动作保持流畅，高影响动作进入更明确的确认路径。
-
-### Evolution Lab · 把每一次结果变成下一轮更好的起点
-
-<p align="center">
-  <img src="docs/assets/product/readme-evolution.png" alt="GrowthEvo Evolution Lab" width="100%" />
-</p>
-
-GrowthEvo 不把一次活动结束当作终点。历史结果会进入持续复盘：哪些做法有效、哪些地方需要调整、哪些候选方案值得继续观察，都能在同一条演进路径里被追踪。
-
-这让“复盘”不再只是写一份总结，而是把真实结果直接带进下一轮增长决策。
-
----
-
-## 一套产品，覆盖完整增长节奏
-
-| 场景 | GrowthEvo 帮你做什么 |
-| --- | --- |
-| **增长驾驶舱** | 聚合增量收入、增量利润、ROI、渠道贡献、运行中的策略与关键待办 |
-| **机会发现** | 识别值得干预的人群，比较潜在增量与价值 |
-| **策略设计** | 把目标、人群、动作、预算、创意和边界组织成完整方案 |
-| **实验验证** | 跟踪分组、成熟度、增量效果、业务影响与保护指标 |
-| **审批协作** | 把高影响动作进入明确的人工审批流程 |
-| **实时决策** | 在具体用户与具体时刻选择更合适的动作或不触达 |
-| **Growth Agent** | 基于当前上下文帮助梳理证据、方案和下一步行动 |
-| **复盘与进化** | 把历史实验和决策结果沉淀为下一轮增长的输入 |
-
----
-
-## 效果证据
-
-GrowthEvo 的产品理念建立在一个简单原则上：**增长应该证明“多创造了什么”，而不只是“发生了什么”。**
-
-在公开数据集 **Criteo Uplift v2.1** 的预先固定评估中，GrowthEvo 使用 **13,979,592** 条源数据完成目标人群评估：
-
-<table>
-<tr>
-<td width="33%" align="center"><h3>+0.94 pp</h3><sub>整体人群增量访问</sub></td>
-<td width="33%" align="center"><h3>+9.38 pp</h3><sub>Top 10% 目标人群增量访问</sub></td>
-<td width="33%" align="center"><h3>13.98M</h3><sub>公开数据源记录</sub></td>
-</tr>
-</table>
-
-评估过程先固定候选方案和选择规则，再进入最终结果验证，避免在看到最终答案之后反过来挑选最好看的结论。
-
-- [查看 Criteo Uplift v2.1 增量目标评估](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md)
-- [查看 Open Bandit Dataset 策略评估](benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/README.md)
-
----
-
-## 移动体验
-
-GrowthEvo 的核心驾驶舱也适配移动场景，方便在会议、通勤或活动现场快速查看关键增长状态。
-
-<table>
-<tr>
-<td width="62%" valign="middle">
-<h3>随时知道增长发生了什么</h3>
-<p>移动视图保留最重要的增量收入、增量利润、ROI、趋势与渠道贡献，让团队不用回到桌面端才能回答“今天增长表现怎么样”。</p>
-<p>更适合快速查看、复盘和协作，而不是把复杂工作流硬塞进小屏幕。</p>
+<td width="25%" valign="top">
+<h4>理解你的目标</h4>
+从一句自然语言开始，不必先找到正确的页面或报表。
 </td>
-<td width="38%" align="center">
-<img src="docs/assets/product/readme-mobile.png" alt="GrowthEvo 移动端" width="280" />
+<td width="25%" valign="top">
+<h4>了解工作现场</h4>
+结合增长机会、活动、实验与审批信息，而不是脱离上下文回答。
+</td>
+<td width="25%" valign="top">
+<h4>推动下一步</h4>
+在授权范围内查看页面、推进任务，或生成等待确认的活动草案。
+</td>
+<td width="25%" valign="top">
+<h4>让过程看得见</h4>
+能够回看执行步骤、状态及反馈；遇到需要确认的操作会停下来。
 </td>
 </tr>
 </table>
+
+> **例如，你可以说：**“帮我看看最近有哪些值得关注的增长机会，带我去相关实验页面，并整理下一步行动。”
+
+GrowthEvo 的 Agent 不只是回答这个问题，而是围绕目标开展可观察的站内操作。它不会绕过人的审批，也不会自行发布营销活动。
+
+**产品体验的重点是：** 目标在同一个地方提出，任务在同一个地方推进，结果也在同一个地方核对。
+
+---
+
+## 自进化中心
+
+### 不只是完成今天的任务，还要让下一次更好
+
+<p align="center">
+  <img src="docs/assets/product/nightfall-evolution.png" alt="GrowthEvo Evolution Lab 自进化中心：改进候选、验证阶段与审批状态" width="100%" />
+</p>
+<p align="center"><sub>Evolution Lab · 浏览器实拍，候选与数值为演示样例，不代表实际进化收益</sub></p>
+
+
+真正长期有价值的 Agent，不应该每一次都像第一次工作。
+
+GrowthEvo 将执行过程中的有效经验、任务受阻的原因和可改进的工作方式，整理成可以追踪的改进候选。Evolution Lab 让团队看见 Agent **正在尝试改善什么、比较结果如何、是否值得采用**。
+
+| 你在产品中看到 | 对你意味着什么 |
+| --- | --- |
+| **运行轨迹** | 知道 Agent 实际做过哪些事情，而不只看最后一句回答 |
+| **改进候选** | 了解哪些工作方式可能值得调整，以及为什么 |
+| **对照验证** | 在采用新做法之前，先与现有表现进行比较 |
+| **审查与批准** | 关键变化经过检查与人工把关，不由 Agent 自行决定 |
+| **持续积累** | 被认可的改进成为下一次工作的新起点 |
+
+这是 GrowthEvo 对“自进化”的产品定义：**有记忆的改进方向、有证据的比较、有边界的采用。**
+
+目前已具备真实轨迹驱动的受限改进候选和配对离线验证能力；完整的生产级自动推广与自主修改源码尚未开放。我们宁愿明确告诉你哪些改进还在验证，也不展示没有来源的“进化提升百分比”。
+
+---
+
+## Nightfall 体验
+
+### 让复杂工作流拥有安静、精密的赛博界面
+
+GrowthEvo 的 **Nightfall** 设计语言，不是用大量霓虹装饰来制造科技感，而是让你在信息密集的场景中，依然能迅速看清**目标、当前状态、下一步操作和风险边界**。
+
+<details>
+<summary><b>Nightfall 的设计关键词</b></summary>
+
+- **深色与克制：** 深海军蓝工作台，搭配少量青色高亮，减少长时间工作的视觉疲劳。
+- **任务优先：** Agent OS 与自进化中心位于产品导航最前面。
+- **清晰的层次：** 对话、任务、证据、活动与审批有明确的阅读顺序。
+- **桌面与移动兼顾：** 不只是把桌面页面缩小，也重视小屏幕上的导航与操作。
+- **真实状态：** 不用虚构的运行次数或增长成绩填满界面。
+
+</details>
+
+从首页的任务入口，到 Agent 侧栏、增长驾驶舱、实验和审批，Nightfall 把多个业务空间连接成一个统一的操作环境。
+
+[了解 Nightfall 设计语言](docs/DESIGN_SYSTEM.md)
+
+<p align="center">
+  <img src="docs/assets/product/nightfall-mobile.png" alt="GrowthEvo Nightfall 移动端：任务操作入口、运行闭环与移动导航" width="315" />
+</p>
+<p align="center"><sub>Nightfall 移动端 · 真实浏览器截图（示例业务数据）</sub></p>
+
+
+---
+
+## 一个工作空间，完成增长全流程
+
+增长不应该被拆散在聊天窗口、分析报表、活动工具和审批表格之间。GrowthEvo 把这些工作组织成一条自然的路径：
+
+**发现机会 → 制定方案 → 检查证据 → 设计实验 → 人工确认 → 跟踪结果 → 持续改进**
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<h3>Opportunity Map · 找到真正值得行动的机会</h3>
+知道哪些人群可能需要帮助、哪些机会值得投入资源，以及何时最好先不要打扰用户。
+</td>
+<td width="50%" valign="top">
+<h3>Campaign Studio · 让想法成为具体方案</h3>
+把目标、受众、动作、预算和限制条件汇集在一个地方，让方案可以讨论、修改与确认。
+</td>
+</tr>
+<tr>
+<td valign="top">
+<h3>Experiment Center · 不靠感觉判断结果</h3>
+在一个视图里了解实验进展、主要结果与需要继续观察的风险，帮助团队决定下一步。
+</td>
+<td valign="top">
+<h3>Approval Center · 关键动作有人把关</h3>
+对重要的业务动作保留清晰的审批过程，让团队知道谁需要确认，以及为什么。
+</td>
+</tr>
+<tr>
+<td valign="top">
+<h3>Growth Dashboard · 随时了解整体进展</h3>
+把增长趋势、活动状态、渠道表现和待办事项放到同一个驾驶舱，减少来回切换。
+</td>
+<td valign="top">
+<h3>Evolution Lab · 把经验带到下一次工作</h3>
+让改进建议、验证结果与采用状态可见，使 Agent 的工作方式能够逐步改善。
+</td>
+</tr>
+</table>
+
+### 一次真实的产品旅程<p align="center">
+  <img src="docs/assets/product/nightfall-campaign-studio.png" alt="GrowthEvo Campaign Studio：目标、受众、活动设计与实验工作流" width="100%" />
+</p>
+<p align="center"><sub>Campaign Studio · 浏览器实拍（演示工作空间）</sub></p>
+
+
+
+你可以从一句“最近有哪些值得行动的机会？”开始。Agent 帮你查看工作空间，带你进入相关页面；你在 Campaign Studio 中完善方案，在 Experiment Center 中跟踪验证，在审批中心决定是否继续推进。所有关键步骤都留下可查看的状态，下一轮工作不必重新从零梳理。
+
+**不行动，也是一个值得认真考虑的决定。** GrowthEvo 支持将“不触达”作为正式选择，避免为了制造活动量而打扰本来无需干预的人群。
+
+---
+
+## 为谁而设计
+
+| 团队 | 可以如何使用 GrowthEvo |
+| --- | --- |
+| **增长与生命周期团队** | 从发现机会到规划下一次用户互动，始终围绕实际业务目标行动 |
+| **CRM 与运营团队** | 让活动准备、内容协作、审批和执行进展有更清晰的上下文 |
+| **实验与分析团队** | 将实验和业务判断放在同一工作空间，方便共同讨论结果 |
+| **业务负责人** | 看到当前重点、潜在风险、待审批事项与持续改进的方向 |
+| **AI 产品与 Agent 团队** | 了解 Agent 实际采取的步骤，以及哪些改进已经得到验证 |
 
 ---
 
 ## 为什么是 GrowthEvo
 
-GrowthEvo 不是把更多图表堆到增长团队面前，而是重新组织增长决策的顺序：
+**我们不想再做一个“加了 AI 聊天框的 Dashboard”。**
 
-1. **先判断是否存在真实增量机会**，再决定是否行动；
-2. **先看证据与边界**，再选择动作；
-3. **把不触达视为有效选择**，减少无效营销；
-4. **让实验结果直接连接下一步决策**，而不是停留在复盘文档里；
-5. **让人和 Agent 在同一套上下文中协作**，保持目标、证据和执行一致。
+GrowthEvo 相信，下一代增长产品应该同时拥有三种能力：
 
-最终希望回答的不是“我们做了多少 Campaign”，而是：
+- **能够行动。** 从提建议走向受控的真实操作，减少人工在不同页面间重复搬运信息。
+- **能够解释。** 关键任务有过程可看，重要选择有证据可查，涉及风险时有人把关。
+- **能够进化。** 把工作过程积累成可验证的改进，而不是仅仅保存一段聊天记录。
 
-> **哪些动作真正创造了增量，为什么值得继续，以及下一次应该怎么做得更好。**
+这也是为什么产品的前两个入口始终是 **智能体操作系统** 和 **自进化中心**。
 
 ---
 
-## 进一步了解
+## 产品证据
 
-- [产品与项目文档](docs/)
-- [真实世界评估](docs/REAL_WORLD_BENCHMARKS.md)
-- [产品变更记录](CHANGELOG.md)
-- [参与贡献](CONTRIBUTING.md)
-- [安全说明](SECURITY.md)
+GrowthEvo 重视真实结果，也重视证据适用的范围。下面是仓库中可复核的**公开数据评估记录**，用于展示项目在增长场景中的验证工作；它们**不是客户投放收益，也不是 Agent 自进化后的效果承诺**。
+
+以 **Criteo Uplift v2.1** 公开数据集为例，项目针对 **13,979,592** 条记录进行了已固定评估条件的验证：
+
+<table>
+<tr>
+<td width="33%" align="center"><h3>+0.94 pp</h3><sub>整体人群增量访问</sub></td>
+<td width="33%" align="center"><h3>+9.38 pp</h3><sub>选定 Top 10% 人群增量访问</sub></td>
+<td width="33%" align="center"><h3>13.98M</h3><sub>公开数据记录</sub></td>
+</tr>
+</table>
+
+你可以直接查看原始记录：[Criteo 公开评估](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md) · [Open Bandit Dataset 公开评估](benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/README.md)。
+
+产品不应该把参考数据、演示画面和真实客户效果混为一谈。GrowthEvo 会持续保持这种区分。
+
+---
+
+## 体验 GrowthEvo
+
+### 先从演示工作空间开始
+
+你可以在本地启动 Nightfall 界面，探索 Agent、增长驾驶舱、活动、实验、自进化和审批等页面。
+
+```bash
+git clone https://github.com/jiaweine/GrowthEvo-Harness.git
+cd GrowthEvo-Harness
+python -m pip install -e '.[web]'
+GROWTHEVO_MODE=demo growthevo-web --host 127.0.0.1 --port 8765
+```
+
+打开 **http://127.0.0.1:8765**。
+
+演示工作空间使用明确标识的样例数据；体验真实 Agent 执行需要另行配置模型服务。当前的 Agent 操作范围是 **GrowthEvo 内部的受控业务工具和站内导航**，不是任意网站的通用浏览器自动控制。草案创建需要用户明确同意，审批与发布不会由 Agent 自行决定。
+
+需要接入真实工作区或进行正式部署？请查看 [运行与部署指南](docs/SELF_HOSTING.md) 以及 [Agent OS 使用说明](docs/AGENT_OPERATING_SYSTEM.md)。
+
+---
+
+## 更多关于 GrowthEvo
+
+[产品架构与能力边界](docs/AGENT_OPERATING_SYSTEM.md) · [Nightfall 设计规范](docs/DESIGN_SYSTEM.md) · [项目当前状态](docs/IMPLEMENTATION_STATUS.md) · [技术与研究资料](docs/ARCHITECTURE.md)
+
+[参与贡献](CONTRIBUTING.md) · [问题与建议](https://github.com/jiaweine/GrowthEvo-Harness/issues) · [安全政策](SECURITY.md)
 
 ---
 
@@ -268,8 +247,8 @@ GrowthEvo 不是把更多图表堆到增长团队面前，而是重新组织增�
 
 ### GrowthEvo
 
-**From Insight to Impact.**
+**From insight to action. From action to evolution.**
 
-<sub>让每一次触达，都创造真实的增长。</sub>
+<sub>让 AI 真正参与工作，让每一次行动成为下一次进步的起点。</sub>
 
 </div>

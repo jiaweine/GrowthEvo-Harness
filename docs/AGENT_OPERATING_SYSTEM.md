@@ -71,6 +71,12 @@ This deliberately separates **proven policy improvement**, **candidate discovery
 
 These are architectural references, not claims that this repository reproduces their experimental results.
 
+## Nonblocking recursive evaluation
+
+The EvolutionAuthority uses a three-stage critical section for held-out evaluations: **claim candidate and snapshot the active policy → release the operator lock while an independent evaluator runs → reacquire the lock to validate lineage and record evidence**. This prevents multi-task replay from blocking live operator policy reads. Competing evaluations of the same candidate are rejected; evaluator failures release the claim without manufacturing measurements. If an independently promoted policy replaces the parent while replay is running, the old candidate is marked `stale_evaluation` and cannot be promoted.
+
+This is in-process concurrency safety, not durable distributed ownership. Multiple replicas still require persistent compare-and-swap claims and external evidence verification before production promotion.
+
 ## Offline paired replay harness
 
 The built-in **PairedReplayEvaluator** in `growthevo/agent_os/benchmark.py` now runs the same locked task manifest twice through the actual `GrowthOperator` loop, using a fresh isolated model and tools for each task and candidate. It verifies actual first-party workspace observations and navigation intents, and counts blocked operations as safety failures. A model-generated final message alone does **not** pass an evaluation.

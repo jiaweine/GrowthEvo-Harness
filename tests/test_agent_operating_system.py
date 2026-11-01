@@ -108,21 +108,6 @@ def test_user_level_decision_data_is_not_exported_to_model():
     assert "private@example.com" not in feedback
 
 
-def test_user_level_decision_data_is_not_exported_to_model():
-    tools = make_tools(ReferenceProductState())
-    tools.readers["decisions"] = lambda: [
-        {"decision_id": "safe-id", "action_id": "NO_TREATMENT",
-         "entity_id": "private-customer", "context": {"email": "private@example.com"}}
-    ]
-    model = FakeModel(step("workspace.read", {"section": "decisions"}), finish())
-    result = run(GrowthOperator(model, tools, AgentTraceStore()))
-    assert result["status"] == "completed"
-    feedback = model.inputs[1]["previous_steps"][0]["feedback"]
-    assert "safe-id" in feedback
-    assert "private-customer" not in feedback
-    assert "private@example.com" not in feedback
-
-
 def test_mutation_needs_consent_and_prior_workspace_observation():
     state = ReferenceProductState()
     args = {"name": "Test", "goal": "Causal profit", "audience": "Dormant",
@@ -202,6 +187,95 @@ def test_provider_failure_is_not_silent_success():
     assert result["status"] == "provider_failure"
     assert not result["steps"]
     assert "private provider token" not in result["message"]
+
+
+def test_heldout_eval_does_not_lock_live_operator_or_share_mutable_claims():
+    from threading import Thread
+
+    authority = EvolutionAuthority()
+    candidate = authority.propose([
+        {"run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        for i in range(8)
+    ])
+    assert candidate is not None
+
+    def evaluate_live(baseline, proposal):
+        observed = []
+        thread = Thread(target=lambda: observed.append(authority.snapshot()),
+                        daemon=True)
+        thread.start()
+        thread.join(timeout=2)
+        assert not thread.is_alive(), "held-out replay blocked live policy reads"
+        assert observed[0]["fingerprint"] == baseline.fingerprint
+        assert authority.candidates()[0]["status"] == "evaluating"
+        # Another evaluator may not run the same candidate concurrently.
+        with pytest.raises(ValueError, match="already been evaluated"):
+            authority.evaluate(candidate.id, lambda a, b: {})
+        return {"baseline_success": 0.6, "candidate_success": 0.9,
+                "baseline_violations": 0, "candidate_violations": 0,
+                "baseline_cost": 1, "candidate_cost": 1.04,
+                "sample_size": 40, "evidence_id": "locked-independent-evidence"}
+
+    result = authority.evaluate(candidate.id, evaluate_live)
+    assert result.status == "awaiting_shadow_canary"
+    assert result.evaluation["candidate_success"] == 0.9
+
+
+def test_heldout_evaluator_failure_releases_claim_without_fabricated_results():
+    authority = EvolutionAuthority()
+    candidate = authority.propose([
+        {"run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        for i in range(8)
+    ])
+    assert candidate is not None
+
+    def offline_failure(_baseline, _proposal):
+        raise RuntimeError("isolated replay unavailable")
+
+    with pytest.raises(RuntimeError, match="unavailable"):
+        authority.evaluate(candidate.id, offline_failure)
+    assert candidate.status == "requires_independent_eval"
+    assert candidate.evaluation is None
+    assert authority.active.step_budget == 6
+
+
+def test_heldout_results_are_rejected_if_active_parent_changes_during_replay():
+    authority = EvolutionAuthority()
+    step_traces = [
+        {"run_id": f"op_limited_{i}", "status": "step_limit", "steps": []}
+        for i in range(8)
+    ]
+    candidate = authority.propose(step_traces)
+    assert candidate is not None
+    read_traces = [
+        {"run_id": f"op_observed_{i}", "status": "completed",
+         "steps": [{"tool": "workspace.read", "section": "opportunities", "outcome": "ok"}]}
+        for i in range(8)
+    ]
+    second = authority.propose(read_traces)
+    assert second is not None
+
+    def metrics(_baseline, _proposal):
+        return {"baseline_success": 0.60, "candidate_success": 0.85,
+                "baseline_violations": 0, "candidate_violations": 0,
+                "baseline_cost": 1, "candidate_cost": 1,
+                "sample_size": 40, "evidence_id": "verified-independent-replay"}
+
+    authority.evaluate(second.id, metrics)
+
+    def stale_replay(baseline, proposal):
+        assert baseline.step_budget == 6
+        assert proposal.step_budget == 7
+        authority.promote(second.id, operator_approved=True,
+                          shadow_passed=True, canary_passed=True,
+                          evidence_reference="separate-human-canary-evidence")
+        return metrics(baseline, proposal)
+
+    with pytest.raises(ValueError, match="active policy changed"):
+        authority.evaluate(candidate.id, stale_replay)
+    assert candidate.status == "stale_evaluation"
+    assert candidate.evaluation is None
+    assert authority.active.preferred_first_read == "opportunities"
 
 
 def test_evolution_archives_descendants_only_after_external_evidence():
