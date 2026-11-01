@@ -85,6 +85,21 @@ def test_user_level_decision_data_is_not_exported_to_model():
     assert "private@example.com" not in feedback
 
 
+def test_user_level_decision_data_is_not_exported_to_model():
+    tools = make_tools(ReferenceProductState())
+    tools.readers["decisions"] = lambda: [
+        {"decision_id": "safe-id", "action_id": "NO_TREATMENT",
+         "entity_id": "private-customer", "context": {"email": "private@example.com"}}
+    ]
+    model = FakeModel(step("workspace.read", {"section": "decisions"}), finish())
+    result = run(GrowthOperator(model, tools, AgentTraceStore()))
+    assert result["status"] == "completed"
+    feedback = model.inputs[1]["previous_steps"][0]["feedback"]
+    assert "safe-id" in feedback
+    assert "private-customer" not in feedback
+    assert "private@example.com" not in feedback
+
+
 def test_mutation_needs_consent_and_prior_workspace_observation():
     state = ReferenceProductState()
     args = {"name": "Test", "goal": "Causal profit", "audience": "Dormant",
