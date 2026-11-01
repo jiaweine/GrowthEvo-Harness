@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from dataclasses import dataclass
 from hashlib import sha256
 import json
 from threading import RLock
@@ -34,20 +33,13 @@ class ToolDenied(ValueError):
     """The attempted operation is not permitted by the tool contract."""
 
 
-@dataclass(frozen=True)
-class ToolDefinition:
-    name: str
-    description: str
-    effect: str  # read, navigation, draft, approval
-
-
-TOOL_DEFINITIONS = (
-    ToolDefinition("workspace.read", "Read one section: " + ", ".join(sorted(SECTIONS)) + ". Arguments: {section:string}.", "read"),
-    ToolDefinition("page.navigate", "Navigate the first-party Growth OS UI to one of the published routes. Arguments: {route:string}.", "navigation"),
-    ToolDefinition("campaign.draft", "Create a real persisted campaign DRAFT only; never activate, publish or spend. Arguments: {name:string,goal:string,audience:string,budget:number,candidate_action_ids:string[]}.", "draft"),
-    ToolDefinition("approval.review", "Pause and request a human review for an existing approval. NEVER approve on behalf of the user. Arguments: {approval_id:string}.", "approval"),
-)
-
+# ToolSpec/ToolRegistry from the existing harness are the sole tool catalogue.
+TOOL_EFFECTS = {
+    "workspace.read": "read",
+    "page.navigate": "navigation",
+    "campaign.draft": "draft",
+    "approval.review": "approval",
+}
 
 def _contract_args(args: Any, expected: frozenset[str]) -> dict[str, Any]:
     if not isinstance(args, dict) or set(args) != expected:
@@ -71,18 +63,38 @@ class GrowthTools:
         self.product_state = product_state
         # Use the pre-existing harness registry for tool lookup and dispatch.
         self.registry = ToolRegistry()
-        for definition in TOOL_DEFINITIONS:
-            self.registry.register(ToolSpec(
-                name=definition.name,
-                fn=partial(self._dispatch, definition.name),
-                read_only=definition.effect != "draft",
-                description=definition.description,
-            ))
+        specs = (
+            ToolSpec(
+                "workspace.read", partial(self._dispatch, "workspace.read"),
+                read_only=True,
+                description="Read first-party workspace data. Args: {section:string}. Sections: "
+                + ", ".join(sorted(SECTIONS)),
+            ),
+            ToolSpec(
+                "page.navigate", partial(self._dispatch, "page.navigate"),
+                read_only=True,
+                description="Navigate a first-party Growth OS page. Args: {route:string}. Routes: "
+                + ", ".join(sorted(ROUTES)),
+            ),
+            ToolSpec(
+                "campaign.draft", partial(self._dispatch, "campaign.draft"),
+                read_only=False,
+                description="Create a campaign Draft after a workspace read and explicit consent. "
+                "Args: {name:string,goal:string,audience:string,budget:number,candidate_action_ids:string[]}",
+            ),
+            ToolSpec(
+                "approval.review", partial(self._dispatch, "approval.review"),
+                read_only=True,
+                description="Request human review; never approve automatically. Args: {approval_id:string}",
+            ),
+        )
+        for spec in specs:
+            self.registry.register(spec)
 
     def describe(self) -> list[dict[str, str]]:
         return [
             {"name": name, "description": self.registry.get(name).description,
-             "effect": next(item.effect for item in TOOL_DEFINITIONS if item.name == name)}
+             "effect": TOOL_EFFECTS[name]}
             for name in self.registry.names()
         ]
 
@@ -203,7 +215,7 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
             "type": "object",
             "properties": {
                 "kind": {"type": "string", "enum": ["tool", "finish"]},
-                "tool": {"type": "string", "enum": ["none"] + [t.name for t in TOOL_DEFINITIONS]},
+                "tool": {"type": "string", "enum": ["none"] + list(self.tools.registry.names())},
                 "arguments_json": {"type": "string", "maxLength": 3000},
                 "message": {"type": "string", "maxLength": 800},
             },
@@ -260,7 +272,7 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                     if not events:
                         message = "No workspace operation was performed. " + message
                     break
-                if tool not in {t.name for t in TOOL_DEFINITIONS}:
+                if tool not in self.tools.registry.names():
                     raise ToolDenied("model selected an unknown tool")
                 args = json.loads(response["arguments_json"])
                 if not isinstance(args, dict):
@@ -276,7 +288,7 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                 outcome, data = self.tools.execute(tool, args, allow_drafts=allow_drafts,
                                                    observed=observed)
                 observed |= tool == "workspace.read" and outcome == "ok"
-                event = {"tool": tool, "effect": next(t.effect for t in TOOL_DEFINITIONS if t.name == tool),
+                event = {"tool": tool, "effect": TOOL_EFFECTS[tool],
                          "outcome": outcome, "arguments_hash": fingerprint[:16]}
                 if tool == "workspace.read":
                     event["section"] = data["section"]
