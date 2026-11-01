@@ -221,8 +221,9 @@ def test_mutable_dashboard_fields_are_html_escaped() -> None:
     assert "safeColor" in dashboard
     assert "go('campaignStudio')" in dashboard
     assert "esc(liveText(x.title))" in live_pages
-    assert "esc(liveText(x.task))" in live_pages
-    assert "esc(liveText(x.problem))" in live_pages
+    assert "esc(liveText(run.run_id))" in live_pages
+    assert "esc(liveText(run.status))" in live_pages
+    assert "esc(liveText(item.reason))" in live_pages
 
 
 def test_browser_auth_smoke_covers_bearer_and_401_reauthentication() -> None:
