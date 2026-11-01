@@ -145,6 +145,30 @@ def test_approval_is_interrupt_only_and_arbitrary_route_denied():
     assert run(invalid)["status"] == "blocked"
 
 
+def test_finishing_without_observing_is_not_claimed_as_completed():
+    model = FakeModel(finish("Everything was executed."))
+    result = run(GrowthOperator(model, make_tools(ReferenceProductState()),
+                                AgentTraceStore()))
+    assert result["status"] == "unverified"
+    assert result["tool_calls"] == 0
+    assert "No workspace operation" in result["message"]
+
+
+def test_draft_tool_uses_existing_request_validator_and_control_action():
+    state = ReferenceProductState()
+    draft = {"name": "Checked draft", "goal": "Incremental profit",
+             "audience": "Eligible dormant users", "budget": 120,
+             "candidate_action_ids": ["push_reminder"]}
+    model = FakeModel(step("workspace.read", {"section": "opportunities"}),
+                      step("campaign.draft", draft), finish())
+    result = run(GrowthOperator(model, make_tools(state), AgentTraceStore()),
+                 allow_drafts=True)
+    assert result["status"] == "completed"
+    assert state.campaigns()[0]["candidate_action_ids"] == [
+        "NO_TREATMENT", "push_reminder"
+    ]
+
+
 def test_provider_failure_is_not_silent_success():
     class Broken:
         async def agenerate(self, **kwargs):
