@@ -77,10 +77,25 @@ realtime=async function liveRealtime(){
 };
 
 harness=async function liveHarness(){
- if(useDemo)return fixtureHarnessPage();
- const rows=await api('/api/harness/runs');const items=Array.isArray(rows)?rows:[];
- $('#view').innerHTML=`${head('Agent Runtime','服务端 Harness Run API：身份、工具调用、策略结果、证据与成本可审计。')}${sectionNav(RUNTIME_NAV,'harness')}${items.length?`<div class="card surface-card table-scroll"><div class="surface-title"><div><h2>Harness Runs</h2><p>当前 reference run history。</p></div><span class="soft-badge green">Live API</span></div><table class="opportunity-table"><thead><tr><th>Run</th><th>Task</th><th>Agent</th><th>Harness</th><th>Policy</th><th>Evidence</th><th>Tools</th><th>Latency</th><th>Outcome</th></tr></thead><tbody>${items.map(x=>`<tr><td><code>${esc(liveText(x.id))}</code></td><td>${esc(liveText(x.task))}</td><td>${esc(liveText(x.agent_id))}</td><td>${esc(liveText(x.harness_id))}</td><td>${esc(liveText(x.policy))}</td><td>${esc(liveText(x.evidence))}</td><td>${esc(liveText(x.tool_calls))}</td><td>${esc(liveText(x.latency_ms))} ms</td><td>${esc(liveText(x.outcome))}</td></tr>`).join('')}</tbody></table></div>`:emptyState('暂无 Harness Run','Harness API 当前没有返回 run。')}`;
- bindProductActions();
+  if(useDemo)return fixtureHarnessPage();
+  const raw=await api('/api/harness/runs');
+  const runs=Array.isArray(raw)?raw:[];
+  const body=runs.map(run=>{
+    const steps=Array.isArray(run.steps)?run.steps:[];
+    const names=steps.map(step=>step.tool+': '+step.outcome).join(' · ');
+    return '<tr><td><code>'+esc(liveText(run.run_id))+'</code></td>'
+      +'<td>'+esc(liveText(run.status))+'</td>'
+      +'<td>'+esc(liveText(run.tool_calls,0))+'</td>'
+      +'<td>'+esc(liveText(run.policy_fingerprint))+'</td>'
+      +'<td>'+esc(names||'没有执行工具')+'</td></tr>';
+  }).join('');
+  $('#view').innerHTML=head('Agent Runtime','真实运行轨迹：工具、结果和演进策略指纹。仅保存有限的进程内运行记录。')
+    +sectionNav(RUNTIME_NAV,'harness')
+    +(runs.length?'<div class="card surface-card table-scroll"><table class="opportunity-table">'
+      +'<thead><tr><th>Run</th><th>Status</th><th>Tools</th><th>Policy</th><th>Observed actions</th></tr></thead>'
+      +'<tbody>'+body+'</tbody></table></div>'
+      :emptyState('还没有真实 Agent Run','在执行模式中输入目标，完成运行后这里会记录实际结果。'));
+  bindProductActions();
 };
 
 function approvalActionLabel(decision){return ({approve_shadow:'批准 Shadow',approve_1:'批准 1%',approve_5:'批准 5%',approve_25:'批准 25%',reject:'拒绝',return:'退回'})[decision]||decision}
@@ -99,12 +114,31 @@ approvals=async function liveApprovals(){
 };
 
 evolution=async function liveEvolution(){
- if(useDemo)return fixtureEvolutionPage();
- const rows=await api('/api/evolution/candidates');const items=Array.isArray(rows)?rows:[];
- $('#view').innerHTML=`${head('Evolution Lab','服务端 Evolution candidates：候选改进必须沿 Replay → Eval → Shadow → Canary → Promote 边界演进。')}${sectionNav(RUNTIME_NAV,'evolution')}${items.length?`<div class="evolution-list">${items.map(x=>`<div class="card evo-card"><div class="evo-head"><div><strong>${esc(liveText(x.id))}</strong><div class="evo-source">Source runs: ${esc(liveText(x.source_runs))}</div></div>${liveBadge(x.status)}</div><div class="evo-problem"><strong>问题</strong><br>${esc(liveText(x.problem))}<br><br><strong>候选改进</strong><br>${esc(liveText(x.candidate))}</div><div class="eval-grid">${Object.entries(x.offline_replay||{}).map(([key,value])=>`<div class="eval-cell"><span>${esc(key)}</span><strong>${esc(liveText(value))}</strong></div>`).join('')}</div><div class="promotion-line"><div class="promotion-stage done">Offline Replay</div><span class="promotion-arrow">→</span><div class="promotion-stage done">Eval</div><span class="promotion-arrow">→</span><div class="promotion-stage ${x.shadow==='PASS'?'done':''}">Shadow</div><span class="promotion-arrow">→</span><div class="promotion-stage active">Canary Gate</div><span class="promotion-arrow">→</span><div class="promotion-stage">Promote</div></div></div>`).join('')}</div>`:emptyState('暂无进化候选','Evolution API 当前没有返回 candidate。')}`;
- bindProductActions();
+  if(useDemo)return fixtureEvolutionPage();
+  const [raw,policy]=await Promise.all([
+    api('/api/evolution/candidates'),api('/api/evolution/policy')
+  ]);
+  const items=Array.isArray(raw)?raw:[];
+  const current='<div class="card surface-card"><div class="surface-title"><div>'
+    +'<h2>Active operator policy</h2><p>完成独立评测、Shadow、Canary 和人工批准后，才可推广新的策略。'
+    +' 进程内状态不代表跨实例持久化。</p></div></div>'
+    +'<p>Fingerprint: <code>'+esc(liveText(policy.fingerprint))+'</code>'
+    +' · Step budget: '+esc(liveText(policy.step_budget))+'</p></div>';
+  const cards=items.map(item=>'<div class="card evo-card"><div class="evo-head">'
+    +'<strong>'+esc(liveText(item.id))+'</strong>'+liveBadge(item.status)+'</div>'
+    +'<div class="evo-problem">来源轨迹：'+esc(liveText(item.source_count))
+    +' · Parent: <code>'+esc(liveText(item.parent))+'</code>'
+    +'<p>'+esc(liveText(item.reason))+'</p>'
+    +'<p>候选策略：'+esc(JSON.stringify(item.proposal||{}))+'</p>'
+    +(item.evaluation?'<p>独立评测：'+esc(JSON.stringify(item.evaluation))+'</p>':
+      '<p>等待独立评测，尚无经过验证的提升结果。</p>')
+    +'</div></div>').join('');
+  $('#view').innerHTML=head('Evolution Lab','从真实失败轨迹构建递归改进候选；没有独立证据就不会声称进化成功。')
+    +sectionNav(RUNTIME_NAV,'evolution')+current
+    +(items.length?'<div class="evolution-list">'+cards+'</div>':
+      emptyState('暂无可验证的进化候选','真实运行轨迹不足，或尚未发现可提议的安全修改。'));
+  bindProductActions();
 };
-
 
 campaigns=async function liveCampaigns(){
  if(useDemo)return fixtureCampaignsPage();
