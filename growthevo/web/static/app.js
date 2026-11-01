@@ -50,7 +50,7 @@ const COMMAND_ITEMS=[
 ];
 const DATE_PRESETS=['最近 7 天','最近 30 天','最近 90 天'];
 const CHANNEL_PRESETS=['全部渠道','App Push','站内消息','Email','短信','广告','微信'];
-const AGENT_MODES=['执行模式','策略模式','证据模式'];
+const AGENT_MODES=['执行模式','策略模式'];
 let utilityMenuActions=[];
 let agentModeIndex=0;
 let agentRequestController=null;
