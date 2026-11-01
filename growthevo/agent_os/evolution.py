@@ -70,6 +70,7 @@ class EvolutionAuthority:
                 return None
             recent = real[:30]
             step_limited = sum(t.get("status") == "step_limit" for t in recent)
+            # A model finish is not evidence of task success; this only mines a candidate.
             completed = [t for t in recent if t.get("status") == "completed"]
             new_policy: OperatorPolicy | None = None
             reason = ""
@@ -88,7 +89,7 @@ class EvolutionAuthority:
                 if (counts[preferred] >= 4 and counts[preferred] / len(completed) >= 0.7
                     and preferred != self.active.preferred_first_read):
                     new_policy = replace(self.active, preferred_first_read=preferred)
-                    reason = "Repeated successful first-read tool pattern"
+                    reason = "Frequent first-read pattern among model-finished runs (task success unverified)"
             if new_policy is None:
                 return None
             if any(c.parent == self.active.fingerprint
