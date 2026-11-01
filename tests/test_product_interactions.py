@@ -44,7 +44,9 @@ def test_agent_is_reversible_and_renders_visible_feedback() -> None:
     assert "appendAgentMessage('user',goal)" in app
     assert "appendAgentMessage('agent',demoAgentResponse(goal))" in app
     assert "const target=$('#agent-achievement')" in app
-    assert "本周增量成果" in app
+    assert "执行与演进观测" in app
+    assert "api(\'/api/harness/runs\')" in app
+    assert "api(\'/api/evolution/candidates\')" in app
 
 
 def test_dashboard_controls_change_state_or_navigate() -> None:
