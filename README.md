@@ -15,10 +15,6 @@
 
 </div>
 
----
-
-## 智能体操作系统 
-
 <p align="center">
   <img src="docs/assets/product/nightfall-dashboard.png" alt="GrowthEvo Nightfall 智能体操作系统主界面：任务控制台、增长驾驶舱与 Agent 操作侧栏" width="100%" />
 </p>
