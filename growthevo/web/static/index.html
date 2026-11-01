@@ -58,13 +58,17 @@
       <div class="agent-head">
         <div class="agent-title"><span class="agent-logo">✦</span><strong>Growth Agent</strong><span class="online-dot"></span><span class="online-text">在线</span></div>
         <div class="agent-head-actions">
-          <button class="mode-btn" id="agent-mode" type="button">策略模式⌄</button>
+          <button class="mode-btn" id="agent-mode" type="button">执行模式⌄</button>
           <button class="agent-close" id="agent-close" type="button" aria-label="关闭 Growth Agent">×</button>
         </div>
       </div>
       <div class="agent-body" id="agent-body"></div>
       <form class="agent-composer" id="agent-form">
         <textarea id="agent-input" rows="2" placeholder="继续提问，或输入指令..."></textarea>
+        <label class="agent-draft-consent" style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8390a3;margin:4px 0 7px;">
+          <input id="agent-draft-consent" type="checkbox" />
+          授权 AI 创建 Campaign 草案（不含发布或审批）
+        </label>
         <input id="agent-file-input" type="file" hidden />
         <div class="composer-tools"><button id="agent-attach" type="button" aria-label="附件">⌕</button><button id="agent-voice" type="button" aria-label="语音">♩</button><button class="send" type="submit" aria-label="发送">➤</button></div>
       </form>
