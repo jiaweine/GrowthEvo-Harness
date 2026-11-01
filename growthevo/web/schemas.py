@@ -44,7 +44,7 @@ class AgentPlanRequest(RequestModel):
 class AgentRunRequest(RequestModel):
     goal: str = Field(min_length=3, max_length=4000)
     allow_draft_writes: StrictBool = False
-    max_steps: int = Field(default=6, ge=1, le=8)
+    max_steps: int | None = Field(default=None, ge=1, le=8)
 
 
 class ApprovalDecisionRequest(RequestModel):
