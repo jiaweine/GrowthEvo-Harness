@@ -461,8 +461,9 @@ function init(){
 
 function parentRoute(route){return (typeof ROUTE_PARENT!=='undefined'&&ROUTE_PARENT[route])||route}
 function active(){
-  const parent=parentRoute(state.route);
-  $$('[data-route]').forEach(button=>button.classList.toggle('active',button.dataset.route===parent));
+  // Dedicated top-level entries must not be shadowed by their legacy parent.
+  const parent=NAV.some(item=>item[0]===state.route)?state.route:parentRoute(state.route);
+  $('[data-route]').forEach(button=>button.classList.toggle('active',button.dataset.route===parent));
 }
 function go(route){
   if(route==='agent'){openAgent();return}
