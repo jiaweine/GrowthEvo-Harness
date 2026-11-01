@@ -205,3 +205,43 @@ def test_web_operator_unconfigured_fails_closed(monkeypatch):
         assert client.post("/api/agent/run", json={
             "goal": "Find incremental impact", "allow_draft_writes": "yes"
         }).status_code == 422
+
+
+
+def test_live_api_executes_real_model_tool_loop(monkeypatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from growthevo.llm.provider_pool import ProviderFailoverClient, ProviderRoute
+    import growthevo.web.app as web_app
+
+    provider = FakeModel(step("workspace.read", {"section": "opportunities"}),
+                         step("page.navigate", {"route": "experiments"}),
+                         finish("Observed opportunities and opened experiments."))
+    provider.provider_name = "fixture"
+    provider.model = "pinned-fixture"
+
+    async def close_provider():
+        return None
+
+    provider.aclose = close_provider
+    pool = ProviderFailoverClient([ProviderRoute("fixture", provider)])
+    monkeypatch.setenv("GROWTHEVO_MODE", "api")
+    monkeypatch.setenv("OPENAI_API_KEY", "fixture-secret")
+    monkeypatch.setenv("GROWTHEVO_OPENAI_MODEL", "pinned-fixture")
+    monkeypatch.setattr(web_app, "build_provider_pool_from_env", lambda: pool)
+
+    with TestClient(web_app.create_app()) as client:
+        response = client.post("/api/agent/run", json={
+            "goal": "Inspect opportunity evidence and navigate to experiments",
+            "allow_draft_writes": False
+        })
+        assert response.status_code == 200
+        assert response.json()["status"] == "completed"
+        assert response.json()["navigation"] == "experiments"
+        assert len(response.json()["steps"]) == 2
+        traces = client.get("/api/harness/runs").json()
+        assert len(traces) == 1
+        assert traces[0]["run_id"] == response.json()["run_id"]
+        assert client.get("/api/evolution/candidates").json() == []
+        assert client.get("/api/evolution/policy").json()["step_budget"] == 6
