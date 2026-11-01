@@ -1,6 +1,6 @@
 const REFERENCE_FIXTURE_ROUTES=new Set();
 const baseRouteRender=render;
-const AGENT_PLAN_TIMEOUT_MS=30000;
+const AGENT_PLAN_TIMEOUT_MS=90000;
 let routeRenderEpoch=0;
 
 function markReferenceFixture(route){
@@ -49,7 +49,7 @@ const COMMAND_ITEMS=[
 ];
 const DATE_PRESETS=['最近 7 天','最近 30 天','最近 90 天'];
 const CHANNEL_PRESETS=['全部渠道','App Push','站内消息','Email','短信','广告','微信'];
-const AGENT_MODES=['策略模式','证据模式','执行模式'];
+const AGENT_MODES=['执行模式','策略模式','证据模式'];
 let utilityMenuActions=[];
 let agentModeIndex=0;
 let agentRequestController=null;
@@ -208,6 +208,33 @@ function renderAgentPlan(result){
   target.scrollTop=target.scrollHeight;
 }
 
+function renderAgentOperation(result){
+  const target=$('#agent-body');
+  if(!target)return;
+  const status=String(result&&result.status||'unknown');
+  const message=String(result&&result.message||'没有返回可验证的运行结果');
+  const steps=Array.isArray(result&&result.steps)?result.steps:[];
+  const details=steps.map((step,index)=>{
+    const label=String(step.tool||'unknown');
+    const outcome=String(step.outcome||'unknown');
+    const effect=String(step.effect||'read');
+    return '<div class="agent-plan-meta"><span>'+esc(String(index+1))+'. '+esc(label)+'</span><span>'+esc(effect)+'</span><span>'+esc(outcome)+'</span></div>';
+  }).join('');
+  target.insertAdjacentHTML('beforeend',
+    '<div class="chat-row agent-plan-row"><div class="chat-avatar agent">✦</div><div>'
+    +'<div class="chat-name">Growth Agent · 操作记录</div>'
+    +'<article class="agent-plan-card"><div class="agent-plan-head"><strong>'+esc(status)+'</strong></div>'
+    +'<p>'+esc(message)+'</p>'+details
+    +'<small>执行记录来自实际 API 调用；审批、发布和外部发送不会自动完成。</small>'
+    +'</article></div></div>');
+  target.scrollTop=target.scrollHeight;
+  const route=String(result&&result.navigation||'');
+  const approvedRoutes=new Set(['dashboard','opportunities','campaigns','campaignStudio',
+    'experiments','approvals','evolution','harness','realtime','evidence','execution',
+    'dataCenter','integrations','settings']);
+  if(approvedRoutes.has(route))go(route);
+}
+
 function demoAgentResponse(goal){
   if(/审批|风险/.test(goal))return '我会先检查影响用户、预算、证据等级和最大风险敞口，再把高影响动作送入审批路径。';
   if(/机会|增量|人群/.test(goal))return '我会优先按 Population × Incremental Lift × Support 排序，并保留 NO_TREATMENT 作为一等候选动作。';
@@ -237,16 +264,25 @@ async function submitAgentPrompt(event){
   setAgentBusy(true);
   const pending=appendAgentPending();
   try{
-    const result=await api('/api/agent/plan',{
+    const strategyMode=agentModeIndex===1;
+    const draftPermission=agentModeIndex===0&&Boolean($('#agent-draft-consent')&&$('#agent-draft-consent').checked);
+    const result=await api(strategyMode?'/api/agent/plan':'/api/agent/run',{
       method:'POST',
-      body:JSON.stringify({goal,primary_metric:'incremental_profit',guardrails:[]}),
+      body:JSON.stringify(strategyMode
+        ? {goal,primary_metric:'incremental_profit',guardrails:[]}
+        : {goal,allow_draft_writes:draftPermission,max_steps:6}),
       signal:controller.signal,
       timeoutMs:AGENT_PLAN_TIMEOUT_MS,
     });
     if(pending)pending.remove();
-    renderAgentPlan(result);
-    const audit=result&&result.planner_audit?result.planner_audit:null;
-    toast(audit&&audit.accepted?'AI 策略已通过 Critic':'安全计划已生成');
+    if(strategyMode){
+      renderAgentPlan(result);
+      const audit=result&&result.planner_audit?result.planner_audit:null;
+      toast(audit&&audit.accepted?'AI 策略已通过 Critic':'安全计划已生成');
+    }else{
+      renderAgentOperation(result);
+      toast(result.status==='completed'?'Agent 已完成任务':'Agent 已停止：'+result.status);
+    }
   }catch(error){
     if(pending)pending.remove();
     if(typeof isAuthRequiredError==='function'&&isAuthRequiredError(error)){
