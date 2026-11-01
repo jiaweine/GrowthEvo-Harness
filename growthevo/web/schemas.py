@@ -41,6 +41,12 @@ class AgentPlanRequest(RequestModel):
     guardrails: list[GuardrailName] = Field(default_factory=list, max_length=64)
 
 
+class AgentRunRequest(RequestModel):
+    goal: str = Field(min_length=3, max_length=4000)
+    allow_draft_writes: StrictBool = False
+    max_steps: int = Field(default=6, ge=1, le=8)
+
+
 class ApprovalDecisionRequest(RequestModel):
     decision: Literal["approve_shadow", "approve_1", "approve_5", "approve_25", "reject", "return"]
     note: str = Field(min_length=1, max_length=1000)
