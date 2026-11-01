@@ -163,4 +163,19 @@ function integrations(){const rows=DEMO.connectors;$('#view').innerHTML=`${head(
 function settings(){$('#view').innerHTML=`${head('设置','Workspace、环境、权限、预算、渠道与安全策略。')}<div class="workbench-grid"><div class="card surface-card"><div class="surface-title"><div><h2>Workspace Policy</h2><p>个人项目默认采用最小权限 + 显式 side-effect gate。</p></div></div><div class="evidence-row"><span>Environment</span><strong>GitHub Demo / Solo Production</strong></div><div class="evidence-row"><span>Default external risk</span><strong>L3 requires approval</strong></div><div class="evidence-row"><span>Hard budget</span><strong>Enabled</strong></div><div class="evidence-row"><span>NO_TREATMENT</span><strong>Required in candidate set</strong></div><div class="evidence-row"><span>Evidence gate</span><strong>Tier A/B preferred</strong></div><div class="evidence-row"><span>Audit retention</span><strong>Immutable snapshots</strong></div></div><div class="card surface-card"><div class="surface-title"><div><h2>GitHub Deployment</h2><p>当前不需要任何企业凭据。</p></div><span class="soft-badge green">Ready</span></div><div class="evidence-row"><span>Pages build</span><strong>GitHub Actions</strong></div><div class="evidence-row"><span>API base</span><strong>Demo fixture</strong></div><div class="evidence-row"><span>Future switch</span><strong>GROWTHEVO_API_BASE</strong></div><button class="mini-action" style="width:100%;margin-top:10px" data-demo-action="deployment-check">运行部署检查</button><div id="demo-deployment-result" hidden style="margin-top:8px;font-size:8px;line-height:1.5;color:#667085"></div></div></div>`;bindProductActions()}
 
 function render(){if(state.route==='dashboard')return dashboard();if(state.route==='campaigns')return campaigns();if(state.route==='campaignStudio')return campaignStudio();if(state.route==='experiments')return experiments();if(state.route==='execution')return execution();if(state.route==='evidence')return evidence();if(state.route==='opportunities')return opportunities();if(state.route==='realtime')return realtime();if(state.route==='harness')return harness();if(state.route==='approvals')return approvals();if(state.route==='evolution')return evolution();if(state.route==='data')return dataCenter();if(state.route==='integrations')return integrations();if(state.route==='settings')return settings();return dashboard()}
-function renderAgent(){$('#agent-body').innerHTML=`<div class="chat-time">Growth Agent</div><div class="agent-msg"><strong>当前目标</strong><p>提高真实增量，而不是只追求表面转化。</p></div><div class="agent-msg"><strong>工作方式</strong><p>我会先检查 Evidence、Support、NO_TREATMENT、预算和审批边界，再生成可执行草稿。</p></div><div class="agent-msg"><strong>稳定身份</strong><p>growth_agent · growth_harness · policy_growth_safe</p></div>`}
+function renderAgent(){
+  const body=$('#agent-body');
+  if(!body)return;
+  const mode=useDemo?'演示工作区':'真实工作区 · 工具操作';
+  body.innerHTML='<div class="agent-onboarding"><div class="agent-onboarding-eyebrow"><span class="os-signal"></span> AGENT OPERATING SYSTEM</div>'
+    +'<h3>你设定目标。<br><span>我负责推进任务。</span></h3>'
+    +'<p>读取工作区、调用受控工具、检验实际结果。高风险操作保持人工审批。</p>'
+    +'<div class="agent-onboarding-label">建议任务 / '+esc(mode)+'</div>'
+    +'<div class="agent-task-list"><button type="button" data-agent-prompt="读取当前增长机会，并导航到实验中心">分析增长机会 <span>↗</span></button>'
+    +'<button type="button" data-agent-prompt="检查待审批事项，带我进入审批界面">检查审批边界 <span>↗</span></button>'
+    +'<button type="button" data-agent-prompt="检查 Agent 的最近运行轨迹和自进化候选">检查演进状态 <span>↗</span></button></div></div>';
+  $('[data-agent-prompt]',body).forEach(button=>button.onclick=()=>{
+    const input=$('#agent-input');
+    if(input){input.value=button.dataset.agentPrompt;input.focus();}
+  });
+}
