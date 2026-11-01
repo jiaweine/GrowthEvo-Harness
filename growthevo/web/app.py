@@ -247,12 +247,8 @@ def create_app() -> Any:
             "approvals": product_state.approvals,
             "evidence": lambda: build_dashboard_payload(product_state)["evidence"],
             "actions": action_registry_payload,
-            "decisions": lambda: [
-                {field: item[field] for field in
-                 ("decision_id", "placement", "action_id", "policy_id", "evidence_tier")
-                 if field in item}
-                for item in decision_engine.recent(20)
-            ],
+            # Model-facing privacy filtering happens once in GrowthTools._dispatch.
+            "decisions": lambda: decision_engine.recent(20),
             "harness": lambda: agent_traces.recent(20),
             "evolution": evolution_authority.candidates,
         },
