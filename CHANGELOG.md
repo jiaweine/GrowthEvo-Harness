@@ -4,6 +4,14 @@ Notable GrowthEvo-Harness changes are recorded here. The current development lin
 
 ## Unreleased
 
+### Agent Operating System and recursive evolution
+
+- Added a bounded observe/act/observe operating loop with strict first-party read, navigation, draft and approval-interrupt tools, plus explicit user consent for draft writes.
+- Connected real operator traces to live Harness and Evolution Lab, replacing preloaded reference statistics in the live surface.
+- Added recursive, fingerprint-parented operator policy candidates with independent held-out evaluation and shadow/canary/operator promotion contracts; no claim of production automatic promotion or source-code rewriting.
+- Elevated the operating system and evidence-gated evolution to README and architecture documentation; added fake-provider and offline regression tests.
+
+
 ### Production operator surface
 
 - Fixed self-host Docker Compose forwarding so documented PostgreSQL pool, HTTP capacity, and guarded LLM settings from `.env` reach the API container instead of being silently ignored.

@@ -100,6 +100,12 @@ def validate_recent(value: JsonValue | str) -> str | None:
     return None if isinstance(value, list) else "recent decisions is not a list"
 
 
+def validate_trace_or_candidate_list(value: JsonValue | str) -> str | None:
+    # A fresh live workspace is expected to have no executed agent runs or
+    # evolution candidates. Fixtures must not be fabricated to satisfy stress.
+    return None if isinstance(value, list) else "expected JSON trace/candidate list"
+
+
 def validate_html(value: JsonValue | str) -> str | None:
     return None if isinstance(value, str) and "GrowthEvo" in value and 'id="app"' in value else "GrowthEvo app shell marker missing"
 
@@ -186,8 +192,8 @@ READ_CASES = [
     RequestCase("campaigns", "GET", "/api/campaigns", validate_list, empty_payload),
     RequestCase("experiments", "GET", "/api/experiments", validate_list, empty_payload),
     RequestCase("approvals", "GET", "/api/approvals", validate_list, empty_payload),
-    RequestCase("harness", "GET", "/api/harness/runs", validate_list, empty_payload),
-    RequestCase("evolution", "GET", "/api/evolution/candidates", validate_list, empty_payload),
+    RequestCase("harness", "GET", "/api/harness/runs", validate_trace_or_candidate_list, empty_payload),
+    RequestCase("evolution", "GET", "/api/evolution/candidates", validate_trace_or_candidate_list, empty_payload),
     RequestCase("actions", "GET", "/api/actions", validate_actions, empty_payload),
     RequestCase("decision-log", "GET", "/api/decisions/recent?limit=20", validate_recent, empty_payload),
     RequestCase("web-shell", "GET", "/", validate_html, empty_payload, response_kind="text"),

@@ -171,7 +171,7 @@
     click('#intro-close');
     check(document.querySelector('#intro-modal').hidden, 'product intro did not close');
 
-    check(document.querySelector('#agent-achievement').textContent.includes('本周增量成果'), 'agent achievement did not render');
+    check(document.querySelector('#agent-achievement').textContent.includes('执行与演进观测'), 'agent achievement did not render');
     finish();
   }
 

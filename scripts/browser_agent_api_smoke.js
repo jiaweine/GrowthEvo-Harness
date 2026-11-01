@@ -28,11 +28,18 @@
 
     document.querySelector('[data-route="agent"]').click();
     const input = document.querySelector('#agent-input');
+    input.value = '查看当前工作区';
+    document.querySelector('#agent-form').requestSubmit();
+    const unavailable = await waitFor(() => document.querySelector('#agent-body').textContent.includes('model_unavailable'));
+    check(unavailable, 'unconfigured execution must report no model and no actions');
+    document.querySelector('#agent-mode').click();
+    check(document.querySelector('#agent-mode').textContent.includes('策略模式'), 'failed to switch to conservative planner');
     input.value = '为新用户首购设计一个可验证的增长方案';
     document.querySelector('#agent-form').requestSubmit();
-    const rendered = await waitFor(() => document.querySelector('.agent-plan-card'));
+    const rendered = await waitFor(() => document.querySelectorAll('.agent-plan-card').length >= 2);
     check(rendered, 'real API agent plan card did not render');
-    const cardText = document.querySelector('.agent-plan-card')?.textContent || '';
+    const cards = Array.from(document.querySelectorAll('.agent-plan-card'));
+    const cardText = cards[cards.length - 1]?.textContent || '';
     check(cardText.includes('Deterministic 安全规划'), 'safe plan status missing');
     check(cardText.includes('新用户 7 日首购增量策略'), 'strategy title missing from live API result');
     check(cardText.includes('NO_TREATMENT vs 首单免邮'), 'experiment direction missing from live API result');

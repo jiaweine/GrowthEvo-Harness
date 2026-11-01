@@ -1,5 +1,8 @@
 # GrowthEvo-Harness · Implementation Status
 
+**Priority capabilities:** [Agent Operating System + Recursive Evolution](AGENT_OPERATING_SYSTEM.md). The model can choose constrained first-party workspace tools, receive real tool feedback and navigate internal pages; evolution candidates derive from recorded traces and require independent gates before activation. Run ledger and candidate archive remain process-local; no production self-editing or high-risk autonomous execution is claimed.
+
+
 GrowthEvo-Harness provides an integrated causal decision and product runtime for incremental user growth. The implementation combines causal effect estimation, constrained policy improvement, off-policy evaluation, locked evidence, guarded LLM proposals, durable product state, production authentication, browser/mobile product surfaces, and self-host recovery.
 
 ## Current capability snapshot

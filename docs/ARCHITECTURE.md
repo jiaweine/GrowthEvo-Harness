@@ -1,5 +1,8 @@
 # GrowthEvo Runtime Architecture
 
+**Product front door:** [Agent Operating System and evidence-gated recursive evolution](AGENT_OPERATING_SYSTEM.md). The browser-side operating agent uses a bounded, model-directed first-party tool loop with explicit draft consent; the causal-policy proposal plane remains separately gated. Actual traces inform archived policy descendants; independent evaluation and promotion authority stay outside the model.
+
+
 GrowthEvo separates causal estimation, semantic planning, numeric policy improvement, execution constraints, process credit, counterfactual evaluation, and evidence promotion into explicit contracts. The result is a modular runtime in which each layer has a clear statistical or operational responsibility.
 
 ## Architecture at a glance

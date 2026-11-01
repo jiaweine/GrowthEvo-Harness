@@ -11,6 +11,30 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "growthevo" / "web" / "static"
 
 
+def test_nightfall_surface_and_agent_first_navigation_are_real_assets() -> None:
+    theme = (STATIC / "cyber-surface.css").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    build = (ROOT / "scripts" / "build_pages.py").read_text(encoding="utf-8")
+    service_worker = (STATIC / "service-worker.js").read_text(encoding="utf-8")
+    data = (STATIC / "data.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    index = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert "cyber-surface.css" in styles
+    assert '"cyber-surface.css"' in build
+    assert "./assets/cyber-surface.css" in service_worker
+    assert "AGENT OS" in index
+    assert "data-route" in app
+    assert "renderAgentOsHero" in app
+    pages = (STATIC / "pages.js").read_text(encoding="utf-8")
+    assert "document.querySelectorAll(\'#agent-body [data-agent-prompt]\')" in pages
+    assert "Agent Operating System" not in index or "Agent OS" in index
+    assert "run_9081" not in app
+    assert "Agent OS mission control" in theme
+    assert "prefers-reduced-motion:reduce" in theme
+    assert "const NAV=[['agent'" in data
+    assert "['evolution','runtime','自进化中心']" in data
+
+
 def test_growth_os_dashboard_exposes_incremental_kpis() -> None:
     payload = dashboard_payload()
     ids = {item["id"] for item in payload["kpis"]}
@@ -221,8 +245,9 @@ def test_mutable_dashboard_fields_are_html_escaped() -> None:
     assert "safeColor" in dashboard
     assert "go('campaignStudio')" in dashboard
     assert "esc(liveText(x.title))" in live_pages
-    assert "esc(liveText(x.task))" in live_pages
-    assert "esc(liveText(x.problem))" in live_pages
+    assert "esc(liveText(run.run_id))" in live_pages
+    assert "esc(liveText(run.status))" in live_pages
+    assert "esc(liveText(item.reason))" in live_pages
 
 
 def test_browser_auth_smoke_covers_bearer_and_401_reauthentication() -> None:
@@ -248,7 +273,8 @@ def test_agent_composer_calls_real_api_outside_demo() -> None:
     assert "if(useDemo)" in app
     assert "AGENT_PLAN_TIMEOUT_MS=30000" in app
     assert "agentRequestController.abort('user_cancelled')" in app
-    assert "timeoutMs:AGENT_PLAN_TIMEOUT_MS" in app
+    assert "AGENT_RUN_TIMEOUT_MS=90000" in app
+    assert "timeoutMs:strategyMode?AGENT_PLAN_TIMEOUT_MS:AGENT_RUN_TIMEOUT_MS" in app
     assert "renderAgentPlan(result)" in app
     assert "Deterministic 安全规划" in app
     assert "AI + Critic 已通过" in app

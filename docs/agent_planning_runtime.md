@@ -1,6 +1,6 @@
 # Guarded Agent Planning
 
-GrowthEvo can use an activated model-provider pool to assist `/api/agent/plan` without giving a model execution authority.
+GrowthEvo can use an activated model-provider pool to assist `/api/agent/plan` without giving the **strategy planner** execution authority. For the separate, typed, first-party operating tool loop available at `/api/agent/run`, see [Agent Operating System](AGENT_OPERATING_SYSTEM.md).
 
 ## Product contract
 

@@ -230,9 +230,11 @@ jobs:
           assert_live_route opportunities 'Live API'
           assert_live_route experiments 'Live API'
           assert_live_route realtime 'free_shipping'
-          assert_live_route harness 'run_9081'
+          # A live workspace has no operator traces/candidates until real runs occur.
+          # Assert the honest empty-state UI instead of fabricated fixture IDs.
+          assert_live_route harness '还没有真实 Agent Run'
           assert_live_route approvals 'apr_281'
-          assert_live_route evolution 'EV-281'
+          assert_live_route evolution '暂无可验证的进化候选'
           auth_out=/tmp/growthevo-auth-api-smoke.html
           "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:4174/?auth-api-smoke=1#dashboard" > "$auth_out"
           if ! grep -Fq 'AUTH_API_SMOKE_PASS' "$auth_out"; then
@@ -260,6 +262,11 @@ jobs:
           fi
           "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=5000 --screenshot=ui-screenshots/growthevo-api-realtime.png http://127.0.0.1:4174/#realtime
           test -s ui-screenshots/growthevo-api-realtime.png
+          # Visual regression review artifacts for the Nightfall control surface.
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=5000 --screenshot=ui-screenshots/growthevo-nightfall-desktop.png http://127.0.0.1:4174/#dashboard
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=390,844 --virtual-time-budget=5000 --screenshot=ui-screenshots/growthevo-nightfall-mobile.png http://127.0.0.1:4174/#dashboard
+          test -s ui-screenshots/growthevo-nightfall-desktop.png
+          test -s ui-screenshots/growthevo-nightfall-mobile.png
           docker rm -f "$API_PID" >/dev/null
           unavailable_out="/tmp/growthevo-api-unavailable.html"
           "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:4174/#dashboard" > "$unavailable_out"

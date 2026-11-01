@@ -4,28 +4,13 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
+from growthevo.tools.contracts import KNOWN_ACTION_IDS, validated_action_ids as _validated_action_ids
+
 
 ClaimType = Literal["FACT", "ESTIMATE", "INFERENCE", "HYPOTHESIS", "IDEA"]
 EvidenceTier = Literal["A", "B", "C", "D"]
 ActionId = Annotated[str, Field(min_length=1, max_length=128)]
 GuardrailName = Annotated[str, Field(min_length=1, max_length=128)]
-KNOWN_ACTION_IDS = frozenset(
-    {
-        "NO_TREATMENT",
-        "free_shipping",
-        "coupon_10",
-        "push_reminder",
-        "email_guide",
-    }
-)
-
-
-def _validated_action_ids(values: list[str]) -> list[str]:
-    deduped = list(dict.fromkeys(values))
-    unknown = sorted(set(deduped).difference(KNOWN_ACTION_IDS))
-    if unknown:
-        raise ValueError(f"unknown candidate_action_ids: {unknown}")
-    return deduped
 
 
 class RequestModel(BaseModel):
@@ -39,6 +24,12 @@ class AgentPlanRequest(RequestModel):
     budget_limit: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     primary_metric: str = Field(default="incremental_profit", min_length=1, max_length=128)
     guardrails: list[GuardrailName] = Field(default_factory=list, max_length=64)
+
+
+class AgentRunRequest(RequestModel):
+    goal: str = Field(min_length=3, max_length=4000)
+    allow_draft_writes: StrictBool = False
+    max_steps: int | None = Field(default=None, ge=1, le=8)
 
 
 class ApprovalDecisionRequest(RequestModel):

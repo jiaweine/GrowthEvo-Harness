@@ -1,6 +1,6 @@
 # Guarded LLM Proposal Plane
 
-GrowthEvo's LLM integration is intentionally **not** an LLM-controlled execution loop.
+GrowthEvo's **causal-policy proposal plane** is intentionally **not** an LLM-controlled execution loop. The separate, first-party [Agent Operating System](AGENT_OPERATING_SYSTEM.md) provides a bounded, user-authorized tool loop for workspace navigation and draft operations; it does not grant the policy model authority to bypass legal gates or perform campaign sends.
 The original causal/RL harness remains authoritative. The model is an optional semantic
 proposal layer that can be removed without changing the policy, OPE, verifier, benchmark,
 or evidence contracts.
