@@ -248,7 +248,8 @@ def test_agent_composer_calls_real_api_outside_demo() -> None:
     assert "if(useDemo)" in app
     assert "AGENT_PLAN_TIMEOUT_MS=30000" in app
     assert "agentRequestController.abort('user_cancelled')" in app
-    assert "timeoutMs:AGENT_PLAN_TIMEOUT_MS" in app
+    assert "AGENT_RUN_TIMEOUT_MS=90000" in app
+    assert "timeoutMs:strategyMode?AGENT_PLAN_TIMEOUT_MS:AGENT_RUN_TIMEOUT_MS" in app
     assert "renderAgentPlan(result)" in app
     assert "Deterministic 安全规划" in app
     assert "AI + Critic 已通过" in app
