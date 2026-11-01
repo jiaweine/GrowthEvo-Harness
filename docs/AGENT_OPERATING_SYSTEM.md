@@ -71,6 +71,18 @@ This deliberately separates **proven policy improvement**, **candidate discovery
 
 These are architectural references, not claims that this repository reproduces their experimental results.
 
+## Offline paired replay harness
+
+The built-in **PairedReplayEvaluator** in `growthevo/agent_os/benchmark.py` now runs the same locked task manifest twice through the actual `GrowthOperator` loop, using a fresh isolated model and tools for each task and candidate. It verifies actual first-party workspace observations and navigation intents, and counts blocked operations as safety failures. A model-generated final message alone does **not** pass an evaluation.
+
+The evaluator returns normalized task completion, safety violations, tool-call cost proxy, sample count and a SHA-256 suite fingerprint. It requires at least 30 distinct cases and is accepted by `EvolutionAuthority.evaluate` without writing a second promotion implementation.
+
+**Boundaries:** This is an offline paired replay, not an online causal lift measurement, statistically conclusive randomized canary, or independent attestation of a deployed browser action. The manifest and model factory must be kept outside the candidate's control, and the evaluator itself must be independently provisioned. The model cannot promote its own candidate.
+
+**Desktop and mobile product navigation now starts with Agent Operating System and Evolution Lab**. The Agent remains a first-party typed tool user; for arbitrary GUI operations follow [OpenAI Computer use](https://developers.openai.com/api/docs/guides/agents-api/tools/computer-use) or [Anthropic Computer use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool) with an isolated browser, screenshot feedback, domain consent, and independent observation of effects. Do not add unrestricted DOM/JavaScript execution to this business application.
+
+**Microsoft's durable workflows and human-in-the-loop checkpoints** demonstrate the next production step: persistent, tenant-isolated checkpoints and resumable authorization barriers rather than only an in-memory trace deque. See [Agent Framework HITL](https://learn.microsoft.com/en-us/agent-framework/workflows/human-in-the-loop) and [Durable Task Extension](https://learn.microsoft.com/en-us/azure/durable-task/sdks/durable-agents-microsoft-agent-framework).
+
 ## Required gates before production claims
 
 The next execution improvements are a durable, tenant-isolated run/checkpoint ledger; constrained session continuations; domain-specific tool adapters for every operational page; replayed independent task suites; randomized shadow/canary comparisons and automatic rollback; and an authenticated, auditable policy promotion service using signed evidence. Every claimed success should identify the exact task, observed side effect, independent evaluation set and policy fingerprint.
