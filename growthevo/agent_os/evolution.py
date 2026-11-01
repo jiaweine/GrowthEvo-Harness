@@ -150,7 +150,10 @@ class EvolutionAuthority:
             # retryable, with no fabricated result or partially promoted policy.
             with self._lock:
                 if candidate.status == "evaluating":
-                    candidate.status = "requires_independent_eval"
+                    candidate.status = (
+                        "requires_independent_eval"
+                        if self.active.fingerprint == parent else "stale_evaluation"
+                    )
             raise
 
         with self._lock:
