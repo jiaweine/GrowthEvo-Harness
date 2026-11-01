@@ -14,6 +14,7 @@ from threading import RLock
 from typing import Any, Callable, Mapping
 from functools import partial
 
+from growthevo.tools.contracts import validated_campaign_draft
 from growthevo.tools.registry import ToolRegistry, ToolSpec
 from uuid import uuid4
 
@@ -149,18 +150,10 @@ class GrowthTools:
                 return "needs_consent", {"message": "Explicit user consent for draft creation is required."}
             if not observed:
                 raise ToolDenied("a workspace read is required before any mutation")
-            from math import isfinite
-            from growthevo.web.schemas import CampaignDraftRequest
-
-            budget = args["budget"]
-            if (isinstance(budget, bool) or not isinstance(budget, (int, float))
-                or not isfinite(budget) or not 0 <= budget <= 1_000_000):
-                raise ToolDenied("draft budget is outside the operator limit")
-            # The same validated contract is used for direct API and Agent drafts.
-            request = CampaignDraftRequest.model_validate(args)
+            request = validated_campaign_draft(args, max_budget=1_000_000)
             draft = self.product_state.create_campaign_draft(
-                request.name, request.goal, request.audience, request.budget,
-                request.candidate_action_ids,
+                request["name"], request["goal"], request["audience"], request["budget"],
+                request["candidate_action_ids"],
             )
             if (not isinstance(draft, dict) or not draft.get("id")
                 or not any(row.get("id") == draft["id"] and row.get("status") == "Draft"
