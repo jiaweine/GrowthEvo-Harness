@@ -3,29 +3,29 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#111827" />
+  <meta name="theme-color" content="#090e18" />
   <meta name="description" content="GrowthEvo — AI 原生因果增长执行平台" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="stylesheet" href="./assets/styles.css" />
-  <title>GrowthEvo · 因果增长操作系统</title>
+  <title>GrowthEvo · Agent OS / Recursive Evolution</title>
 </head>
 <body>
   <div id="app" class="app-shell">
     <aside class="sidebar" id="sidebar" aria-label="主导航">
       <div class="brand-block">
         <div class="brand-name">GrowthEvo</div>
-        <div class="brand-subtitle">因果驱动的增长操作系统</div>
+        <div class="brand-subtitle">AGENT OS · RECURSIVE INTELLIGENCE</div>
       </div>
       <nav id="main-nav" class="nav-list"></nav>
       <div class="sidebar-bottom">
         <div class="workspace-card">
           <div class="avatar avatar-blue">✦</div>
-          <div class="workspace-copy"><strong>Acme 电商</strong><span>Enterprise Plan</span></div>
+          <div class="workspace-copy"><strong>GrowthEvo Workspace</strong><span>Operations Control</span></div>
           <span class="chev">⌄</span>
         </div>
         <div class="user-card">
-          <div class="avatar avatar-photo">李</div>
-          <div class="workspace-copy"><strong>李明</strong><span>增长负责人</span></div>
+          <div class="avatar avatar-photo">OP</div>
+          <div class="workspace-copy"><strong>Workspace Operator</strong><span>权限由登录态决定</span></div>
         </div>
         <button class="collapse-btn" id="sidebar-collapse" type="button" aria-label="收起侧栏" aria-expanded="true"><span>‹</span> 收起</button>
       </div>
@@ -50,7 +50,7 @@
       <section class="content" id="view"></section>
       <footer class="statusbar">
         <div><span class="brand-foot">GrowthEvo</span><span class="divider-v"></span><span>From Insight to Impact.</span></div>
-        <div class="status-right"><span><i class="dot green"></i>系统运行正常</span><span>▣ 决策延迟 48 ms</span><span><i class="dot gray"></i>数据更新 5 分钟前</span></div>
+        <div class="status-right"><span><i class="dot green"></i>系统运行正常</span><span>真实运行状态由 API 返回</span></div>
       </footer>
     </main>
 
@@ -65,7 +65,7 @@
       <div class="agent-body" id="agent-body"></div>
       <form class="agent-composer" id="agent-form">
         <textarea id="agent-input" rows="2" placeholder="继续提问，或输入指令..."></textarea>
-        <label class="agent-draft-consent" style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8390a3;margin:4px 0 7px;">
+        <label class="agent-draft-consent" >
           <input id="agent-draft-consent" type="checkbox" />
           授权 AI 创建 Campaign 草案（不含发布或审批）
         </label>
@@ -75,8 +75,8 @@
       <div class="agent-achievement" id="agent-achievement"></div>
       <div class="agent-banner">
         <div class="banner-overlay"></div>
-        <div class="banner-copy"><strong>让每一次触达，<br/>都创造真实的增长</strong><span>数据 × 因果 × AI × 执行</span></div>
-        <button class="video-btn" id="product-intro" type="button"><span>▶</span> 观看产品介绍 · 2 分钟</button>
+        <div class="banner-copy"><strong>CONTROL THE LOOP.<br/>VERIFY THE CHANGE.</strong><span>AGENT OS / REPLAY / SHADOW / APPROVAL</span></div>
+        <button class="video-btn" id="product-intro" type="button"><span>▶</span> 查看系统工作流</button>
       </div>
     </aside>
 
@@ -96,9 +96,9 @@
 
   <div class="command-modal" id="intro-modal" hidden>
     <div class="command-panel intro-panel">
-      <div class="intro-head"><div><strong>GrowthEvo</strong><span>从机会发现到真实增量的闭环</span></div><button id="intro-close" type="button" aria-label="关闭产品介绍">×</button></div>
+      <div class="intro-head"><div><strong>GrowthEvo / Control Loop</strong><span>Agent 操作与自进化均以真实证据为依据</span></div><button id="intro-close" type="button" aria-label="关闭产品介绍">×</button></div>
       <div class="intro-flow"><span>Discover</span><b>→</b><span>Decide</span><b>→</b><span>Design</span><b>→</b><span>Validate</span><b>→</b><span>Approve</span><b>→</b><span>Execute</span><b>→</b><span>Learn</span></div>
-      <p>GrowthEvo 把增长机会、因果证据、策略设计、实验、审批与执行放在同一个工作空间，让团队围绕真实增量持续迭代。</p>
+      <p>Agent OS 基于受控工具执行和观测反馈完成操作；自进化通过 Replay、独立评测、Shadow、Canary 与人工审批逐级验证。高风险业务动作不会由模型自行放行。</p>
       <div class="intro-actions"><button class="secondary" id="intro-evidence" type="button">查看增长证据</button><button class="primary" id="intro-campaign" type="button">进入 Campaign Studio</button></div>
     </div>
   </div>
