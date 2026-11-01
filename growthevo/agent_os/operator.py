@@ -162,10 +162,12 @@ or cannot proceed; be explicit about remaining human approval.
 Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
 """
 
-    def __init__(self, model: Any, tools: GrowthTools, traces: AgentTraceStore):
+    def __init__(self, model: Any, tools: GrowthTools, traces: AgentTraceStore,
+                 evolution: Any | None = None):
         self.model = model
         self.tools = tools
         self.traces = traces
+        self.evolution = evolution
 
     @staticmethod
     def schema() -> dict[str, Any]:
@@ -185,6 +187,10 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                   max_steps: int = 6) -> dict[str, Any]:
         if not 1 <= max_steps <= 8:
             raise ValueError("max_steps outside server limit")
+        policy = self.evolution.snapshot() if self.evolution is not None else {
+            "step_budget": 6, "preferred_first_read": "none", "fingerprint": "baseline"
+        }
+        max_steps = min(max_steps, policy["step_budget"])
         run_id = "op_" + uuid4().hex[:16]
         events: list[dict[str, Any]] = []
         model_history: list[dict[str, Any]] = []
@@ -197,6 +203,7 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
             context = {
                 "goal": goal,
                 "draft_creation_allowed": allow_drafts,
+                "operator_policy": {"preferred_first_read": policy["preferred_first_read"]},
                 "tools": self.tools.describe(),
                 "previous_steps": model_history[-8:],
             }
@@ -234,6 +241,8 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                 observed |= tool == "workspace.read" and outcome == "ok"
                 event = {"tool": tool, "effect": next(t.effect for t in TOOL_DEFINITIONS if t.name == tool),
                          "outcome": outcome, "arguments_hash": fingerprint[:16]}
+                if tool == "workspace.read":
+                    event["section"] = data["section"]
                 if "navigation" in data:
                     navigation = data["navigation"]
                     event["navigation"] = navigation
@@ -256,7 +265,10 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                 break
 
         trace = {"run_id": run_id, "status": status, "steps": events,
-                 "tool_calls": len(events), "has_draft_write": any(x["effect"] == "draft" and x["outcome"] == "ok" for x in events)}
+                 "tool_calls": len(events), "policy_fingerprint": policy["fingerprint"],
+                 "has_draft_write": any(x["effect"] == "draft" and x["outcome"] == "ok" for x in events)}
         self.traces.record(trace)
+        if self.evolution is not None:
+            self.evolution.propose(self.traces.recent(30))
         return {**trace, "message": message, "navigation": navigation,
                 "durability": "process_local", "execution_authority": "typed_first_party_tools"}
