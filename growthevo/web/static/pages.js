@@ -174,7 +174,7 @@ function renderAgent(){
     +'<div class="agent-task-list"><button type="button" data-agent-prompt="读取当前增长机会，并导航到实验中心">分析增长机会 <span>↗</span></button>'
     +'<button type="button" data-agent-prompt="检查待审批事项，带我进入审批界面">检查审批边界 <span>↗</span></button>'
     +'<button type="button" data-agent-prompt="检查 Agent 的最近运行轨迹和自进化候选">检查演进状态 <span>↗</span></button></div></div>';
-  $('[data-agent-prompt]',body).forEach(button=>button.onclick=()=>{
+  document.querySelectorAll('#agent-body [data-agent-prompt]').forEach(button=>button.onclick=()=>{
     const input=$('#agent-input');
     if(input){input.value=button.dataset.agentPrompt;input.focus();}
   });
