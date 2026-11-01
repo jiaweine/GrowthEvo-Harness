@@ -13,6 +13,9 @@ from hashlib import sha256
 import json
 from threading import RLock
 from typing import Any, Callable, Mapping
+from functools import partial
+
+from growthevo.tools.registry import ToolRegistry, ToolSpec
 from uuid import uuid4
 
 
@@ -24,9 +27,6 @@ ROUTES = frozenset({
 SECTIONS = frozenset({
     "dashboard", "opportunities", "campaigns", "experiments", "approvals",
     "evidence", "actions", "decisions", "harness", "evolution",
-})
-ACTION_IDS = frozenset({
-    "NO_TREATMENT", "free_shipping", "coupon_10", "push_reminder", "email_guide",
 })
 
 
@@ -69,12 +69,33 @@ class GrowthTools:
             raise ValueError("workspace readers must cover the declared sections")
         self.readers = dict(readers)
         self.product_state = product_state
+        # Use the pre-existing harness registry for tool lookup and dispatch.
+        self.registry = ToolRegistry()
+        for definition in TOOL_DEFINITIONS:
+            self.registry.register(ToolSpec(
+                name=definition.name,
+                fn=partial(self._dispatch, definition.name),
+                read_only=definition.effect != "draft",
+                description=definition.description,
+            ))
 
     def describe(self) -> list[dict[str, str]]:
-        return [asdict(item) for item in TOOL_DEFINITIONS]
+        return [
+            {"name": name, "description": self.registry.get(name).description,
+             "effect": next(item.effect for item in TOOL_DEFINITIONS if item.name == name)}
+            for name in self.registry.names()
+        ]
 
     def execute(self, name: str, arguments: Any, *, allow_drafts: bool,
                 observed: bool) -> tuple[str, dict[str, Any]]:
+        try:
+            return self.registry.call(name, arguments=arguments,
+                                      allow_drafts=allow_drafts, observed=observed)
+        except KeyError as exc:
+            raise ToolDenied("unknown or unregistered tool") from exc
+
+    def _dispatch(self, name: str, *, arguments: Any, allow_drafts: bool,
+                  observed: bool) -> tuple[str, dict[str, Any]]:
         if name == "workspace.read":
             args = _contract_args(arguments, frozenset({"section"}))
             section = _string(args["section"], 40)
@@ -116,23 +137,18 @@ class GrowthTools:
                 return "needs_consent", {"message": "Explicit user consent for draft creation is required."}
             if not observed:
                 raise ToolDenied("a workspace read is required before any mutation")
-            name_text = _string(args["name"], 160)
-            goal_text = _string(args["goal"], 600)
-            audience_text = _string(args["audience"], 240)
-            budget = args["budget"]
-            if isinstance(budget, bool) or not isinstance(budget, (float, int)):
-                raise ToolDenied("budget must be a finite nonnegative number")
             from math import isfinite
-            if not isfinite(budget) or not 0 <= budget <= 1_000_000:
+            from growthevo.web.schemas import CampaignDraftRequest
+
+            budget = args["budget"]
+            if (isinstance(budget, bool) or not isinstance(budget, (int, float))
+                or not isfinite(budget) or not 0 <= budget <= 1_000_000):
                 raise ToolDenied("draft budget is outside the operator limit")
-            action_ids = args["candidate_action_ids"]
-            if (not isinstance(action_ids, list) or not action_ids
-                or any(not isinstance(item, str) for item in action_ids)
-                or len(action_ids) != len(set(action_ids))
-                or not set(action_ids) <= ACTION_IDS):
-                raise ToolDenied("invalid campaign candidate actions")
+            # The same validated contract is used for direct API and Agent drafts.
+            request = CampaignDraftRequest.model_validate(args)
             draft = self.product_state.create_campaign_draft(
-                name_text, goal_text, audience_text, float(budget), action_ids
+                request.name, request.goal, request.audience, request.budget,
+                request.candidate_action_ids,
             )
             if (not isinstance(draft, dict) or not draft.get("id")
                 or not any(row.get("id") == draft["id"] and row.get("status") == "Draft"
