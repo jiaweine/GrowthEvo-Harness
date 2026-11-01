@@ -63,6 +63,8 @@ GrowthEvo 的第一能力是 **Agent Operating System**：从目标出发，自�
 
 [自进化机制、实验门槛与研究参考](docs/AGENT_OPERATING_SYSTEM.md)
 
+已补充**同题集配对离线 Replay Evaluator**：候选与当前策略使用相同的隔离任务集实际运行、比较真实工具动作和安全违规；对照结果仅用于候选筛选，正式推广仍必须另外满足 Shadow、Canary 与人工批准。
+
 ---
 
 ## 产品总览
