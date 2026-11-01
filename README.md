@@ -45,6 +45,8 @@ GrowthEvo 的第一能力是 **Agent Operating System**：从目标出发，自�
 
 [操作系统架构与 API 说明](docs/AGENT_OPERATING_SYSTEM.md)
 
+**界面设计：** Nightfall 深色赛博工作台已覆盖导航、主页任务控制台、Agent 侧栏、表格、命令面板和移动端；保留深色低噪声、清晰字号和完整的可访问交互。设计依据与色彩/布局规范见 [Nightfall Design System](docs/DESIGN_SYSTEM.md)。
+
 ## 递归自进化
 
 第二能力是 **Evidence-Gated Recursive Evolution**：把真实 Agent 轨迹作为改进输入，在受限可变空间中形成候选，通过独立证据门槛再推广，随后以新的有效策略继续形成后代候选。
