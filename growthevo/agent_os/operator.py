@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from hashlib import sha256
 import json
 from threading import RLock
