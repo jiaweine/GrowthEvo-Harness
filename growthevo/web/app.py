@@ -364,6 +364,7 @@ def create_app() -> Any:
             "healthy": llm_healthy,
             "providers": list(llm_summary.providers),
             "agent_planning": agent_planner is not None,
+            "agent_execution": agent_operator is not None,
             "critic": agent_planner is not None,
         }
         if llm_pool is not None:
@@ -548,6 +549,10 @@ def create_app() -> Any:
     @app.get("/api/evolution/candidates", tags=["evolution"])
     def evolution() -> list[dict[str, Any]]:
         return evolution_candidates() if settings.synthetic_data else evolution_authority.candidates()
+
+    @app.get("/api/evolution/policy", tags=["evolution"])
+    def evolution_policy() -> dict[str, Any]:
+        return evolution_authority.snapshot()
 
     @app.get("/api/agent/tools", tags=["agent"])
     def agent_tools() -> list[dict[str, str]]:
