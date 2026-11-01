@@ -1,6 +1,7 @@
 const REFERENCE_FIXTURE_ROUTES=new Set();
 const baseRouteRender=render;
-const AGENT_PLAN_TIMEOUT_MS=90000;
+const AGENT_PLAN_TIMEOUT_MS=30000;
+const AGENT_RUN_TIMEOUT_MS=90000;
 let routeRenderEpoch=0;
 
 function markReferenceFixture(route){
@@ -133,7 +134,7 @@ function appendAgentPending(){
   if(!target)return null;
   const row=document.createElement('div');
   row.className='chat-row agent-pending-row';
-  row.innerHTML='<div class="chat-avatar agent">✦</div><div><div class="chat-name">Growth Agent</div><div class="bubble agent-pending"><span></span>正在读取机会证据并进行 Critic 复核…</div></div>';
+  row.innerHTML='<div class="chat-avatar agent">✦</div><div><div class="chat-name">Growth Agent</div><div class="bubble agent-pending"><span></span>正在读取工作区并执行受控工具…</div></div>';
   target.appendChild(row);
   target.scrollTop=target.scrollHeight;
   return row;
@@ -272,7 +273,7 @@ async function submitAgentPrompt(event){
         ? {goal,primary_metric:'incremental_profit',guardrails:[]}
         : {goal,allow_draft_writes:draftPermission,max_steps:6}),
       signal:controller.signal,
-      timeoutMs:AGENT_PLAN_TIMEOUT_MS,
+      timeoutMs:strategyMode?AGENT_PLAN_TIMEOUT_MS:AGENT_RUN_TIMEOUT_MS,
     });
     if(pending)pending.remove();
     if(strategyMode){
