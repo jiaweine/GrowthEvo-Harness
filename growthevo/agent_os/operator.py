@@ -80,7 +80,15 @@ class GrowthTools:
             section = _string(args["section"], 40)
             if section not in SECTIONS:
                 raise ToolDenied("unknown workspace section")
-            return "ok", {"section": section, "data": self.readers[section]()}
+            data = self.readers[section]()
+            if section == "decisions":
+                # Never export entity identifiers or request context to an LLM.
+                fields = ("decision_id", "placement", "action_id", "policy_id", "evidence_tier")
+                data = [
+                    {field: row[field] for field in fields if field in row}
+                    for row in data if isinstance(row, dict)
+                ]
+            return "ok", {"section": section, "data": data}
 
         if name == "page.navigate":
             args = _contract_args(arguments, frozenset({"route"}))
