@@ -177,7 +177,7 @@ Agent OS 操作的是已经存在的 GrowthEvo 增长与因果计算能力，不
 
 | 公开数据评估 | 已记录结果 | 证据 |
 | --- | --- | --- |
-| Criteo Uplift 增量目标评估 | 全体人群增量访问约 **+0.94 个百分点**；所选 Top 10% 人群约 **+9.38 个百分点** | [冻结评估记录](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md) |
+| Criteo Uplift v2.1（上游数据集标识） | 全体人群增量访问约 **+0.94 个百分点**；所选 Top 10% 人群约 **+9.38 个百分点** | [冻结评估记录](benchmarks/targeting/results/criteo-v2.1-visit-top10/7ac26a5a/README.md) |
 | Open Bandit Dataset 离线策略评估 | 支持覆盖率 **1.0000**，最终选择的验证方案为 IPS | [冻结评估记录](benchmarks/ope/results/obd-full-all-random-to-bts/7d538cea/README.md) |
 
 这些测量结果有其特定任务、数据和评估协议，不应直接外推为真实用户业务收益。[证据方法与限制](docs/REAL_WORLD_BENCHMARKS.md)
