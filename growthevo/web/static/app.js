@@ -271,7 +271,7 @@ async function submitAgentPrompt(event){
       method:'POST',
       body:JSON.stringify(strategyMode
         ? {goal,primary_metric:'incremental_profit',guardrails:[]}
-        : {goal,allow_draft_writes:draftPermission,max_steps:6}),
+        : {goal,allow_draft_writes:draftPermission}),
       signal:controller.signal,
       timeoutMs:strategyMode?AGENT_PLAN_TIMEOUT_MS:AGENT_RUN_TIMEOUT_MS,
     });
