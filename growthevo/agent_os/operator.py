@@ -126,6 +126,10 @@ class GrowthTools:
             draft = self.product_state.create_campaign_draft(
                 name_text, goal_text, audience_text, float(budget), action_ids
             )
+            if (not isinstance(draft, dict) or not draft.get("id")
+                or not any(row.get("id") == draft["id"] and row.get("status") == "Draft"
+                           for row in self.product_state.campaigns())):
+                raise ToolDenied("campaign draft could not be verified after creation")
             return "ok", {"draft": {"id": draft.get("id"), "status": draft.get("status")},
                           "navigation": "campaigns"}
         raise ToolDenied("unknown or unregistered tool")
@@ -235,6 +239,10 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                 fingerprint = sha256(json.dumps([tool, args], sort_keys=True).encode()).hexdigest()
                 if fingerprint in seen:
                     raise ToolDenied("repeated identical tool action")
+                if tool == "campaign.draft" and any(
+                    x["tool"] == "campaign.draft" and x["outcome"] == "ok" for x in events
+                ):
+                    raise ToolDenied("only one campaign draft mutation is allowed per run")
                 seen.add(fingerprint)
                 outcome, data = self.tools.execute(tool, args, allow_drafts=allow_drafts,
                                                    observed=observed)
