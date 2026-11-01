@@ -2,5 +2,6 @@
 
 from .operator import AgentTraceStore, GrowthOperator, GrowthTools, ToolDenied
 from .evolution import EvolutionAuthority, EvolutionCandidate, OperatorPolicy
+from .benchmark import BenchmarkTask, PairedReplayEvaluator
 
-__all__ = ["AgentTraceStore", "GrowthOperator", "GrowthTools", "ToolDenied", "EvolutionAuthority", "EvolutionCandidate", "OperatorPolicy"]
+__all__ = ["AgentTraceStore", "GrowthOperator", "GrowthTools", "ToolDenied", "EvolutionAuthority", "EvolutionCandidate", "OperatorPolicy", "BenchmarkTask", "PairedReplayEvaluator"]
