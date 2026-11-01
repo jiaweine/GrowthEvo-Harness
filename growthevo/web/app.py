@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from growthevo.agent_os import AgentTraceStore, EvolutionAuthority, GrowthOperator, GrowthTools
 from growthevo.llm.agent_planner import GuardedLLMAgentPlanner
 from growthevo.llm.configuration import (
     activation_summary,
@@ -32,7 +33,7 @@ from .product_data import (
     opportunities,
 )
 from .runtime import RuntimeSettings, postgres_pool_config_from_env
-from .schemas import AgentPlanRequest, ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest
+from .schemas import AgentPlanRequest, AgentRunRequest, ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest
 
 STATIC_DIR = Path(__file__).with_name("static")
 MAX_API_BODY_BYTES = 1_000_000
@@ -235,6 +236,28 @@ def create_app() -> Any:
     if llm_pool is not None:
         agent_planner = GuardedLLMAgentPlanner(llm_pool, critic=llm_pool)
 
+    agent_traces = AgentTraceStore()
+    evolution_authority = EvolutionAuthority()
+    operator_tools = GrowthTools(
+        readers={
+            "dashboard": lambda: build_dashboard_payload(product_state),
+            "opportunities": opportunities,
+            "campaigns": product_state.campaigns,
+            "experiments": experiments,
+            "approvals": product_state.approvals,
+            "evidence": lambda: build_dashboard_payload(product_state)["evidence"],
+            "actions": action_registry_payload,
+            "decisions": lambda: decision_engine.recent(20),
+            "harness": lambda: agent_traces.recent(20),
+            "evolution": evolution_authority.candidates,
+        },
+        product_state=product_state,
+    )
+    agent_operator = (
+        GrowthOperator(llm_pool, operator_tools, agent_traces, evolution_authority)
+        if llm_pool is not None else None
+    )
+
     @asynccontextmanager
     async def lifespan(_: Any):
         try:
@@ -261,6 +284,9 @@ def create_app() -> Any:
     app.state.authenticator = authenticator
     app.state.llm_pool = llm_pool
     app.state.agent_planner = agent_planner
+    app.state.agent_operator = agent_operator
+    app.state.agent_traces = agent_traces
+    app.state.evolution_authority = evolution_authority
     app.state.runtime_settings = settings
 
     def persistence_healthy() -> bool:
@@ -517,11 +543,29 @@ def create_app() -> Any:
 
     @app.get("/api/harness/runs", tags=["harness"])
     def runs() -> list[dict[str, Any]]:
-        return harness_runs()
+        return harness_runs() if settings.synthetic_data else agent_traces.recent(50)
 
     @app.get("/api/evolution/candidates", tags=["evolution"])
     def evolution() -> list[dict[str, Any]]:
-        return evolution_candidates()
+        return evolution_candidates() if settings.synthetic_data else evolution_authority.candidates()
+
+    @app.get("/api/agent/tools", tags=["agent"])
+    def agent_tools() -> list[dict[str, str]]:
+        return operator_tools.describe()
+
+    @app.post("/api/agent/run", tags=["agent"])
+    async def operate(request: AgentRunRequest) -> dict[str, Any]:
+        if agent_operator is None:
+            return {
+                "status": "model_unavailable", "steps": [],
+                "message": "Autonomous execution needs an active model provider; no actions were run.",
+                "navigation": None, "durability": "process_local",
+            }
+        return await agent_operator.run(
+            request.goal,
+            allow_drafts=request.allow_draft_writes,
+            max_steps=request.max_steps,
+        )
 
     @app.post("/api/agent/plan", tags=["agent"])
     async def plan(request: AgentPlanRequest) -> dict[str, Any]:
