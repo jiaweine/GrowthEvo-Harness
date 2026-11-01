@@ -25,6 +25,8 @@ def test_nightfall_surface_and_agent_first_navigation_are_real_assets() -> None:
     assert "AGENT OS" in index
     assert "data-route" in app
     assert "renderAgentOsHero" in app
+    pages = (STATIC / "pages.js").read_text(encoding="utf-8")
+    assert "document.querySelectorAll(\'#agent-body [data-agent-prompt]\')" in pages
     assert "Agent Operating System" not in index or "Agent OS" in index
     assert "run_9081" not in app
     assert "Agent OS mission control" in theme
