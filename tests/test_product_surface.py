@@ -11,6 +11,28 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "growthevo" / "web" / "static"
 
 
+def test_nightfall_surface_and_agent_first_navigation_are_real_assets() -> None:
+    theme = (STATIC / "cyber-surface.css").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    build = (ROOT / "scripts" / "build_pages.py").read_text(encoding="utf-8")
+    service_worker = (STATIC / "service-worker.js").read_text(encoding="utf-8")
+    data = (STATIC / "data.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    index = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert "cyber-surface.css" in styles
+    assert '"cyber-surface.css"' in build
+    assert "./assets/cyber-surface.css" in service_worker
+    assert "AGENT OS" in index
+    assert "data-route" in app
+    assert "renderAgentOsHero" in app
+    assert "Agent Operating System" not in index or "Agent OS" in index
+    assert "run_9081" not in app
+    assert "Agent OS mission control" in theme
+    assert "prefers-reduced-motion:reduce" in theme
+    assert "const NAV=[['agent'" in data
+    assert "['evolution','runtime','自进化中心']" in data
+
+
 def test_growth_os_dashboard_exposes_incremental_kpis() -> None:
     payload = dashboard_payload()
     ids = {item["id"] for item in payload["kpis"]}
