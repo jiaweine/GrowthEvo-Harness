@@ -51,6 +51,29 @@ def run(operator, **kwargs):
     return asyncio.run(operator.run("Find an opportunity and navigate", **kwargs))
 
 
+def test_shared_campaign_contract_is_dependency_free_and_safe():
+    from growthevo.tools.contracts import validated_campaign_draft
+    draft = validated_campaign_draft({
+        "name": "  Causal holdout  ", "goal": "Incremental profit",
+        "audience": "Dormant users", "budget": 200,
+        "candidate_action_ids": ["push_reminder", "push_reminder"],
+    }, max_budget=300)
+    assert draft["name"] == "Causal holdout"
+    assert draft["candidate_action_ids"] == ["NO_TREATMENT", "push_reminder"]
+    with pytest.raises(ValueError):
+        validated_campaign_draft({
+            "name": "Safe", "goal": "Incremental profit",
+            "audience": "Dormant users", "budget": float("nan"),
+            "candidate_action_ids": ["NO_TREATMENT"]
+        })
+    with pytest.raises(ValueError, match="unknown"):
+        validated_campaign_draft({
+            "name": "Safe", "goal": "Incremental profit",
+            "audience": "Dormant users", "budget": 200,
+            "candidate_action_ids": ["arbitrary_outbound_action"]
+        })
+
+
 def test_model_directed_read_navigation_finish_and_trace():
     state = ReferenceProductState()
     traces = AgentTraceStore()
