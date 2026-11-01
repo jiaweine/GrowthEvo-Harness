@@ -209,8 +209,7 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
         self.traces = traces
         self.evolution = evolution
 
-    @staticmethod
-    def schema() -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
