@@ -61,7 +61,7 @@ def test_model_directed_read_navigation_finish_and_trace():
     )
     operator = GrowthOperator(model, make_tools(state), traces)
     result = run(operator)
-    assert result["status"] == "completed"
+    assert result["status"] == "completed", result
     assert result["tool_calls"] == 2
     assert result["navigation"] == "campaignStudio"
     assert result["steps"][0]["section"] == "opportunities"
@@ -121,7 +121,7 @@ def test_mutation_needs_consent_and_prior_workspace_observation():
                                        finish("Draft created")),
                              make_tools(state), AgentTraceStore())
     response = run(allowed, allow_drafts=True)
-    assert response["status"] == "completed"
+    assert response["status"] == "completed", response
     assert response["has_draft_write"]
     assert len(state.campaigns()) == before + 1
     assert state.campaigns()[0]["status"] == "Draft"
