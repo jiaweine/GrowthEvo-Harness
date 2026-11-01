@@ -17,6 +17,15 @@
 
 ---
 
+## 智能体操作系统 
+
+<p align="center">
+  <img src="docs/assets/product/nightfall-dashboard.png" alt="GrowthEvo Nightfall 智能体操作系统主界面：任务控制台、增长驾驶舱与 Agent 操作侧栏" width="100%" />
+</p>
+<p align="center"><sub>Nightfall 桌面工作台 · 真实浏览器截图（示例业务数据）</sub></p>
+
+---
+
 ## 智能体操作系统
 
 ### 不只是聊天，而是让 AI 真正参与工作
@@ -58,6 +67,12 @@ GrowthEvo 的 Agent 不只是回答这个问题，而是围绕目标开展可观
 
 ### 不只是完成今天的任务，还要让下一次更好
 
+<p align="center">
+  <img src="docs/assets/product/nightfall-evolution.png" alt="GrowthEvo Evolution Lab 自进化中心：改进候选、验证阶段与审批状态" width="100%" />
+</p>
+<p align="center"><sub>Evolution Lab · 浏览器实拍，候选与数值为演示样例，不代表实际进化收益</sub></p>
+
+
 真正长期有价值的 Agent，不应该每一次都像第一次工作。
 
 GrowthEvo 将执行过程中的有效经验、任务受阻的原因和可改进的工作方式，整理成可以追踪的改进候选。Evolution Lab 让团队看见 Agent **正在尝试改善什么、比较结果如何、是否值得采用**。
@@ -96,6 +111,12 @@ GrowthEvo 的 **Nightfall** 设计语言，不是用大量霓虹装饰来制造�
 从首页的任务入口，到 Agent 侧栏、增长驾驶舱、实验和审批，Nightfall 把多个业务空间连接成一个统一的操作环境。
 
 [了解 Nightfall 设计语言](docs/DESIGN_SYSTEM.md)
+
+<p align="center">
+  <img src="docs/assets/product/nightfall-mobile.png" alt="GrowthEvo Nightfall 移动端：任务操作入口、运行闭环与移动导航" width="315" />
+</p>
+<p align="center"><sub>Nightfall 移动端 · 真实浏览器截图（示例业务数据）</sub></p>
+
 
 ---
 
@@ -138,7 +159,12 @@ GrowthEvo 的 **Nightfall** 设计语言，不是用大量霓虹装饰来制造�
 </tr>
 </table>
 
-### 一次真实的产品旅程
+### 一次真实的产品旅程<p align="center">
+  <img src="docs/assets/product/nightfall-campaign-studio.png" alt="GrowthEvo Campaign Studio：目标、受众、活动设计与实验工作流" width="100%" />
+</p>
+<p align="center"><sub>Campaign Studio · 浏览器实拍（演示工作空间）</sub></p>
+
+
 
 你可以从一句“最近有哪些值得行动的机会？”开始。Agent 帮你查看工作空间，带你进入相关页面；你在 Campaign Studio 中完善方案，在 Experiment Center 中跟踪验证，在审批中心决定是否继续推进。所有关键步骤都留下可查看的状态，下一轮工作不必重新从零梳理。
 
