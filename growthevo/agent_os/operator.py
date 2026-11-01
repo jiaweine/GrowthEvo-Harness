@@ -246,12 +246,20 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                 "tools": self.tools.describe(),
                 "previous_steps": model_history[-8:],
             }
+            # Provider failures and host-tool failures have different remediation
+            # paths. Never misclassify a failed local write as an LLM outage.
             try:
                 response = await self.model.agenerate(
                     system=self.SYSTEM,
                     user=json.dumps(context, ensure_ascii=False, sort_keys=True),
                     schema=self.schema(),
                 )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                status, message = "provider_failure", "Model provider failed; no tools were run at this step."
+                break
+            try:
                 if not isinstance(response, Mapping) or set(response) != {
                     "kind", "tool", "arguments_json", "message"
                 }:
@@ -308,8 +316,10 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
             except (ValueError, TypeError, KeyError) as exc:
                 status, message = "blocked", str(exc)[:240]
                 break
-            except Exception:
-                status, message = "provider_failure", "Model provider failed; no further tools were run."
+            except Exception as exc:
+                # Do not leak exception messages (may contain provider/user data).
+                # The class name is safe for diagnostics and CI assertion output.
+                status, message = "tool_failure", "A first-party tool failed: " + type(exc).__name__
                 break
 
         trace = {"run_id": run_id, "status": status, "steps": events,
