@@ -24,7 +24,11 @@ function renderWorkspaceFailure(error){
 render=async function guardedRender(){
   const epoch=++routeRenderEpoch;
   const route=state.route;
-  if(useDemo)return baseRouteRender();
+  if(useDemo){
+    await baseRouteRender();
+    if(epoch===routeRenderEpoch&&route==='dashboard')renderAgentOsHero();
+    return;
+  }
   if(runtimeAvailability==='unavailable'){renderApiUnavailable(runtimeLastError);return}
   if(runtimeAvailability==='auth_required'){renderAuthRequired(runtimeLastError);return}
   if(route!=='dashboard'&&!state.dashboard){
@@ -34,8 +38,34 @@ render=async function guardedRender(){
   }
   try{await baseRouteRender()}
   catch(error){if(epoch===routeRenderEpoch)renderWorkspaceFailure(error);return}
-  if(epoch===routeRenderEpoch&&route===state.route)markReferenceFixture(route);
+  if(epoch===routeRenderEpoch&&route===state.route){
+    markReferenceFixture(route);
+    if(route==='dashboard')renderAgentOsHero();
+  }
 };
+
+function renderAgentOsHero(){
+  const view=$('#view');
+  if(!view||view.querySelector('.os-hero'))return;
+  const hero=document.createElement('section');
+  hero.className='os-hero';
+  hero.setAttribute('aria-label','智能体操作系统与递归自进化');
+  hero.innerHTML='<div class="os-hero-copy"><div class="os-eyebrow"><span class="os-signal"></span> GROWTH INTELLIGENCE SYSTEM / FIRST PARTY TOOLS</div>'
+    +'<h2>从指令，到真实行动。<br><em>从执行，到持续进化。</em></h2>'
+    +'<p>让 AI 在受控工作空间内观察、选择工具、执行与校验；用真实轨迹发现可改进的策略，经过独立评测再推广。</p>'
+    +'<div class="os-hero-actions"><button class="os-cta" type="button" id="os-start-agent">启动 Agent 操作 <span>↗</span></button>'
+    +'<button class="os-cta-secondary" type="button" id="os-open-evolution">查看进化中心 <span>↗</span></button></div></div>'
+    +'<div class="os-flow" aria-label="执行与进化闭环">'
+    +'<span class="os-flow-heading">CONTROL LOOP <b>● OBSERVABLE</b></span>'
+    +'<div class="os-flow-step"><i>01</i><strong>OBSERVE</strong><span>读取真实工作区</span></div>'
+    +'<div class="os-flow-step"><i>02</i><strong>ACT</strong><span>执行受控工具</span></div>'
+    +'<div class="os-flow-step"><i>03</i><strong>VERIFY</strong><span>检验动作与轨迹</span></div>'
+    +'<div class="os-flow-step os-flow-last"><i>↺</i><strong>EVOLVE</strong><span>回放 · 评测 · 审批</span></div>'
+    +'</div>';
+  view.prepend(hero);
+  const start=$('#os-start-agent');if(start)start.onclick=openAgent;
+  const evolution=$('#os-open-evolution');if(evolution)evolution.onclick=()=>go('evolution');
+}
 
 const COMMAND_ITEMS=[
   ['campaignStudio','创建一个新活动','Goal → Audience → Evidence → Execution'],
@@ -124,7 +154,7 @@ function appendAgentMessage(role,text){
   const target=$('#agent-body');
   if(!target)return;
   const label=role==='user'?'你':'Growth Agent';
-  const avatar=role==='user'?'李':'✦';
+  const avatar=role==='user'?'我':'✦';
   target.insertAdjacentHTML('beforeend',`<div class="chat-row"><div class="chat-avatar ${role==='user'?'user':'agent'}">${avatar}</div><div><div class="chat-name">${label}</div><div class="bubble">${esc(text)}</div></div></div>`);
   target.scrollTop=target.scrollHeight;
 }
@@ -282,6 +312,7 @@ async function submitAgentPrompt(event){
       toast(audit&&audit.accepted?'AI 策略已通过 Critic':'安全计划已生成');
     }else{
       renderAgentOperation(result);
+      void renderAchievement();
       toast(result.status==='completed'?'Agent 已完成任务':'Agent 已停止：'+result.status);
     }
   }catch(error){
@@ -308,10 +339,30 @@ async function submitAgentPrompt(event){
   }
 }
 
-function renderAchievement(){
+async function renderAchievement(){
   const target=$('#agent-achievement');
   if(!target)return;
-  target.innerHTML=`<div class="achievement-head"><strong>本周增量成果</strong><button id="achievement-evidence" type="button">查看证据 →</button></div><div class="achievement-card"><div class="achievement-main"><div class="achievement-avatar">Acme</div><div class="achievement-copy"><strong>增量收益</strong><b>+28%</b></div><div class="achievement-copy"><strong>NO_TREATMENT 节省</strong><b>31.6%</b></div></div><div class="achievement-metrics"><div><span>Evidence</span><strong>Tier A</strong></div><div><span>Support</span><strong>91%</strong></div><div><span>Canary</span><strong>5%</strong></div></div></div>`;
+  // Report observations from the real process-local runtime, not promotional
+  // uplift numbers or a fixture masquerading as production evidence.
+  const isDemo=useDemo;
+  target.innerHTML='<div class="achievement-head"><strong>执行与演进观测</strong><button id="achievement-evidence" type="button">证据中心 →</button></div>'
+    +'<div class="achievement-card"><div class="achievement-main"><div class="achievement-avatar">OS</div>'
+    +'<div class="achievement-copy"><strong>运行记录</strong><b id="agent-run-count">—</b></div>'
+    +'<div class="achievement-copy"><strong>改进候选</strong><b id="agent-evo-count">—</b></div></div>'
+    +'<div class="achievement-metrics"><div><span>执行模式</span><strong>'+ (isDemo?'演示':'实时 API') +'</strong></div>'
+    +'<div><span>校验状态</span><strong>受控工具</strong></div>'
+    +'<div><span>演进推广</span><strong>需审批</strong></div></div></div>';
+  const evidence=$('#achievement-evidence');
+  if(evidence)evidence.onclick=()=>go('evidence');
+  if(isDemo){$('#agent-run-count').textContent='样例';$('#agent-evo-count').textContent='样例';return;}
+  try{
+    const [runs,candidates]=await Promise.all([api('/api/harness/runs'),api('/api/evolution/candidates')]);
+    if(!document.contains(target))return;
+    $('#agent-run-count').textContent=Array.isArray(runs)?String(runs.length):'—';
+    $('#agent-evo-count').textContent=Array.isArray(candidates)?String(candidates.length):'—';
+  }catch(_error){
+    // Telemetry is advisory; never replace the main workspace when unavailable.
+  }
 }
 
 function openProductIntro(){
@@ -419,7 +470,7 @@ function bindShellInteractions(){
   $('#intro-close').onclick=()=>$('#intro-modal').hidden=true;
   $('#intro-evidence').onclick=()=>{$('#intro-modal').hidden=true;go('evidence')};
   $('#intro-campaign').onclick=()=>{$('#intro-modal').hidden=true;go('campaignStudio')};
-  $('#achievement-evidence').onclick=()=>go('evidence');
+  // The evidence link is rebound whenever live observability is refreshed.
 
   $('#command-input').addEventListener('input',event=>renderCommandResults(event.target.value));
   $('#command-modal').addEventListener('click',event=>{if(event.target===$('#command-modal'))$('#command-modal').hidden=true});
