@@ -24,11 +24,6 @@ function renderWorkspaceFailure(error){
 render=async function guardedRender(){
   const epoch=++routeRenderEpoch;
   const route=state.route;
-  document.body.classList.toggle('agent-workspace',route==='agent');
-  if(route==='agent'){
-    renderAgentWorkspace();
-    return;
-  }
   if(useDemo){
     await baseRouteRender();
     if(epoch===routeRenderEpoch&&route==='dashboard')renderAgentOsHero();
@@ -70,107 +65,6 @@ function renderAgentOsHero(){
   view.prepend(hero);
   const start=$('#os-start-agent');if(start)start.onclick=()=>go('agent');
   const evolution=$('#os-open-evolution');if(evolution)evolution.onclick=()=>go('evolution');
-}
-
-// Agent conversations are page-local: do not persist potentially sensitive
-// prompts or tool feedback in browser storage. Switching sessions is safe only
-// while no operation is running.
-const agentSessions=[{id:1,title:'新会话',html:''}];
-let activeAgentSessionId=1;
-let nextAgentSessionId=2;
-const CONSOLE_ROUTES=[
-  ['opportunities','增长机会','查看值得行动的人群和线索'],
-  ['campaignStudio','活动设计','创建待确认的活动草案'],
-  ['experiments','实验中心','检查实验与结果'],
-  ['approvals','审批中心','需要人工授权的动作'],
-  ['harness','执行轨迹','查看已执行的工具步骤'],
-  ['evolution','自进化中心','真实轨迹与改进候选']
-];
-function bindAgentSuggestions(){
-  const body=$('#agent-body');
-  if(!body||body.dataset.suggestionsBound)return;
-  body.dataset.suggestionsBound='true';
-  body.addEventListener('click',event=>{
-    const button=event.target.closest('[data-agent-prompt]');
-    if(!button)return;
-    const input=$('#agent-input');
-    if(input){input.value=button.dataset.agentPrompt;input.focus();}
-  });
-}
-function saveAgentSession(){
-  const current=agentSessions.find(s=>s.id===activeAgentSessionId);
-  const body=$('#agent-body');
-  if(current&&body)current.html=body.innerHTML;
-}
-function renderAgentSessions(){
-  const list=$('#agent-session-list');
-  if(!list)return;
-  list.innerHTML=agentSessions.map(session=>'<button class="session-item '
-    +(session.id===activeAgentSessionId?'active':'')
-    +'" type="button" data-agent-session="'+session.id+'"><span class="session-bullet">✦</span><span>'
-    +esc(session.title)+'</span></button>').join('');
-  $('[data-agent-session]',list).forEach(button=>button.onclick=()=>{
-    if(agentRequestController){toast('请先完成或停止当前操作');return}
-    const id=Number(button.dataset.agentSession);
-    if(id===activeAgentSessionId)return;
-    saveAgentSession();
-    activeAgentSessionId=id;
-    const selected=agentSessions.find(s=>s.id===id);
-    if(selected&&selected.html)$('#agent-body').innerHTML=selected.html;
-    else renderAgent();
-    renderAgentSessions();
-  });
-}
-function newAgentSession(){
-  if(agentRequestController){toast('请先完成或停止当前操作');return}
-  saveAgentSession();
-  const id=nextAgentSessionId++;
-  agentSessions.unshift({id,title:'新会话',html:''});
-  activeAgentSessionId=id;
-  renderAgent();
-  renderAgentSessions();
-  $('#agent-input').value='';
-  $('#agent-input').focus();
-}
-async function renderAgentInspector(){
-  const target=$('#agent-inspector-content');
-  if(!target)return;
-  const isDemo=useDemo;
-  target.innerHTML='<div class="inspector-group"><h3>可操作的工作区</h3>'
-    +CONSOLE_ROUTES.map(([route,name,detail])=>'<button class="inspector-route" type="button" data-console-route="'+route
-      +'"><strong>'+name+'</strong><small>'+detail+'</small><span>↗</span></button>').join('')
-    +'</div><div class="inspector-group"><h3>当前执行边界</h3>'
-    +'<p class="inspector-explain">'+(isDemo?'演示模式仅提供示例回答，不执行真实工具。':'工具调用由服务端审核，导航限站内，草案写入须单独授权。')+'</p>'
-    +'<div id="inspector-tools" class="inspector-tool-state">正在读取可用工具…</div></div>'
-    +'<div class="inspector-group"><h3>自进化状态</h3><p class="inspector-explain">候选改进来自真实轨迹；只有独立验证与人工审批通过后才可考虑采用。</p>'
-    +'<button class="inspector-evolution" type="button" data-console-route="evolution">打开自进化中心 ↗</button></div>';
-  $('[data-console-route]',target).forEach(button=>button.onclick=()=>go(button.dataset.consoleRoute));
-  if(isDemo){$('#inspector-tools').textContent='当前为样例工作区 · 未执行工具';return}
-  try{
-    const list=await api('/api/agent/tools');
-    if(state.route!=='agent'||!document.contains(target))return;
-    $('#inspector-tools').textContent=Array.isArray(list)
-      ? '已提供 '+list.length+' 项受控操作能力 · 由模型配置决定是否可执行'
-      : '暂时无法确认工具状态';
-  }catch(_error){
-    if(state.route==='agent'&&$('#inspector-tools'))$('#inspector-tools').textContent='工具状态暂不可用';
-  }
-}
-function renderAgentWorkspace(){
-  const view=$('#view');
-  if(!view)return;
-  view.innerHTML='<div class="sessions-head"><div><span>工作记录</span><strong>会话</strong></div>'
-    +'<button id="agent-new-session" type="button" aria-label="新建会话">＋</button></div>'
-    +'<p class="sessions-note">本页临时会话 · 不在浏览器持久保存</p>'
-    +'<div class="sessions-group-label">当前页面</div><div id="agent-session-list" class="session-list"></div>'
-    +'<div class="sessions-footer">工具执行记录请进入「执行轨迹」查看。<br>工作区切换后会话仍保留至本页关闭。</div>';
-  $('#agent-new-session').onclick=newAgentSession;
-  renderAgentSessions();
-  const close=$('#agent-close');
-  if(close)close.setAttribute('aria-label','返回增长驾驶舱');
-  void renderAgentInspector();
-  const label=$('.online-text');
-  if(label)label.textContent=useDemo?'演示模式':'按需连接';
 }
 
 const COMMAND_ITEMS=[
@@ -444,11 +338,6 @@ async function submitAgentPrompt(event){
   if(typeof recordAgentWorkspacePrompt==='function')recordAgentWorkspacePrompt(goal);
   appendAgentMessage('user',goal);
   input.value='';
-  const session=agentSessions.find(item=>item.id===activeAgentSessionId);
-  if(session&&session.title==='新会话'){
-    session.title=goal.length>25?goal.slice(0,25)+'…':goal;
-    renderAgentSessions();
-  }
   if(useDemo){
     appendAgentMessage('agent',demoAgentResponse(goal));
     toast('演示建议已生成（未执行任何操作）');
@@ -669,7 +558,6 @@ function init(){
   });
   $('#agent-form').onsubmit=submitAgentPrompt;
   renderAgent();
-  bindAgentSuggestions();
   renderAchievement();
   bindShellInteractions();
   active();
@@ -683,6 +571,7 @@ function active(){
   $$('[data-route]').forEach(button=>button.classList.toggle('active',button.dataset.route===parent));
 }
 function go(route){
+  if(route==='agent'){openAgent();return}
   state.route=route;
   location.hash=route;
   active();
