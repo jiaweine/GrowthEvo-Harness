@@ -30,7 +30,7 @@
     const input = document.querySelector('#agent-input');
     input.value = '查看当前工作区';
     document.querySelector('#agent-form').requestSubmit();
-    const unavailable = await waitFor(() => document.querySelector('#agent-body').textContent.includes('model_unavailable'));
+    const unavailable = await waitFor(() => Boolean(document.querySelector('#agent-body [data-agent-run-status="model_unavailable"]')));
     check(unavailable, 'unconfigured execution must report no model and no actions');
     document.querySelector('#agent-mode').click();
     check(document.querySelector('#agent-mode').textContent.includes('策略模式'), 'failed to switch to conservative planner');
