@@ -73,7 +73,7 @@ function runDemoAction(button){
  if(action==='approval')return demoApprovalDecision(button.dataset.approvalId,button.dataset.decision);
  if(action==='failure-miner'){
   if(!(DEMO.evolution||[]).some(item=>item.id==='EV-DEMO')){
-   DEMO.evolution.unshift({id:'EV-DEMO',source:'Demo trace scan',problem:'审批前说明在少量轨迹中缺少明确的 blast-radius 摘要。',candidate:'在 ApprovalRequest 前固定生成 impact summary。',metrics:[['Coverage','+100%'],['Policy Violation','0%'],['Extra latency','+0.4%'],['Cost','+$0.00']],stage:'Offline replay'});
+   DEMO.evolution.unshift({id:'EV-DEMO',source:'演示轨迹分析',problem:'审批前说明缺少明确的影响范围摘要。',candidate:'在申请审批前补充影响范围摘要。',metrics:[['Coverage','+100%'],['Policy Violation','0%'],['Extra latency','+0.4%'],['Cost','+$0.00']],stage:'Offline replay'});
   }
   document.body.dataset.lastFailureMiner='EV-DEMO';
   return evolution();
@@ -121,9 +121,9 @@ function bindProductActions(){
   const name=b.dataset.campaignMore||'Campaign';
   if(typeof openUtilityMenu!=='function')return go(route);
   openUtilityMenu(name,[
-   {label:'打开工作台',detail:'查看 Campaign / Experiment 状态',action:()=>go(route)},
-   {label:'查看 Evidence',detail:'检查增量与支持度',action:()=>go('evidence')},
-   {label:'治理与审批',detail:'查看 blast radius 与 gate',action:()=>go('approvals')},
+   {label:'打开工作台',detail:'查看活动与实验状态',action:()=>go(route)},
+   {label:'查看证据',detail:'检查增量与支持度',action:()=>go('evidence')},
+   {label:'治理与审批',detail:'查看影响范围与审批条件',action:()=>go('approvals')},
   ]);
  });
 }

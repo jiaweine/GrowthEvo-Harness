@@ -153,6 +153,8 @@ jobs:
           chrome_shot growthevo-evolution evolution
           "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=430,932 --screenshot=ui-screenshots/growthevo-mobile-web.png http://127.0.0.1:4173/
           test -s ui-screenshots/growthevo-mobile-web.png
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --hide-scrollbars --force-device-scale-factor=1 --lang=zh-CN --window-size=390,844 --screenshot=ui-screenshots/growthevo-agent-mobile.png http://127.0.0.1:4173/#agent
+          test -s ui-screenshots/growthevo-agent-mobile.png
       - name: Exercise API-mode workbenches in real Chrome
         shell: bash
         env:
@@ -216,13 +218,13 @@ jobs:
             out="/tmp/growthevo-${route}.html"
             "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --virtual-time-budget=5000 --dump-dom "http://127.0.0.1:4174/#${route}" > "$out"
             grep -Fq "$marker" "$out"
-            if grep -Fq 'Reference UI Fixture' "$out"; then
+            if grep -Fq 'data-reference-fixture=' "$out"; then
               echo "${route} unexpectedly rendered as a static fixture" >&2
               exit 1
             fi
           }
           assert_live_route campaigns '策略与执行'
-          assert_live_route campaignStudio 'Campaign Draft'
+          assert_live_route campaignStudio '活动草案'
           assert_live_route evidence '智能与证据'
           assert_live_route execution '执行中心'
           assert_live_route data '数据中心'
@@ -233,7 +235,7 @@ jobs:
           assert_live_route realtime 'free_shipping'
           # A live workspace has no operator traces/candidates until real runs occur.
           # Assert the honest empty-state UI instead of fabricated fixture IDs.
-          assert_live_route harness '还没有真实 Agent Run'
+          assert_live_route harness '还没有真实运行记录'
           assert_live_route approvals 'apr_281'
           assert_live_route evolution '尚无真实改进候选'
           auth_out=/tmp/growthevo-auth-api-smoke.html
@@ -250,7 +252,7 @@ jobs:
             grep -F 'LIVE_WORKBENCH_SMOKE_' "$live_out" >&2 || cat "$live_out" >&2
             exit 1
           fi
-          if grep -Fq 'Reference UI Fixture' "$live_out"; then
+          if grep -Fq 'data-reference-fixture=' "$live_out"; then
             echo 'API mode still exposed a Reference UI Fixture' >&2
             exit 1
           fi
@@ -284,15 +286,16 @@ jobs:
             grep -oE '<h1[^>]*>[^<]+|<div[^>]+class="runtime-error[^"]*"[^>]*>|<title>[^<]+|<body[^>]+>' "$unavailable_out" >&2 || true
             exit 1
           fi
-          if grep -Fq 'Demo Workspace · Synthetic Data' "$unavailable_out"; then
+          if grep -Fq 'data-runtime-mode="demo"' "$unavailable_out"; then
             echo "strict API mode silently exposed the Demo workspace after API failure" >&2
             exit 1
           fi
-          if grep -Fq 'Reference UI Fixture' "$unavailable_out"; then
+          if grep -Fq 'data-reference-fixture=' "$unavailable_out"; then
             echo "strict API mode rendered a reference fixture after API failure" >&2
             exit 1
           fi
       - name: Upload rendered UI screenshots
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: growthevo-ui-screenshots

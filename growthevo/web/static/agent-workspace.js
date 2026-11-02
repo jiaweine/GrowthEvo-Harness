@@ -132,10 +132,9 @@ async function renderAgentWorkspace(){
     '<button class="aw-quick" data-aw-prompt="先读取工作区，再打开命令搜索面板">打开界面搜索</button></div></aside></section>';
   document.getElementById('aw-chat-mount').appendChild(existingBody);
   document.getElementById('aw-form-mount').appendChild(existingForm);
-  const session=agentWorkspaceSessions.find(item=>item.id===agentWorkspaceActive);
-  if(session?.html!==null&&existingBody.innerHTML!==session.html){
-    existingBody.innerHTML=session.html;bindWorkspaceSuggestionButtons();
-  }
+  // The portal body is the live active thread. Restoring its older snapshot
+  // here would discard messages/receipts received while a business page was open.
+  bindWorkspaceSuggestionButtons();
   agentWorkspaceThreads();
   document.getElementById('aw-new-session').onclick=newAgentWorkspaceSession;
   document.getElementById('aw-mode').onclick=()=>document.getElementById('agent-mode').click();

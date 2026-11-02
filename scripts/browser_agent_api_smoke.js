@@ -69,6 +69,8 @@
     check(document.querySelector('#utility-popover .utility-title')?.textContent==='渠道','wrong channel filter menu');
     closeUtilityMenu();
     await go('agent');
+    check(document.querySelector('[data-agent-run-id="op_browser_contract"]')?.dataset.agentRunStatus==='ui_confirmed',
+      'returning to the Agent workspace discarded the confirmed receipt');
     api=realApi;
     api = async () => { throw Error('isolated agent fixture failure'); };
     input.value = '触发一次隔离失败';
