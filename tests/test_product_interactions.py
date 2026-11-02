@@ -42,7 +42,8 @@ def test_agent_is_reversible_and_renders_visible_feedback() -> None:
     assert "function closeAgent()" in app
     assert "function openAgent()" in app
     assert "appendAgentMessage('user',goal)" in app
-    assert "appendAgentMessage('agent',demoAgentResponse(goal))" in app
+    assert "appendAgentMessage('agent',demoAgentResponse(goal)+" in app
+    assert "demoNavigationTarget(goal)" in app
     assert "const target=$('#agent-achievement')" in app
     assert "执行与演进观测" in app
     assert "api(\'/api/harness/runs\')" in app
