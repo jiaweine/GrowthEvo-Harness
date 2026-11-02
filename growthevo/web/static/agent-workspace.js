@@ -68,7 +68,7 @@ function recordAgentWorkspacePrompt(goal){
 async function agentWorkspaceTelemetry(){
   const target=document.getElementById('aw-telemetry');
   if(!target)return;
-  if(useDemo){
+  if(use演示){
     target.innerHTML='<span>演示工作区</span><strong>示例数据，不执行真实 Agent 请求</strong>';
     return;
   }
@@ -99,21 +99,21 @@ async function renderAgentWorkspace(){
   if(!existingBody||!existingForm)return;
   // Keep the existing composer, consent checkbox, request lifecycle and trace UI.
   view.innerHTML='<section class="aw-shell" aria-label="Agent OS Conversation Workspace">'+
-    '<aside class="aw-conversations" aria-label="Agent 会话"><div class="aw-panel-title"><strong>CONVERSATIONS</strong><button id="aw-new-session" type="button" aria-label="新建会话" title="新建会话">＋</button></div>'+
+    '<aside class="aw-conversations" aria-label="Agent 会话"><div class="aw-panel-title"><strong>会话记录</strong><button id="aw-new-session" type="button" aria-label="新建会话" title="新建会话">＋</button></div>'+
     '<p class="aw-muted">本次浏览器会话 · 不同步服务器历史</p><div id="agent-workspace-threads"></div>'+
-    '<div class="aw-conversation-footer"><strong>YOUR WORKSPACE</strong><p>会话内容保存在当前页面内存中。Agent 单次请求不会自动继承其他会话历史。</p></div></aside>'+
-    '<section class="aw-chat"><header class="aw-chat-head"><div class="aw-identity"><span class="aw-agent-icon">✦</span><div><strong>Growth Agent</strong><small>Agent Operating System · '+(useDemo?'DEMO':'LIVE API')+'</small></div></div>'+
+    '<div class="aw-conversation-footer"><strong>当前工作区</strong><p>会话内容保存在当前页面内存中。Agent 单次请求不会自动继承其他会话历史。</p></div></aside>'+
+    '<section class="aw-chat"><header class="aw-chat-head"><div class="aw-identity"><span class="aw-agent-icon">✦</span><div><strong>智能体助手</strong><small>智能体操作系统 · '+(use演示?'演示模式':'实时工作区')+'</small></div></div>'+
     '<div class="aw-head-actions"><button id="aw-mode" type="button">切换执行 / 策略</button><button id="aw-evolution" type="button">自进化中心 ↗</button></div></header>'+
     '<div class="aw-messages" id="aw-chat-mount"></div><div class="aw-composer-mount" id="aw-form-mount"></div>'+
     '<p class="aw-chat-disclaimer">仅可使用已授权的第一方操作。审批、发送和发布必须由人确认；任务失败不会显示为成功。</p></section>'+
-    '<aside class="aw-participants" aria-label="能力与进化状态"><div class="aw-panel-title"><strong>OPERATING CONTEXT</strong></div>'+
-    '<div class="aw-group"><h3>Participants</h3><div class="aw-participant"><span class="aw-person">OP</span>你 · Workspace Operator</div>'+
-    '<div class="aw-participant active"><span class="aw-agent-icon">✦</span>Growth Agent <small>'+(useDemo?'Demo':'受控执行')+'</small></div></div>'+
-    '<div class="aw-group"><h3>Toolkits · 第一方能力</h3><div id="aw-tool-list" class="aw-tool-list">'+
-    (useDemo?'<span class="aw-muted">演示预览 · 实际工具需连接 API</span>':'正在检查已注册工具…')+
-    '</div></div><div class="aw-group"><h3>Evolution</h3><div id="aw-telemetry" class="aw-telemetry">正在获取真实进化状态…</div>'+
+    '<aside class="aw-participants" aria-label="能力与进化状态"><div class="aw-panel-title"><strong>任务上下文</strong></div>'+
+    '<div class="aw-group"><h3>参与成员</h3><div class="aw-participant"><span class="aw-person">OP</span>你 · 工作区操作员</div>'+
+    '<div class="aw-participant active"><span class="aw-agent-icon">✦</span>智能体助手 <small>'+(use演示?'演示':'受控执行')+'</small></div></div>'+
+    '<div class="aw-group"><h3>第一方工具能力</h3><div id="aw-tool-list" class="aw-tool-list">'+
+    (use演示?'<span class="aw-muted">演示预览 · 实际工具需连接 API</span>':'正在检查已注册工具…')+
+    '</div></div><div class="aw-group"><h3>自进化</h3><div id="aw-telemetry" class="aw-telemetry">正在获取真实进化状态…</div>'+
     '<button id="aw-open-evolution" type="button" class="aw-quick">查看进化诊断 ↗</button></div>'+
-    '<div class="aw-group"><h3>Quick actions</h3>'+
+    '<div class="aw-group"><h3>快捷操作</h3>'+
     '<button class="aw-quick" data-aw-prompt="读取当前增长机会，并导航到实验中心">检查增长机会</button>'+
     '<button class="aw-quick" data-aw-prompt="读取审批工作区，并带我打开审批页面">检查待审批事项</button>'+
     '<button class="aw-quick" data-aw-prompt="先读取工作区，再打开命令搜索面板">打开界面搜索</button></div></aside></section>';
@@ -131,7 +131,7 @@ async function renderAgentWorkspace(){
   view.querySelectorAll('[data-aw-prompt]').forEach(button=>button.onclick=()=>{
     const field=document.getElementById('agent-input');field.value=button.dataset.awPrompt;field.focus();
   });
-  if(!useDemo)void agentWorkspaceTelemetry();
+  if(!use演示)void agentWorkspaceTelemetry();
   else agentWorkspaceTelemetry();
 }
 
