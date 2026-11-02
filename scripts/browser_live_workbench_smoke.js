@@ -43,7 +43,7 @@
       await visit('data', '数据中心');
       await visit('integrations', '集成与渠道');
       await visit('settings', '设置');
-      await visit('campaignStudio', 'Campaign Draft');
+      await visit('campaignStudio', '活动草案');
 
       const form = document.querySelector('#live-campaign-form');
       check(Boolean(form), 'live campaign form missing');

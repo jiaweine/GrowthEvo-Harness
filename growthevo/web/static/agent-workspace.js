@@ -82,7 +82,7 @@ async function agentWorkspaceTelemetry(){
   const target=document.getElementById('aw-telemetry');
   if(!target)return;
   if(useDemo){
-    target.innerHTML='<span>演示工作区</span><strong>示例数据，不执行真实 Agent 请求</strong>';
+    target.innerHTML='<span>演示工作区</span><strong>示例数据，不执行真实智能体请求</strong>';
     return;
   }
   try{
@@ -111,10 +111,10 @@ async function renderAgentWorkspace(){
   const existingForm=document.getElementById('agent-form');
   if(!existingBody||!existingForm)return;
   // Keep the existing composer, consent checkbox, request lifecycle and trace UI.
-  view.innerHTML='<section class="aw-shell" aria-label="Agent OS Conversation Workspace">'+
-    '<aside class="aw-conversations" aria-label="Agent 会话"><div class="aw-panel-title"><strong>会话记录</strong><button id="aw-new-session" type="button" aria-label="新建会话" title="新建会话">＋</button></div>'+
+  view.innerHTML='<section class="aw-shell" aria-label="智能体会话工作台">'+
+    '<aside class="aw-conversations" aria-label="智能体会话"><div class="aw-panel-title"><strong>会话记录</strong><button id="aw-new-session" type="button" aria-label="新建会话" title="新建会话">＋</button></div>'+
     '<p class="aw-muted">本次浏览器会话 · 不同步服务器历史</p><div id="agent-workspace-threads"></div>'+
-    '<div class="aw-conversation-footer"><strong>当前工作区</strong><p>会话内容保存在当前页面内存中。Agent 单次请求不会自动继承其他会话历史。</p></div></aside>'+
+    '<div class="aw-conversation-footer"><strong>当前工作区</strong><p>会话内容保存在当前页面内存中。智能体单次请求不会自动继承其他会话历史。</p></div></aside>'+
     '<section class="aw-chat"><header class="aw-chat-head"><div class="aw-identity"><span class="aw-agent-icon">✦</span><div><strong>智能体助手</strong><small>智能体操作系统 · '+(useDemo?'演示模式':'实时工作区')+'</small></div></div>'+
     '<div class="aw-head-actions"><button id="aw-mode" type="button">切换执行 / 策略</button><button id="aw-evolution" type="button">自进化中心 ↗</button></div></header>'+
     '<div class="aw-messages" id="aw-chat-mount"></div><div class="aw-composer-mount" id="aw-form-mount"></div>'+

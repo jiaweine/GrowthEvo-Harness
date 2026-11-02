@@ -8,6 +8,7 @@ Promotion requires a separate trusted authority and real shadow/canary gates.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+from copy import deepcopy
 from hashlib import sha256
 import json
 from threading import RLock
@@ -61,15 +62,27 @@ class EvolutionAuthority:
         with self._lock:
             return asdict(self.active) | {"fingerprint": self.active.fingerprint}
 
+    def _eligible_traces(self, traces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        recent = []
+        for trace in traces:
+            run_id = trace.get("run_id", "")
+            if (not isinstance(run_id, str) or not run_id.startswith("op_") or run_id in seen
+                or not isinstance(trace.get("steps"), list)
+                or trace.get("policy_fingerprint") != self.active.fingerprint):
+                continue
+            seen.add(run_id)
+            recent.append(trace)
+            if len(recent) == 30:
+                break
+        return recent
+
     def readiness(self, traces: list[dict[str, Any]]) -> dict[str, Any]:
         """Explain the real trace gate without manufacturing improvement metrics."""
         with self._lock:
-            recent = [
-                t for t in traces[:30] if str(t.get("run_id", "")).startswith("op_")
-                and isinstance(t.get("steps"), list)
-            ]
+            recent = self._eligible_traces(traces)
             step_limits = sum(t.get("status") == "step_limit" for t in recent)
-            completed = sum(t.get("status") == "completed" for t in recent)
+            completed = sum(t.get("status") in {"completed", "ui_confirmed"} for t in recent)
             return {
                 "trace_count": len(recent),
                 "required_trace_count": 8,
@@ -86,14 +99,12 @@ class EvolutionAuthority:
     def propose(self, traces: list[dict[str, Any]]) -> EvolutionCandidate | None:
         """Mine only actual operator traces; ignore fixtures and unverifiable runs."""
         with self._lock:
-            real = [t for t in traces if str(t.get("run_id", "")).startswith("op_")
-                    and isinstance(t.get("steps"), list)]
-            if len(real) < 8:
+            recent = self._eligible_traces(traces)
+            if len(recent) < 8:
                 return None
-            recent = real[:30]
             step_limited = sum(t.get("status") == "step_limit" for t in recent)
             # A model finish is not evidence of task success; this only mines a candidate.
-            completed = [t for t in recent if t.get("status") == "completed"]
+            completed = [t for t in recent if t.get("status") in {"completed", "ui_confirmed"}]
             new_policy: OperatorPolicy | None = None
             reason = ""
             if step_limited >= 3 and self.active.step_budget < 8:
@@ -214,9 +225,9 @@ class EvolutionAuthority:
 
     def candidates(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [
+            return deepcopy([
                 {"id": c.id, "parent": c.parent, "proposal": asdict(c.proposal),
                  "reason": c.reason, "source_count": c.source_count, "status": c.status,
                  "evaluation": c.evaluation}
                 for c in reversed(self.archive)
-            ]
+            ])

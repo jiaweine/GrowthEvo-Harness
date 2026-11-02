@@ -79,7 +79,7 @@ function setRuntimeStatus(label, latency = null, freshness = null) {
   const status = document.querySelector('.status-right');
   if (!status) return;
   const parts = [label];
-  if (latency !== null) parts.push(`Readiness ${latency} ms`);
+  if (latency !== null) parts.push(`状态检查 ${latency} 毫秒`);
   if (freshness) parts.push(freshness);
   while (status.firstChild) status.removeChild(status.firstChild);
   for (const text of parts) {
@@ -95,7 +95,7 @@ function setAgentAvailability(state, detail = '') {
     busy: 'AI 繁忙',
     safe: '安全模式',
     auth: '需要登录',
-    demo: 'Demo',
+    demo: '演示模式',
     checking: '检查中',
     offline: 'API 不可用',
   };
@@ -107,7 +107,7 @@ function setAgentAvailability(state, detail = '') {
   const dot = document.querySelector('.online-dot');
   if (dot) {
     dot.style.opacity = state === 'offline' ? '.35' : '1';
-    dot.style.background = state === 'ai' ? '#10b981' : state === 'busy' ? '#f59e0b' : state === 'offline' ? '#94a3b8' : state === 'auth' ? '#f59e0b' : '#6366f1';
+    dot.style.background = state === 'ai' ? 'var(--green)' : state === 'busy' || state === 'auth' ? 'var(--amber)' : 'var(--muted)';
   }
   document.body.dataset.agentRuntime = state;
 }
@@ -115,13 +115,13 @@ function setAgentAvailability(state, detail = '') {
 function runtimeWorkspaceLabel() {
   const meta = document.querySelector('.workspace-card .workspace-copy span');
   if (useDemo) {
-    if (meta) meta.textContent = 'Demo Workspace · Synthetic Data';
+    if (meta) meta.textContent = '演示工作区 · 样例数据';
     document.body.dataset.runtimeMode = 'demo';
-    setRuntimeStatus('Demo · Synthetic Data', null, '非生产数据');
+    setRuntimeStatus('演示模式 · 样例数据', null, '非生产数据');
     setAgentAvailability('demo', '静态演示不会连接外部模型');
     return;
   }
-  if (meta) meta.textContent = 'API Workspace · Checking';
+  if (meta) meta.textContent = '接口工作区 · 检查中';
   document.body.dataset.runtimeMode = 'api';
   setRuntimeStatus('API 状态检查中');
   setAgentAvailability('checking');
@@ -143,7 +143,7 @@ async function probeRuntime() {
     runtimeBackend = payload || {};
     if (typeof authReadyPromise !== 'undefined') await authReadyPromise;
     const mode = payload && payload.mode ? payload.mode : 'api';
-    const env = payload && payload.environment ? ` · ${payload.environment}` : '';
+    const env = payload && payload.environment ? ` · ${productLabel(payload.environment)}` : '';
     const durable = mode === 'production' && payload && payload.persistence && payload.persistence.active === true;
     const dataMode = payload && payload.data_mode ? payload.data_mode : 'reference-contract';
     const backendAuth = payload && payload.authentication ? payload.authentication : null;
@@ -154,10 +154,10 @@ async function probeRuntime() {
     if (loginRequired) {
       runtimeAvailability = 'auth_required';
       const meta = document.querySelector('.workspace-card .workspace-copy span');
-      if (meta) meta.textContent = 'Production Workspace · 需要登录';
+      if (meta) meta.textContent = '生产工作区 · 需要登录';
       document.body.dataset.runtimeMode = mode;
-      setRuntimeStatus(`API Ready · ${mode}${env}`, latency, '需要组织身份验证');
-      setAgentAvailability('auth', '登录生产工作区后连接受控 Growth Agent');
+      setRuntimeStatus(`接口就绪 · ${productLabel(mode)}${env}`, latency, '需要组织身份验证');
+      setAgentAvailability('auth', '登录生产工作区后连接受控智能体助手');
       renderAuthRequired(authInitializationError);
       return;
     }
@@ -165,11 +165,11 @@ async function probeRuntime() {
     const meta = document.querySelector('.workspace-card .workspace-copy span');
     if (meta) {
       meta.textContent = durable
-        ? 'Production Workspace · Durable API'
-        : `API Workspace · ${dataMode === 'synthetic' ? 'Synthetic' : 'Reference Contract'}`;
+        ? '生产工作区 · 已连接持久化服务'
+        : `接口工作区 · ${dataMode === 'synthetic' ? '样例数据' : '参考数据'}`;
     }
     document.body.dataset.runtimeMode = mode;
-    setRuntimeStatus(`API Ready · ${mode}${env}`, latency, durable ? 'Durable production' : `Data: ${dataMode}`);
+    setRuntimeStatus(`接口就绪 · ${productLabel(mode)}${env}`, latency, durable ? '业务数据已持久化' : `数据：${productLabel(dataMode)}`);
 
     const llm = payload && payload.llm ? payload.llm : null;
     const agentActive = Boolean(llm && llm.agent_planning === true && llm.active === true && llm.healthy !== false);
@@ -183,12 +183,12 @@ async function probeRuntime() {
       const waiting = Number(capacity.waiting || 0);
       const maxQueue = Number(capacity.max_queue_size || 0);
       const capacityDetail = maxConcurrency > 0
-        ? ` · capacity ${inFlight}/${maxConcurrency} active · queue ${waiting}/${maxQueue}`
+        ? ` · 活跃请求 ${inFlight}/${maxConcurrency} · 等待 ${waiting}/${maxQueue}`
         : '';
-      const detail = `${available}/${total || available} routes${providers ? ` · ${providers}` : ''}${capacityDetail}`;
+      const detail = `${available}/${total || available} 条模型路由${providers ? ` · ${providers}` : ''}${capacityDetail}`;
       setAgentAvailability(llm.load_state === 'busy' ? 'busy' : 'ai', detail);
     } else {
-      setAgentAvailability('safe', '模型未激活或暂不可用时使用 deterministic 安全规划');
+      setAgentAvailability('safe', '模型未激活或暂不可用时使用 规则安全规划');
     }
   } catch (error) {
     runtimeAvailability = 'unavailable';
@@ -211,13 +211,13 @@ function renderAuthRequired(error) {
       <div class="runtime-error-icon">↗</div>
       <div>
         <h1>登录生产工作区</h1>
-        <p>此工作区需要组织身份验证。登录成功后，GrowthEvo 才会加载真实业务数据并连接受控 Growth Agent。</p>
+        <p>此工作区需要组织身份验证。登录成功后，GrowthEvo 才会加载真实业务数据并连接受控智能体助手。</p>
         ${reason ? `<dl><div><dt>状态</dt><dd>${reason}</dd></div></dl>` : ''}
         <button class="primary" id="runtime-login" type="button" ${configured ? '' : 'disabled'}>${configured ? '使用组织身份登录' : '登录入口尚未配置'}</button>
       </div>
     </div>`;
-  setRuntimeStatus('API Ready · 需要登录', null, configured ? '组织身份验证' : '部署配置未完成');
-  setAgentAvailability('auth', configured ? '登录后连接受控 Agent' : '生产登录入口尚未配置');
+  setRuntimeStatus('接口就绪 · 需要登录', null, configured ? '组织身份验证' : '部署配置未完成');
+  setAgentAvailability('auth', configured ? '登录后连接受控智能体助手' : '生产登录入口尚未配置');
   const login = document.querySelector('#runtime-login');
   if (login && configured) login.onclick = () => { void beginOidcLogin(); };
 }
@@ -227,14 +227,14 @@ function renderApiUnavailable(error) {
   runtimeLastError = error || runtimeLastError;
   const view = document.querySelector('#view');
   if (!view) return;
-  const base = esc(config.API_BASE || 'same-origin API');
-  const reason = esc(error && error.message ? error.message : 'Connection failed');
+  const base = esc(config.API_BASE || '同源接口');
+  const reason = esc(error && error.message ? error.message : '连接失败');
   view.innerHTML = `
     <div class="runtime-error card">
       <div class="runtime-error-icon">!</div>
       <div>
         <h1>GrowthEvo API 暂不可用</h1>
-        <p>当前处于严格 API 模式，GrowthEvo 不会把 synthetic demo 数据伪装成真实生产数据。</p>
+        <p>当前服务尚未连接。重新连接后才能读取工作区数据。</p>
         <dl><div><dt>API</dt><dd>${base}</dd></div><div><dt>错误</dt><dd>${reason}</dd></div></dl>
         <button class="secondary" id="runtime-retry">重新连接</button>
       </div>

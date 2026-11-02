@@ -54,7 +54,7 @@ async function dashboard(){
   <div class="lower-grid">
     <div class="card table-card">
       <div class="table-toolbar"><div class="panel-head" style="margin:0"><h2>当前运行的策略与实验</h2></div><button class="panel-link" id="all-c" type="button">查看全部 →</button></div>
-      <div class="table-toolbar" style="padding-top:7px;padding-bottom:6px"><div class="table-tabs"><button class="active" type="button" data-dashboard-filter="all">全部(${campaigns.length})</button><button type="button" data-dashboard-filter="Campaign">Campaign (${campaigns.filter(item=>item.type==='Campaign').length})</button><button type="button" data-dashboard-filter="Experiment">Experiment (${campaigns.filter(item=>item.type==='Experiment').length})</button><button type="button" data-go="realtime">实时决策 →</button></div></div>
+      <div class="table-toolbar" style="padding-top:7px;padding-bottom:6px"><div class="table-tabs"><button class="active" type="button" data-dashboard-filter="all">全部(${campaigns.length})</button><button type="button" data-dashboard-filter="Campaign">活动 (${campaigns.filter(item=>item.type==='Campaign').length})</button><button type="button" data-dashboard-filter="Experiment">实验 (${campaigns.filter(item=>item.type==='Experiment').length})</button><button type="button" data-go="realtime">实时决策 →</button></div></div>
       <div id="dashboard-strategies">${campaignsTable(campaigns)}</div>
     </div>
     <div class="card panel">

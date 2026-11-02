@@ -58,7 +58,7 @@
 
     click('[data-dashboard-filter="Experiment"]');
     check(document.querySelectorAll('#dashboard-strategies tbody tr').length >= 1, 'dashboard list filter returned no rows');
-    check([...document.querySelectorAll('#dashboard-strategies tbody tr')].every(row => row.textContent.includes('Experiment')), 'dashboard filter kept wrong row types');
+    check([...document.querySelectorAll('#dashboard-strategies tbody tr')].every(row => row.textContent.includes('实验')), 'dashboard filter kept wrong row types');
 
     click('#dashboard-strategies .action-view');
     await sleep(60);
@@ -179,7 +179,7 @@
     const beforeMode = document.querySelector('#agent-mode').textContent;
     click('#aw-mode');
     check(document.querySelector('#agent-mode').textContent !== beforeMode, 'workspace mode did not change');
-    await confirmFirstPartyUiControls({ui_commands:['open_search']});
+    await confirmFirstPartyUiControls({ui_actions:[{step_index:0,kind:'control',target:'open_search'}]});
     check(document.body.dataset.agentLastUiConfirmation.includes('浏览器已验证'),
       'first-party UI action was not verified in browser');
     check(!document.querySelector('#command-modal').hidden, 'controlled search command did not open');

@@ -63,20 +63,17 @@ def test_production_readiness_requires_active_durable_persistence(monkeypatch: p
 def test_database_url_is_configuration_not_fake_activation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GROWTHEVO_MODE", "production")
     monkeypatch.setenv("DATABASE_URL", "postgresql://private_user:private_password@db.example.test:5432/growthevo")
-    client = TestClient(create_app())
-    response = client.get("/api/ready")
-    assert response.status_code == 503
-    payload_text = response.text
-    assert "private_password" not in payload_text
-    assert "private_user" not in payload_text
-    assert "db.example.test" not in payload_text
-    payload = response.json()
-    assert payload["persistence"]["configured"] is True
-    assert payload["persistence"]["active"] is False
-    assert "host" not in payload["persistence"]
-    assert payload["persistence"]["backend"] == "reference-memory"
-    connector = next(item for item in payload["connectors"] if item["id"] == "persistence")
-    assert connector["state"] == "configured_not_active"
+    from growthevo.web import persistence
+
+    def unavailable_store(*args, **kwargs):
+        raise RuntimeError("simulated unavailable database")
+
+    monkeypatch.setattr(persistence, "PostgresStore", unavailable_store)
+    with pytest.raises(RuntimeError, match="configured PostgreSQL persistence could not be initialized") as caught:
+        create_app()
+    assert "private_password" not in str(caught.value)
+    assert "private_user" not in str(caught.value)
+    assert "db.example.test" not in str(caught.value)
 
 
 def test_pages_origin_can_be_enabled_explicitly(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -161,7 +158,7 @@ def test_idempotency_key_is_trimmed_and_invalid_values_are_rejected() -> None:
     assert "non-whitespace" in blank.json()["detail"]
     too_long = client.post("/api/decide", headers={"Idempotency-Key": "x" * 257}, json=body)
     assert too_long.status_code == 422
-    assert "at most 256" in too_long.json()["detail"]
+    assert "at most 256" in str(too_long.json()["detail"])
 
 
 def test_duplicate_idempotency_keys_are_rejected() -> None:

@@ -17,6 +17,9 @@ class FakeModel:
         self.actions = list(actions)
         self.inputs = []
 
+    def generate(self, **kwargs):
+        return asyncio.run(self.agenerate(**kwargs))
+
     async def agenerate(self, *, system, user, schema):
         assert "UNTRUSTED" in system
         assert schema["additionalProperties"] is False
@@ -84,7 +87,7 @@ def test_model_directed_read_navigation_finish_and_trace():
     )
     operator = GrowthOperator(model, make_tools(state), traces)
     result = run(operator)
-    assert result["status"] == "completed", result["message"]
+    assert result["status"] == "awaiting_ui_confirmation", result["message"]
     assert result["tool_calls"] == 2
     assert result["navigation"] == "campaignStudio"
     assert result["steps"][0]["section"] == "opportunities"
@@ -138,16 +141,16 @@ def test_browser_control_is_a_pending_verified_ui_intent_not_server_success():
 def test_evolution_readiness_only_counts_actual_trace_rows():
     authority = EvolutionAuthority()
     rows = [
-        {"run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_{i}", "status": "step_limit", "steps": []}
         for i in range(7)
     ]
-    rows += [{"run_id": "demo_1", "status": "completed", "steps": []}]
+    rows += [{"policy_fingerprint": authority.active.fingerprint, "run_id": "demo_1", "status": "completed", "steps": []}]
     readiness = authority.readiness(rows)
     assert readiness["trace_count"] == 7
     assert readiness["required_trace_count"] == 8
     assert readiness["enough_traces"] is False
     assert readiness["candidate_count"] == 0
-    ready = authority.readiness([{"run_id": "op_8", "status": "completed", "steps": []}] + rows)
+    ready = authority.readiness([{"policy_fingerprint": authority.active.fingerprint, "run_id": "op_8", "status": "completed", "steps": []}] + rows)
     assert ready["enough_traces"] is True
     assert ready["step_limit_count"] == 7
     assert ready["completed_count"] == 1
@@ -174,7 +177,7 @@ def test_mutation_needs_consent_and_prior_workspace_observation():
                                        finish("Draft created")),
                              make_tools(state), AgentTraceStore())
     response = run(allowed, allow_drafts=True)
-    assert response["status"] == "completed", response["message"]
+    assert response["status"] == "awaiting_ui_confirmation", response["message"]
     assert response["has_draft_write"]
     assert len(state.campaigns()) == before + 1
     assert state.campaigns()[0]["status"] == "Draft"
@@ -216,7 +219,7 @@ def test_draft_tool_uses_existing_request_validator_and_control_action():
                       step("campaign.draft", draft), finish())
     result = run(GrowthOperator(model, make_tools(state), AgentTraceStore()),
                  allow_drafts=True)
-    assert result["status"] == "completed"
+    assert result["status"] == "awaiting_ui_confirmation"
     assert state.campaigns()[0]["candidate_action_ids"] == [
         "NO_TREATMENT", "push_reminder"
     ]
@@ -239,7 +242,7 @@ def test_heldout_eval_does_not_lock_live_operator_or_share_mutable_claims():
 
     authority = EvolutionAuthority()
     candidate = authority.propose([
-        {"run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_{i}", "status": "step_limit", "steps": []}
         for i in range(8)
     ])
     assert candidate is not None
@@ -269,7 +272,7 @@ def test_heldout_eval_does_not_lock_live_operator_or_share_mutable_claims():
 def test_heldout_evaluator_failure_releases_claim_without_fabricated_results():
     authority = EvolutionAuthority()
     candidate = authority.propose([
-        {"run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_{i}", "status": "step_limit", "steps": []}
         for i in range(8)
     ])
     assert candidate is not None
@@ -287,13 +290,13 @@ def test_heldout_evaluator_failure_releases_claim_without_fabricated_results():
 def test_heldout_results_are_rejected_if_active_parent_changes_during_replay():
     authority = EvolutionAuthority()
     step_traces = [
-        {"run_id": f"op_limited_{i}", "status": "step_limit", "steps": []}
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_limited_{i}", "status": "step_limit", "steps": []}
         for i in range(8)
     ]
     candidate = authority.propose(step_traces)
     assert candidate is not None
     read_traces = [
-        {"run_id": f"op_observed_{i}", "status": "completed",
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_observed_{i}", "status": "completed",
          "steps": [{"tool": "workspace.read", "section": "opportunities", "outcome": "ok"}]}
         for i in range(8)
     ]
@@ -327,7 +330,7 @@ def test_evolution_archives_descendants_only_after_external_evidence():
     authority = EvolutionAuthority()
 
     def traces(count):
-        return [{"run_id": f"op_real_{i}", "status": "step_limit",
+        return [{"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_real_{i}", "status": "step_limit",
                  "steps": [{"tool": "workspace.read", "section": "opportunities",
                             "outcome": "ok"}]} for i in range(count)]
 
@@ -375,7 +378,7 @@ def test_evolution_archives_descendants_only_after_external_evidence():
 def test_evolution_rejects_unmeasured_or_regressive_changes():
     authority = EvolutionAuthority()
     candidate = authority.propose([
-        {"run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_{i}", "status": "step_limit", "steps": []}
         for i in range(8)
     ])
     assert candidate is not None
@@ -423,7 +426,7 @@ def test_paired_replay_evaluates_actual_agent_loops_and_candidate_budget():
     )
     authority = EvolutionAuthority()
     candidate = authority.propose([
-        {"run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_{i}", "status": "step_limit", "steps": []}
         for i in range(8)
     ])
     assert candidate is not None
@@ -496,7 +499,7 @@ def test_live_api_executes_real_model_tool_loop(monkeypatch):
             "allow_draft_writes": False
         })
         assert response.status_code == 200
-        assert response.json()["status"] == "completed"
+        assert response.json()["status"] == "awaiting_ui_confirmation"
         assert response.json()["navigation"] == "experiments"
         assert len(response.json()["steps"]) == 2
         traces = client.get("/api/harness/runs").json()

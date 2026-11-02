@@ -12,7 +12,7 @@ function markReferenceFixture(route){
   note.dataset.referenceFixture='true';
   note.className='card';
   note.style.cssText='margin-bottom:10px;padding:9px 12px;border:1px solid #e2d6a6;background:#fffaf0;color:#6f5a16;font-size:10px;line-height:1.5';
-  note.textContent='Reference UI Fixture · 此工作台仍包含静态参考数据，不代表实时生产状态。真实 API 可用性与业务数据不会被 synthetic fixture 替代。';
+  note.textContent='Reference UI Fixture · 此工作台仍包含静态参考数据，不代表生产状态。服务不可用时不会用样例数据替代。';
   view.prepend(note);
 }
 
@@ -26,6 +26,7 @@ render=async function guardedRender(){
   const route=state.route;
   if(useDemo){
     await baseRouteRender();
+    if(epoch===routeRenderEpoch)$('#view').dataset.renderedRoute=route;
     if(epoch===routeRenderEpoch&&route==='dashboard')renderAgentOsHero();
     return;
   }
@@ -39,6 +40,7 @@ render=async function guardedRender(){
   try{await baseRouteRender()}
   catch(error){if(epoch===routeRenderEpoch)renderWorkspaceFailure(error);return}
   if(epoch===routeRenderEpoch&&route===state.route){
+    $('#view').dataset.renderedRoute=route;
     markReferenceFixture(route);
     if(route==='dashboard')renderAgentOsHero();
   }
@@ -79,7 +81,7 @@ const COMMAND_ITEMS=[
   ['settings','打开工作区设置','工作区 · 策略 · 部署'],
 ];
 const DATE_PRESETS=['最近 7 天','最近 30 天','最近 90 天'];
-const CHANNEL_PRESETS=['全部渠道','App Push','站内消息','Email','短信','广告','微信'];
+const CHANNEL_PRESETS=['全部渠道','应用推送','站内消息','邮件','短信','广告','微信'];
 const AGENT_MODES=['执行模式','策略模式'];
 let utilityMenuActions=[];
 let agentModeIndex=0;
@@ -153,7 +155,7 @@ function syncBackdrop(){
 function appendAgentMessage(role,text){
   const target=$('#agent-body');
   if(!target)return;
-  const label=role==='user'?'你':'Growth Agent';
+  const label=role==='user'?'你':'智能体助手';
   const avatar=role==='user'?'我':'✦';
   target.insertAdjacentHTML('beforeend',`<div class="chat-row"><div class="chat-avatar ${role==='user'?'user':'agent'}">${avatar}</div><div><div class="chat-name">${label}</div><div class="bubble">${esc(text)}</div></div></div>`);
   target.scrollTop=target.scrollHeight;
@@ -185,12 +187,12 @@ function setAgentBusy(busy){
 function agentFallbackLabel(reason){
   const value=String(reason||'');
   if(value==='proposal_low_confidence')return '置信度不足，已采用安全基线';
-  if(value==='critic_veto')return 'Critic 未通过，已采用安全基线';
+  if(value==='critic_veto')return '审核模型未通过，已采用安全基线';
   if(value==='agent_circuit_open')return '模型保护中，已采用安全基线';
   if(value.startsWith('workspace_invalid'))return '工作区证据校验未通过，已采用安全基线';
   if(value.startsWith('llm_failure'))return '模型暂不可用，已采用安全基线';
   if(value==='no_workspace_opportunity')return '没有可用机会，已采用安全基线';
-  return '已采用 deterministic 安全规划';
+  return '已采用规则安全规划';
 }
 
 function agentItem(items,type){
@@ -207,14 +209,14 @@ function renderAgentPlan(result){
   const estimate=agentItem(result&&result.claims,'ESTIMATE');
   const accepted=Boolean(audit&&audit.accepted);
   const usedLLM=Boolean(audit&&audit.used_llm);
-  const status=accepted?'AI + Critic 已通过':usedLLM?agentFallbackLabel(audit.reason):'规则安全规划';
+  const status=accepted?'方案与审核已通过':usedLLM?agentFallbackLabel(audit.reason):'规则安全规划';
   const provider=accepted&&audit.provider?[audit.provider,audit.model].filter(Boolean).join(' · '):'';
   const critic=accepted&&audit.critic_provider?[audit.critic_provider,audit.critic_model].filter(Boolean).join(' · '):'';
-  const gate=result&&result.next_gate?result.next_gate:'灰度前检查';
+  const gate=productLabel(result&&result.next_gate?result.next_gate:'灰度前检查');
   const runId=result&&result.run_id?result.run_id:'策略建议已生成';
   const title=strategy&&strategy.title?strategy.title:'受控增长策略草案';
   const hypothesisText=hypothesis&&hypothesis.text?hypothesis.text:'等待实验验证';
-  const experimentText=experiment&&experiment.title?experiment.title:'NO_TREATMENT 对照实验';
+  const experimentText=experiment&&experiment.title?productLabel(experiment.title):'不触达对照实验';
   const estimateText=estimate&&estimate.text?estimate.text:'增量估计由工作区证据编译';
   const meta=[provider?`方案模型 · ${provider}`:'',critic?`审核模型 · ${critic}`:'',`下一步 · ${gate}`].filter(Boolean);
   target.insertAdjacentHTML('beforeend',`
@@ -240,24 +242,40 @@ function renderAgentPlan(result){
 }
 
 async function confirmFirstPartyUiControls(result){
-  const commands=Array.isArray(result&&result.ui_commands)?result.ui_commands:[];
-  if(!commands.length)return;
-  const allowed=new Set(['open_search','open_date_filter','open_channel_filter','focus_campaign_name']);
-  const verified=[];
-  for(const command of commands){
-    if(!allowed.has(command)){verified.push(command+': 拒绝未知命令');continue;}
+  const actions=Array.isArray(result&&result.ui_actions)?result.ui_actions:[];
+  if(!actions.length)return;
+  const commands={open_search:'打开搜索',open_date_filter:'打开时间筛选',
+    open_channel_filter:'打开渠道筛选',focus_campaign_name:'定位活动名称'};
+  const routes=new Set(['dashboard','opportunities','campaigns','campaignStudio',
+    'experiments','approvals','evolution','harness','realtime','evidence','execution',
+    'data','integrations','settings']);
+  const receipts=[];
+  const messages=[];
+  for(const action of actions){
+    const command=action.target;
+    let success=false;
     try{
-      let success=false;
-      if(command==='open_search'){
+      if(action.kind==='navigate'&&routes.has(command)){
+        await go(command);
+        success=state.route===command&&location.hash==='#'+command&&
+          document.getElementById('view').dataset.renderedRoute===command&&
+          !document.querySelector('#view .runtime-error');
+      }else if(action.kind!=='control'||!Object.hasOwn(commands,command)){
+        success=false;
+      }else if(command==='open_search'){
+        closeUtilityMenu();
         openCommand();
         success=!document.getElementById('command-modal').hidden&&
-          Boolean(document.getElementById('command-input'));
+          document.activeElement===document.getElementById('command-input');
       }else if(command==='open_date_filter'||command==='open_channel_filter'){
+        document.getElementById('command-modal').hidden=true;
         const id=command==='open_date_filter'?'date-filter':'channel-filter';
         document.getElementById(id).click();
-        success=!document.getElementById('utility-popover').hidden;
+        const menu=document.getElementById('utility-popover');
+        const title=command==='open_date_filter'?'时间范围':'渠道';
+        success=!menu.hidden&&menu.querySelector('.utility-title')?.textContent===title;
       }else if(command==='focus_campaign_name'){
-        go('campaignStudio');
+        await go('campaignStudio');
         const target=await new Promise(resolve=>{
           const direct=document.getElementById('live-campaign-name');
           if(direct){resolve(direct);return;}
@@ -270,11 +288,28 @@ async function confirmFirstPartyUiControls(result){
         });
         if(target){target.focus();success=document.activeElement===target;}
       }
-      verified.push(command+': '+(success?'浏览器已验证':'未确认界面效果'));
-    }catch(_error){verified.push(command+': 浏览器操作失败');}
+    }catch(_error){success=false;}
+    receipts.push({step_index:action.step_index,status:success?'confirmed':'failed'});
+    messages.push((commands[command]||'打开站内页面')+'：'+(success?'浏览器已验证':'未确认界面效果'));
   }
-  appendAgentMessage('agent','界面操作回执（浏览器本地验证）：'+verified.join('；'));
-  document.body.dataset.agentLastUiConfirmation=verified.join('|');
+  appendAgentMessage('agent','界面操作回执：'+messages.join('；'));
+  document.body.dataset.agentLastUiConfirmation=messages.join('|');
+  if(useDemo||!result.run_id||!result.ui_confirmation_token)return;
+  try{
+    const recorded=await api('/api/agent/runs/'+encodeURIComponent(result.run_id)+'/ui-confirmation',{
+      method:'POST',body:JSON.stringify({token:result.ui_confirmation_token,receipts})
+    });
+    const card=document.querySelector('[data-agent-run-id="'+CSS.escape(result.run_id)+'"]');
+    if(card){
+      card.dataset.agentRunStatus=recorded.status;
+      card.querySelector('.agent-plan-head strong').textContent=AGENT_STATUS_LABELS[recorded.status]||'已记录回执';
+      card.querySelector('[data-run-message]').textContent='浏览器回执已写入服务端运行记录；此回执不代表独立评测通过。';
+    }
+    if(state.route==='harness')await harness();
+    return recorded;
+  }catch(_error){
+    appendAgentMessage('agent','界面回执未写入服务端，运行仍保留待确认状态。请检查连接后重试。');
+  }
 }
 
 const AGENT_STATUS_LABELS={
@@ -282,7 +317,8 @@ const AGENT_STATUS_LABELS={
   blocked:'已被安全规则阻止',provider_failure:'模型服务不可用',
   tool_failure:'工具执行失败',step_limit:'达到操作步数限制',
   model_unavailable:'尚未连接可用模型',unverified:'未核验',
-  ui_pending:'等待界面确认',awaiting_ui_confirmation:'等待浏览器确认',unknown:'未知状态'
+  ui_pending:'等待界面确认',awaiting_ui_confirmation:'等待浏览器确认',
+  ui_confirmed:'界面操作已收到回执',ui_failed:'界面操作未全部完成',unknown:'未知状态'
 };
 const AGENT_TOOL_LABELS={
   'workspace.read':'读取工作区','page.navigate':'打开站内页面',
@@ -292,7 +328,21 @@ const AGENT_TOOL_LABELS={
 const AGENT_OUTCOME_LABELS={ok:'成功',ui_pending:'等待浏览器核验',
   blocked:'已阻止',needs_approval:'等待审批',needs_consent:'等待授权',
   error:'失败',tool_failure:'工具失败'};
-function renderAgentOperation(result){
+function agentOperationMessage(status,message){
+  const messages={
+    awaiting_ui_confirmation:'服务端已校验操作请求，正在等待浏览器执行并报告界面结果。',
+    model_unavailable:'执行模式需要连接可用模型，本次没有执行任何操作。',
+    provider_failure:'模型服务暂不可用，本步骤没有执行工具。',
+    tool_failure:'站内工具执行失败，请核对运行记录后再重试。',
+    step_limit:'已达到本次操作步数上限，任务可能尚未完成。',
+    blocked:'操作未通过服务端校验，请检查工具权限与请求参数。',
+    needs_consent:'创建活动草案需要勾选明确授权。',
+    needs_approval:'已提出人工审核请求，请在审批页面核对并决定。',
+    unverified:'没有执行可核验的工作区操作。'
+  };
+  return messages[status]||message;
+}
+async function renderAgentOperation(result){
   const target=$('#agent-body');
   if(!target)return;
   const status=String(result&&result.status||'unknown');
@@ -305,18 +355,13 @@ function renderAgentOperation(result){
   }).join('');
   target.insertAdjacentHTML('beforeend',
     '<div class="chat-row agent-plan-row"><div class="chat-avatar agent">✦</div><div>'
-    +'<div class="chat-name">Growth Agent · 操作记录</div>'
-    +'<article class="agent-plan-card" data-agent-run-status="'+esc(status)+'"><div class="agent-plan-head"><strong>'+esc(AGENT_STATUS_LABELS[status]||'请查看操作详情')+'</strong></div>'
-    +'<p>'+esc(message)+'</p>'+details
+    +'<div class="chat-name">智能体助手 · 操作记录</div>'
+    +'<article class="agent-plan-card" data-agent-run-id="'+esc(result.run_id||'')+'" data-agent-run-status="'+esc(status)+'"><div class="agent-plan-head"><strong>'+esc(AGENT_STATUS_LABELS[status]||'请查看操作详情')+'</strong></div>'
+    +'<p data-run-message>'+esc(agentOperationMessage(status,message))+'</p>'+details
     +'<small>执行记录来自实际 API 调用；审批、发布和外部发送不会自动完成。</small>'
     +'</article></div></div>');
   target.scrollTop=target.scrollHeight;
-  const route=String(result&&result.navigation||'');
-  const approvedRoutes=new Set(['dashboard','opportunities','campaigns','campaignStudio',
-    'experiments','approvals','evolution','harness','realtime','evidence','execution',
-    'dataCenter','integrations','settings']);
-  if(approvedRoutes.has(route))go(route);
-  if(Array.isArray(result&&result.ui_commands)&&result.ui_commands.length)void confirmFirstPartyUiControls(result);
+  await confirmFirstPartyUiControls(result);
 }
 
 function demoAgentResponse(goal){
@@ -375,9 +420,9 @@ async function submitAgentPrompt(event){
     if(strategyMode){
       renderAgentPlan(result);
       const audit=result&&result.planner_audit?result.planner_audit:null;
-      toast(audit&&audit.accepted?'AI 策略已通过 Critic':'安全计划已生成');
+      toast(audit&&audit.accepted?'智能策略已通过审核':'安全计划已生成');
     }else{
-      renderAgentOperation(result);
+      await renderAgentOperation(result);
       void renderAchievement();
       toast(result.status==='completed'?'智能体操作已返回结果':'智能体操作停止：'+(AGENT_STATUS_LABELS[result.status]||'请查看详情'));
     }
@@ -388,7 +433,7 @@ async function submitAgentPrompt(event){
       renderAuthRequired(error);
       toast('生产工作区需要重新登录');
     }else if(error&&error.name==='AbortError'){
-      appendAgentMessage('agent','已停止这次规划。没有提交执行动作，也不会继续占用模型请求。');
+      appendAgentMessage('agent','已停止这次规划的等待。服务端可能已执行部分操作，请到执行轨迹核对结果后再重试。');
       toast('已停止智能体操作');
     }else if(error&&error.name==='TimeoutError'){
       appendAgentMessage('agent','这次规划超过响应预算，已停止等待。GrowthEvo 主工作区仍可继续使用，你可以稍后重试。');
@@ -587,13 +632,16 @@ function go(route){
   state.route=route;
   location.hash=route;
   active();
-  void render();
+  const rendering=render();
   $('#sidebar').classList.remove('open');
   syncBackdrop();
   window.scrollTo({top:0,behavior:'instant'});
+  return rendering;
 }
 window.addEventListener('hashchange',()=>{
-  state.route=(location.hash||'#dashboard').slice(1);
+  const route=(location.hash||'#dashboard').slice(1);
+  if(state.route===route)return;
+  state.route=route;
   active();
   void render();
 });

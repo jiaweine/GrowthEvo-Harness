@@ -131,3 +131,70 @@ python -m pytest tests/test_agent_operating_system.py -q
 ~~~
 
 This suite uses fake model responses and local product state only. It validates the actual handler's contracts; it does **not** measure real-model task success or prove online causal lift.
+
+## Browser receipts and an executable offline evaluation gate
+
+A run now returns an ordered `ui_actions` list with the original `step_index`,
+plus a run-specific `ui_confirmation_token`. Navigation, opening search/filter
+menus and focusing the campaign field execute sequentially in the browser. A
+successful model finish with pending UI actions is `awaiting_ui_confirmation`,
+not a claim of completed browser work.
+
+The browser posts `{token, receipts: [{step_index, status}]}` to
+`POST /api/agent/runs/{run_id}/ui-confirmation`. A receipt must cover exactly the
+issued steps in order. Tokens are not included in history reads; conflicting
+replays are rejected, identical retries are idempotent, and evicting a run revokes
+its token. History reads return detached copies. The final trace records
+`ui_confirmed` or `ui_failed`, with `confirmation_source: browser_reported`.
+A browser report is client-supplied evidence, **not independent verification** or
+an input that can bypass the offline evaluation/promotion gates. Existing blocked,
+step-limit and approval stop conditions remain unchanged by a receipt.
+
+Candidate mining counts distinct run IDs from the **current policy fingerprint**.
+At least eight eligible traces are needed. Old-policy samples, duplicate IDs and
+records without a matching fingerprint do not count toward readiness.
+
+An operator may provision a separate, sanitized, held-out manifest and configure:
+
+~~~bash
+GROWTHEVO_AGENT_BENCHMARK_PATH=/absolute/path/to/heldout.json
+GROWTHEVO_AGENT_BENCHMARK_SHA256=<sha256-of-the-exact-file-bytes>
+~~~
+
+The JSON has exactly three fields:
+
+- `suite_id`: a stable 12–128 character identifier.
+- `tasks`: 30–200 distinct objects with `id`, `goal`, `expected_route` and
+  `required_section`. Routes and sections must use the existing allowlists.
+- `workspace`: recorded, sanitized snapshots for all ten sections: `dashboard`,
+  `opportunities`, `campaigns`, `experiments`, `approvals`, `evidence`, `actions`,
+  `decisions`, `harness` and `evolution`.
+
+The file is limited to 1 MB. A missing or mismatched digest makes a configured
+live runtime fail startup; Demo mode does not open the file. Keep held-out goals
+and snapshots outside candidate generation and remove personal data before
+provisioning. Pinning a digest proves file identity, not data independence.
+
+`GET /api/evolution/readiness` reports `evaluation_available`, the suite identifier
+and digest. When configured with an active model, the product enables
+`POST /api/evolution/candidates/{candidate_id}/evaluate`. The client cannot supply
+an evaluator or measurements. A fresh provider pool runs the baseline and proposal
+against isolated copies of the locked workspace on a separate thread/event loop;
+live campaigns cannot be mutated. The run has a five-minute measurement deadline,
+closes its provider clients, and releases a failed evaluation claim for retry.
+Provider failures are not converted into negative task scores or fake evidence.
+
+The product shows the measured baseline/candidate contract pass rates, violations,
+sample count and `replay:<full-manifest-digest>` evidence ID. These measurements
+check **offline tool/route contracts**, not rendered browser effects or customer
+outcomes. Passing only advances to `awaiting_shadow_canary`; there is no public
+promotion endpoint. An evaluation in progress remains visible on refresh.
+
+Traces, confirmation tokens, candidates and active policies remain bounded or
+process-local. A service restart loses this state, and multiple replicas do not
+share evaluation ownership. This change does not provide durable task recovery,
+tenant-isolated history, signed promotion evidence or autonomous source editing.
+
+~~~bash
+python -m pytest tests/test_agent_operating_system.py tests/test_agent_ui_receipts.py tests/test_agent_replay_manifest.py
+~~~
