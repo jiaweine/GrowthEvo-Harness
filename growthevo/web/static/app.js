@@ -282,7 +282,7 @@ const AGENT_STATUS_LABELS={
   blocked:'已被安全规则阻止',provider_failure:'模型服务不可用',
   tool_failure:'工具执行失败',step_limit:'达到操作步数限制',
   model_unavailable:'尚未连接可用模型',unverified:'未核验',
-  ui_pending:'等待界面确认',unknown:'未知状态'
+  ui_pending:'等待界面确认',awaiting_ui_confirmation:'等待浏览器确认',unknown:'未知状态'
 };
 const AGENT_TOOL_LABELS={
   'workspace.read':'读取工作区','page.navigate':'打开站内页面',
