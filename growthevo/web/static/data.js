@@ -195,7 +195,21 @@ const PRODUCT_LABELS={
   "2 arms": "2 个实验组",
   "read_only": "只读",
   "simulated": "模拟执行",
-  "NO_TREATMENT": "NO_TREATMENT"
+  "NO_TREATMENT": "NO_TREATMENT",
+  "Warehouse": "数据仓库",
+  "Event Stream": "事件流",
+  "Feature Service": "特征服务",
+  "Decision Log": "决策记录",
+  "Exposure Store": "曝光记录",
+  "Outcome Store": "结果记录",
+  "Evidence Store": "证据库",
+  "Object Storage": "对象存储",
+  "Realtime": "实时",
+  "Web/App": "网页与应用",
+  "Push": "应用推送",
+  "Ads": "广告",
+  "Production": "生产模式",
+  "Reference": "参考数据"
 };
 function productLabel(value){const text=String(value??'');return Object.hasOwn(PRODUCT_LABELS,text)?PRODUCT_LABELS[text]:text;}
 

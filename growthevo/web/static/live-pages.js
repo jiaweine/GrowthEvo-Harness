@@ -177,10 +177,10 @@ evolution=async function liveEvolution(){
       ?'独立离线评测已配置 · '+esc(readiness.evaluation_suite)+'。评测使用锁定快照，可能需要数分钟。'
       :'独立评测未配置。需由部署者接入锁定的离线任务集后才能运行；当前不会生成评测成绩。')+'</p>'
     +'<p id="evolution-analysis-result" class="evo-policy-note" role="status" aria-live="polite">候选发现和已配置的独立评测可在此发起；采用策略仍需灰度验证和人工批准。</p></div>';
-  $('#view').innerHTML=head('自进化中心','了解 Agent 的真实运行、改进候选与验证进展；不展示未经证实的能力提升。')
+  $('#view').innerHTML=head('自进化中心','查看智能体的真实运行、改进候选与验证进展。')
     +sectionNav(RUNTIME_NAV,'evolution')+policyCard+action
     +(items.length?'<div class="evolution-list">'+cards+'</div>'
-      :emptyState('尚无真实改进候选','需要积累足够的 Agent 执行轨迹并发现明确的可改进模式。'));
+      :emptyState('尚无真实改进候选','需要积累足够的智能体执行轨迹，并发现可改进的模式。'));
   bindProductActions();
   $('#evolution-refresh').onclick=()=>evolution();
   $$('[data-evaluate-candidate]').forEach(button=>button.onclick=async()=>{

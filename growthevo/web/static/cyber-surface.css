@@ -341,3 +341,8 @@ body.sidebar-collapsed .brand-name:after{color:#e3fcfa}
 .evo-action-row button:disabled{opacity:.5;cursor:not-allowed}
 .evo-card .evo-action-row{margin-top:16px}
 .evo-card code{overflow-wrap:anywhere}
+
+/* Keep dense product evidence legible across workspaces. */
+.evo-source,.eval-cell span,.studio-step span,.field label,.metric-chip span{font-size:11px;line-height:1.6}
+.eval-cell strong{font-size:14px;line-height:1.5}
+.evo-head strong,.studio-step strong{font-size:13px}

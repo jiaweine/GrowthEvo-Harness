@@ -437,11 +437,11 @@ async function submitAgentPrompt(event){
       toast('已停止智能体操作');
     }else if(error&&error.name==='TimeoutError'){
       appendAgentMessage('agent','这次规划超过响应预算，已停止等待。GrowthEvo 主工作区仍可继续使用，你可以稍后重试。');
-      toast('Agent 规划已超时');
+      toast('智能体规划已超时');
       void probeRuntime();
     }else{
-      appendAgentMessage('agent','这次规划没有完成。GrowthEvo 会把 Agent 故障与主工作区隔离；确认 API 状态后可直接重试。');
-      toast('Agent 请求未完成');
+      appendAgentMessage('agent','这次规划没有完成。GrowthEvo 会将智能体故障与主工作区隔离；确认 API 状态后可直接重试。');
+      toast('智能体请求未完成');
       void probeRuntime();
     }
   }finally{
