@@ -555,6 +555,39 @@ def create_app() -> Any:
     def evolution_policy() -> dict[str, Any]:
         return evolution_authority.snapshot()
 
+    @app.get("/api/evolution/readiness", tags=["evolution"])
+    def evolution_readiness() -> dict[str, Any]:
+        if settings.synthetic_data:
+            return {
+                "mode": "demo", "trace_count": 0, "required_trace_count": 8,
+                "step_limit_count": 0, "completed_count": 0,
+                "candidate_count": 0, "enough_traces": False,
+                "evaluation_runner": "independent_offline_only",
+                "promotion": "separate_shadow_canary_and_human_approval",
+                "durability": "process_local",
+            }
+        return evolution_authority.readiness(agent_traces.recent(30)) | {"mode": "live"}
+
+    @app.post("/api/evolution/analyze", tags=["evolution"])
+    def evolution_analyze() -> dict[str, Any]:
+        if settings.synthetic_data:
+            raise HTTPException(status_code=409, detail="Demo traces cannot generate real evolution candidates")
+        recent = agent_traces.recent(30)
+        candidate = evolution_authority.propose(recent)
+        return {
+            "created": candidate is not None,
+            "candidate": asdict(candidate) if candidate is not None else None,
+            "readiness": evolution_authority.readiness(recent),
+            "candidates": evolution_authority.candidates(),
+            "next_gate": "independent_offline_evaluation",
+            "message": (
+                "Created a bounded candidate; independent offline evaluation is required."
+                if candidate is not None else
+                "No eligible new proposal from the observed runs; no improvement has been claimed."
+            ),
+        }
+
+
     @app.get("/api/agent/tools", tags=["agent"])
     def agent_tools() -> list[dict[str, str]]:
         return operator_tools.describe()
