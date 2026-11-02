@@ -55,20 +55,20 @@ function renderAgentOsHero(){
   const hero=document.createElement('section');
   hero.className='os-hero';
   hero.setAttribute('aria-label','智能体操作系统与递归自进化');
-  hero.innerHTML='<div class="os-hero-copy"><div class="os-eyebrow"><span class="os-signal"></span> GROWTH INTELLIGENCE SYSTEM / FIRST PARTY TOOLS</div>'
+  hero.innerHTML='<div class="os-hero-copy"><div class="os-eyebrow"><span class="os-signal"></span> 智能增长 · 受控操作工作区</div>'
     +'<h2>从指令，到真实行动。<br><em>从执行，到持续进化。</em></h2>'
     +'<p>让 AI 在受控工作空间内观察、选择工具、执行与校验；用真实轨迹发现可改进的策略，经过独立评测再推广。</p>'
     +'<div class="os-hero-actions"><button class="os-cta" type="button" id="os-start-agent">启动 Agent 操作 <span>↗</span></button>'
     +'<button class="os-cta-secondary" type="button" id="os-open-evolution">查看进化中心 <span>↗</span></button></div></div>'
     +'<div class="os-flow" aria-label="执行与进化闭环">'
-    +'<span class="os-flow-heading">CONTROL LOOP <b>● OBSERVABLE</b></span>'
-    +'<div class="os-flow-step"><i>01</i><strong>OBSERVE</strong><span>读取真实工作区</span></div>'
-    +'<div class="os-flow-step"><i>02</i><strong>ACT</strong><span>执行受控工具</span></div>'
-    +'<div class="os-flow-step"><i>03</i><strong>VERIFY</strong><span>检验动作与轨迹</span></div>'
-    +'<div class="os-flow-step os-flow-last"><i>↺</i><strong>EVOLVE</strong><span>回放 · 评测 · 审批</span></div>'
+    +'<span class="os-flow-heading">操作闭环 <b>● 过程可追溯</b></span>'
+    +'<div class="os-flow-step"><i>01</i><strong>观察</strong><span>读取真实工作区</span></div>'
+    +'<div class="os-flow-step"><i>02</i><strong>行动</strong><span>执行受控工具</span></div>'
+    +'<div class="os-flow-step"><i>03</i><strong>核验</strong><span>检验动作与轨迹</span></div>'
+    +'<div class="os-flow-step os-flow-last"><i>↺</i><strong>改进</strong><span>回放 · 评测 · 审批</span></div>'
     +'</div>';
   view.prepend(hero);
-  const start=$('#os-start-agent');if(start)start.onclick=openAgent;
+  const start=$('#os-start-agent');if(start)start.onclick=()=>go('agent');
   const evolution=$('#os-open-evolution');if(evolution)evolution.onclick=()=>go('evolution');
 }
 
@@ -174,15 +174,15 @@ function renderAgentWorkspace(){
 }
 
 const COMMAND_ITEMS=[
-  ['campaignStudio','创建一个新活动','Goal → Audience → Evidence → Execution'],
-  ['opportunities','分析新用户增长机会','Opportunity Map · causal incrementality'],
-  ['experiments','打开实验中心','Assignment / Holdout / Guardrails'],
-  ['realtime','查看实时决策','Decision API / propensity / policy'],
-  ['approvals','查看待审批事项','Risk / evidence / identity'],
-  ['harness','打开 Agent Harness','Trace / tools / guardrails'],
-  ['evolution','打开 Evolution Lab','Replay → Shadow → Canary'],
-  ['integrations','查看集成与渠道','Data / execution / content connectors'],
-  ['settings','打开工作区设置','Workspace / policy / deployment'],
+  ['campaignStudio','创建一个新活动','目标 → 受众 → 证据 → 执行'],
+  ['opportunities','分析新用户增长机会','发现真实增量机会'],
+  ['experiments','打开实验中心','分组 · 对照 · 风险边界'],
+  ['realtime','查看实时决策','决策记录 · 动作 · 执行策略'],
+  ['approvals','查看待审批事项','风险 · 证据 · 身份校验'],
+  ['harness','查看执行轨迹','步骤 · 工具 · 安全边界'],
+  ['evolution','打开自进化中心','回放 → 验证 → 审批'],
+  ['integrations','查看集成与渠道','数据 · 执行 · 内容接入'],
+  ['settings','打开工作区设置','工作区 · 策略 · 部署'],
 ];
 const DATE_PRESETS=['最近 7 天','最近 30 天','最近 90 天'];
 const CHANNEL_PRESETS=['全部渠道','App Push','站内消息','Email','短信','广告','微信'];
@@ -270,7 +270,7 @@ function appendAgentPending(){
   if(!target)return null;
   const row=document.createElement('div');
   row.className='chat-row agent-pending-row';
-  row.innerHTML='<div class="chat-avatar agent">✦</div><div><div class="chat-name">Growth Agent</div><div class="bubble agent-pending"><span></span>正在读取工作区并执行受控工具…</div></div>';
+  row.innerHTML='<div class="chat-avatar agent">✦</div><div><div class="chat-name">智能体助手</div><div class="bubble agent-pending"><span></span>正在读取工作区并执行受控工具…</div></div>';
   target.appendChild(row);
   target.scrollTop=target.scrollHeight;
   return row;
@@ -313,21 +313,21 @@ function renderAgentPlan(result){
   const estimate=agentItem(result&&result.claims,'ESTIMATE');
   const accepted=Boolean(audit&&audit.accepted);
   const usedLLM=Boolean(audit&&audit.used_llm);
-  const status=accepted?'AI + Critic 已通过':usedLLM?agentFallbackLabel(audit.reason):'Deterministic 安全规划';
+  const status=accepted?'AI + Critic 已通过':usedLLM?agentFallbackLabel(audit.reason):'规则安全规划';
   const provider=accepted&&audit.provider?[audit.provider,audit.model].filter(Boolean).join(' · '):'';
   const critic=accepted&&audit.critic_provider?[audit.critic_provider,audit.critic_model].filter(Boolean).join(' · '):'';
-  const gate=result&&result.next_gate?result.next_gate:'Shadow preflight';
-  const runId=result&&result.run_id?result.run_id:'proposal_ready';
+  const gate=result&&result.next_gate?result.next_gate:'灰度前检查';
+  const runId=result&&result.run_id?result.run_id:'策略建议已生成';
   const title=strategy&&strategy.title?strategy.title:'受控增长策略草案';
   const hypothesisText=hypothesis&&hypothesis.text?hypothesis.text:'等待实验验证';
   const experimentText=experiment&&experiment.title?experiment.title:'NO_TREATMENT 对照实验';
   const estimateText=estimate&&estimate.text?estimate.text:'增量估计由工作区证据编译';
-  const meta=[provider?`Proposal · ${provider}`:'',critic?`Critic · ${critic}`:'',`Next · ${gate}`].filter(Boolean);
+  const meta=[provider?`方案模型 · ${provider}`:'',critic?`审核模型 · ${critic}`:'',`下一步 · ${gate}`].filter(Boolean);
   target.insertAdjacentHTML('beforeend',`
     <div class="chat-row agent-plan-row">
       <div class="chat-avatar agent">✦</div>
       <div>
-        <div class="chat-name">Growth Agent</div>
+        <div class="chat-name">智能体助手</div>
         <article class="agent-plan-card" data-agent-plan-status="${accepted?'ai':'safe'}">
           <div class="agent-plan-head"><div><span class="agent-plan-status">${esc(status)}</span><strong>${esc(title)}</strong></div><small>${esc(runId)}</small></div>
           <div class="agent-plan-block"><span>可证伪假设</span><p>${esc(hypothesisText)}</p></div>
@@ -383,6 +383,21 @@ async function confirmFirstPartyUiControls(result){
   document.body.dataset.agentLastUiConfirmation=verified.join('|');
 }
 
+const AGENT_STATUS_LABELS={
+  completed:'操作已结束',needs_approval:'等待人工审批',needs_consent:'需要授权',
+  blocked:'已被安全规则阻止',provider_failure:'模型服务不可用',
+  tool_failure:'工具执行失败',step_limit:'达到操作步数限制',
+  model_unavailable:'尚未连接可用模型',unverified:'未核验',
+  ui_pending:'等待界面确认',unknown:'未知状态'
+};
+const AGENT_TOOL_LABELS={
+  'workspace.read':'读取工作区','page.navigate':'打开站内页面',
+  'campaign.draft':'创建活动草案','approval.review':'请求人工审核',
+  'ui.control':'操作界面控件'
+};
+const AGENT_OUTCOME_LABELS={ok:'成功',ui_pending:'等待浏览器核验',
+  blocked:'已阻止',needs_approval:'等待审批',needs_consent:'等待授权',
+  error:'失败',tool_failure:'工具失败'};
 function renderAgentOperation(result){
   const target=$('#agent-body');
   if(!target)return;
@@ -390,15 +405,14 @@ function renderAgentOperation(result){
   const message=String(result&&result.message||'没有返回可验证的运行结果');
   const steps=Array.isArray(result&&result.steps)?result.steps:[];
   const details=steps.map((step,index)=>{
-    const label=String(step.tool||'unknown');
-    const outcome=String(step.outcome||'unknown');
-    const effect=String(step.effect||'read');
-    return '<div class="agent-plan-meta"><span>'+esc(String(index+1))+'. '+esc(label)+'</span><span>'+esc(effect)+'</span><span>'+esc(outcome)+'</span></div>';
+    const label=AGENT_TOOL_LABELS[String(step.tool||'')]||'受控操作';
+    const outcome=AGENT_OUTCOME_LABELS[String(step.outcome||'')]||'已记录';
+    return '<div class="agent-plan-meta"><span>'+esc(String(index+1))+'. '+esc(label)+'</span><span>'+esc(outcome)+'</span></div>';
   }).join('');
   target.insertAdjacentHTML('beforeend',
     '<div class="chat-row agent-plan-row"><div class="chat-avatar agent">✦</div><div>'
     +'<div class="chat-name">Growth Agent · 操作记录</div>'
-    +'<article class="agent-plan-card"><div class="agent-plan-head"><strong>'+esc(status)+'</strong></div>'
+    +'<article class="agent-plan-card"><div class="agent-plan-head"><strong>'+esc(AGENT_STATUS_LABELS[status]||'请查看操作详情')+'</strong></div>'
     +'<p>'+esc(message)+'</p>'+details
     +'<small>执行记录来自实际 API 调用；审批、发布和外部发送不会自动完成。</small>'
     +'</article></div></div>');
@@ -437,7 +451,7 @@ async function submitAgentPrompt(event){
   }
   if(useDemo){
     appendAgentMessage('agent',demoAgentResponse(goal));
-    toast('Growth Agent 已生成下一步建议');
+    toast('演示建议已生成（未执行任何操作）');
     return;
   }
 
@@ -464,7 +478,7 @@ async function submitAgentPrompt(event){
     }else{
       renderAgentOperation(result);
       void renderAchievement();
-      toast(result.status==='completed'?'Agent 已完成任务':'Agent 已停止：'+result.status);
+      toast(result.status==='completed'?'智能体操作已返回结果':'智能体操作停止：'+(AGENT_STATUS_LABELS[result.status]||'请查看详情'));
     }
   }catch(error){
     if(pending)pending.remove();
@@ -474,7 +488,7 @@ async function submitAgentPrompt(event){
       toast('生产工作区需要重新登录');
     }else if(error&&error.name==='AbortError'){
       appendAgentMessage('agent','已停止这次规划。没有提交执行动作，也不会继续占用模型请求。');
-      toast('已停止 Growth Agent');
+      toast('已停止智能体操作');
     }else if(error&&error.name==='TimeoutError'){
       appendAgentMessage('agent','这次规划超过响应预算，已停止等待。GrowthEvo 主工作区仍可继续使用，你可以稍后重试。');
       toast('Agent 规划已超时');
@@ -572,7 +586,7 @@ function bindShellInteractions(){
   $('#profile-open').onclick=event=>{
     event.stopPropagation();
     const authItems=typeof authProfileMenuItems==='function'?authProfileMenuItems():[];
-    const title=typeof authProfileLabel==='function'?authProfileLabel():'李明 · 增长负责人';
+    const title=typeof authProfileLabel==='function'?authProfileLabel():'工作区操作员';
     openUtilityMenu(title,[
       ...authItems,
       {label:'工作区设置',detail:'权限、预算与安全策略',action:()=>go('settings')},
@@ -590,7 +604,7 @@ function bindShellInteractions(){
   $('#agent-mode').onclick=()=>{
     agentModeIndex=(agentModeIndex+1)%AGENT_MODES.length;
     $('#agent-mode').textContent=`${AGENT_MODES[agentModeIndex]}⌄`;
-    toast(`Growth Agent · ${AGENT_MODES[agentModeIndex]}`);
+    toast(`智能体助手 · ${AGENT_MODES[agentModeIndex]}`);
   };
 
   $('#agent-attach').onclick=()=>$('#agent-file-input').click();
