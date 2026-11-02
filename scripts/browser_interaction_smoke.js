@@ -155,6 +155,10 @@
     check(Boolean(document.querySelector('.aw-shell')), 'three-pane Agent workspace missing: '+JSON.stringify({
       hash:location.hash,route:state.route,renderType:typeof renderAgentWorkspace,
       hasAsset:!!document.querySelector('script[src$="agent-workspace.js"]'),
+      hasBody:!!document.getElementById('agent-body'),
+      hasForm:!!document.getElementById('agent-form'),
+      goName:go.name,renderName:render.name,
+      bodyAgentRoute:document.body.classList.contains('agent-workspace-route'),
       view:document.getElementById('view')?.textContent?.slice(0,75)
     }));
     check(Boolean(document.querySelector('#agent-workspace-threads')), 'conversation list missing');
