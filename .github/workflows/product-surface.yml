@@ -270,8 +270,20 @@ jobs:
           test -s ui-screenshots/growthevo-nightfall-mobile.png
           docker rm -f "$API_PID" >/dev/null
           unavailable_out="/tmp/growthevo-api-unavailable.html"
-          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:4174/#dashboard" > "$unavailable_out"
-          grep -Fq 'GrowthEvo API 暂不可用' "$unavailable_out"
+          UNAVAILABLE_CHECKED=0
+          for attempt in 1 2 3; do
+            "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --lang=zh-CN --virtual-time-budget=12000 --dump-dom "http://127.0.0.1:4174/#dashboard" > "$unavailable_out"
+            if grep -Fq 'GrowthEvo API 暂不可用' "$unavailable_out"; then
+              UNAVAILABLE_CHECKED=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$UNAVAILABLE_CHECKED" != "1" ]]; then
+            echo 'Strict API outage page did not render; captured browser state:' >&2
+            grep -oE '<h1[^>]*>[^<]+|<div[^>]+class="runtime-error[^"]*"[^>]*>|<title>[^<]+|<body[^>]+>' "$unavailable_out" >&2 || true
+            exit 1
+          fi
           if grep -Fq 'Demo Workspace · Synthetic Data' "$unavailable_out"; then
             echo "strict API mode silently exposed the Demo workspace after API failure" >&2
             exit 1
