@@ -33,7 +33,7 @@ opportunities=async function liveOpportunities(){
   evidence_tier:liveText(x.evidence_tier),
   freshness:liveText(x.freshness),
  }));
- $('#view').innerHTML=`${head('增长机会 Opportunity Map','服务端 Opportunity API 的当前因果机会；不会用购买倾向替代增量效果。','<button class="primary" data-go="campaignStudio">基于机会创建 Campaign</button>')}${sectionNav(EVIDENCE_NAV,'opportunities')}${rows.length?`<div class="card surface-card table-scroll"><div class="surface-title"><div><h2>当前机会</h2><p>Population × Incremental Lift × Support × Evidence。</p></div><span class="soft-badge green">实时数据</span></div>${opportunityTable(rows)}</div>`:emptyState('暂无机会','Opportunity API 当前没有返回可展示记录。')}`;
+ $('#view').innerHTML=`${head('增长机会地图','服务端 Opportunity API 的当前因果机会；不会用购买倾向替代增量效果。','<button class="primary" data-go="campaignStudio">基于机会创建 Campaign</button>')}${sectionNav(EVIDENCE_NAV,'opportunities')}${rows.length?`<div class="card surface-card table-scroll"><div class="surface-title"><div><h2>当前机会</h2><p>Population × Incremental Lift × Support × Evidence。</p></div><span class="soft-badge green">实时数据</span></div>${opportunityTable(rows)}</div>`:emptyState('暂无机会','Opportunity API 当前没有返回可展示记录。')}`;
  bindProductActions();
 };
 
@@ -72,7 +72,7 @@ realtime=async function liveRealtime(){
  if(useDemo)return fixtureRealtimePage();
  const [actions,logs]=await Promise.all([api('/api/actions'),api('/api/decisions/recent?limit=50')]);
  const registry=Array.isArray(actions)?actions:[];const recent=Array.isArray(logs)?logs:[];
- $('#view').innerHTML=`${head('实时决策','当前 Reference Decision API 的真实 registry、propensity 与 Decision Log。它验证决策契约，不宣称因果最优。','<button class="primary" id="run-reference-decision">运行安全示例决策</button>')}${sectionNav(EVIDENCE_NAV,'realtime')}<div class="page-grid"><div class="card surface-card span-4"><div class="surface-title"><div><h2>Action Registry</h2><p>NO_TREATMENT 始终是一等动作。</p></div><span class="soft-badge green">实时数据</span></div>${registry.map(x=>`<div class="evidence-row"><span>${esc(liveText(x.label))}<br><small>${esc(liveText(x.action_id))}</small></span><strong>${esc(liveText(x.risk_level))} · ${liveMoney(x.cost)}</strong></div>`).join('')}</div><div class="card surface-card span-8 table-scroll"><div class="surface-title"><div><h2>Decision Log</h2><p>记录 policy identity、真实 assignment propensity 与 guardrail fallback。</p></div></div>${recent.length?`<table class="log-table"><thead><tr><th>ID</th><th>Placement</th><th>Action</th><th>Propensity</th><th>Policy</th><th>Evidence</th><th>Mode</th></tr></thead><tbody>${recent.map(x=>`<tr><td><code>${esc(liveText(x.decision_id))}</code></td><td>${esc(liveText(x.placement))}</td><td>${esc(liveText(x.action_id))}</td><td>${esc(liveNumber(x.propensity)===null?'—':Number(x.propensity).toFixed(4))}</td><td>${esc(liveText(x.policy_id))}</td><td>${esc(liveText(x.evidence_tier))}</td><td>${esc(liveText(x.policy_randomization))}</td></tr>`).join('')}</tbody></table>`:'<p style="font-size:10px;color:#7d8899">尚无本进程决策记录。可运行一个无外部副作用的 reference decision。</p>'}</div></div>`;
+ $('#view').innerHTML=`${head('实时决策','当前 Reference Decision API 的真实 registry、propensity 与 Decision Log。它验证决策契约，不宣称因果最优。','<button class="primary" id="run-reference-decision">运行安全示例决策</button>')}${sectionNav(EVIDENCE_NAV,'realtime')}<div class="page-grid"><div class="card surface-card span-4"><div class="surface-title"><div><h2>可用动作</h2><p>NO_TREATMENT 始终是一等动作。</p></div><span class="soft-badge green">实时数据</span></div>${registry.map(x=>`<div class="evidence-row"><span>${esc(liveText(x.label))}<br><small>${esc(liveText(x.action_id))}</small></span><strong>${esc(liveText(x.risk_level))} · ${liveMoney(x.cost)}</strong></div>`).join('')}</div><div class="card surface-card span-8 table-scroll"><div class="surface-title"><div><h2>决策记录</h2><p>记录 policy identity、真实 assignment propensity 与 guardrail fallback。</p></div></div>${recent.length?`<table class="log-table"><thead><tr><th>ID</th><th>Placement</th><th>Action</th><th>Propensity</th><th>Policy</th><th>Evidence</th><th>Mode</th></tr></thead><tbody>${recent.map(x=>`<tr><td><code>${esc(liveText(x.decision_id))}</code></td><td>${esc(liveText(x.placement))}</td><td>${esc(liveText(x.action_id))}</td><td>${esc(liveNumber(x.propensity)===null?'—':Number(x.propensity).toFixed(4))}</td><td>${esc(liveText(x.policy_id))}</td><td>${esc(liveText(x.evidence_tier))}</td><td>${esc(liveText(x.policy_randomization))}</td></tr>`).join('')}</tbody></table>`:'<p style="font-size:10px;color:#7d8899">尚无本进程决策记录。可运行一个无外部副作用的 reference decision。</p>'}</div></div>`;
  bindProductActions();const run=$('#run-reference-decision');if(run)run.onclick=runReferenceDecision;
 };
 
@@ -283,7 +283,7 @@ evidence=async function liveEvidence(){
  }).join('');
  $('#view').innerHTML=head('智能与证据','服务端锁定证据集合；结果、候选与 commit 身份从 API 读取。')
   +sectionNav(EVIDENCE_NAV,'evidence')
-  +(items.length?'<div class="card surface-card"><div class="surface-title"><div><h2>Locked Evidence</h2><p>当前 API 暴露的可审计证据摘要。</p></div><span class="soft-badge green">实时数据</span></div><div class="experiment-list">'+cards+'</div></div>':emptyState('暂无锁定证据','Evidence API 当前没有返回证据集合。'));
+  +(items.length?'<div class="card surface-card"><div class="surface-title"><div><h2>已锁定证据</h2><p>当前 API 暴露的可审计证据摘要。</p></div><span class="soft-badge green">实时数据</span></div><div class="experiment-list">'+cards+'</div></div>':emptyState('暂无锁定证据','Evidence API 当前没有返回证据集合。'));
  bindProductActions();
 };
 
@@ -301,7 +301,7 @@ execution=async function liveExecution(){
   +'<div class="stat-box"><span>活动总数</span><strong>'+campaigns.length+'</strong><em>服务端状态</em></div>'
   +'<div class="stat-box"><span>Pending approvals</span><strong>'+pending+'</strong><em>治理边界</em></div>'
   +'</div>';
- const boundary='<div class="card surface-card"><div class="surface-title"><div><h2>Execution Boundary</h2><p>'
+ const boundary='<div class="card surface-card"><div class="surface-title"><div><h2>执行边界</h2><p>'
   +(sideEffects?'外部执行已启用，仍受 approval / policy gate 约束。':'当前部署明确为 reference-only；Campaign 与审批可写，但不会产生外部营销副作用。')
   +'</p></div><span class="soft-badge '+(sideEffects?'green':'amber')+'">'+(sideEffects?'Side effects enabled':'Reference only')+'</span></div></div>';
  $('#view').innerHTML=head('执行中心','读取当前服务端执行边界；没有启用的外部 side effect 不会被伪装成 Running。')
@@ -324,7 +324,7 @@ dataCenter=async function liveDataCenter(){
   +'<div class="stat-box"><span>Recent decisions</span><strong>'+rows.length+'</strong><em>最多 20 条</em></div>'
   +'<div class="stat-box"><span>Environment</span><strong>'+esc(liveText(runtime.environment))+'</strong><em>'+esc(liveText(runtime.mode))+'</em></div>'
   +'</div>'
-  +'<div class="card surface-card table-scroll"><div class="surface-title"><div><h2>Recent Decision Log</h2><p>来自 /api/decisions/recent，不使用浏览器 fixture。</p></div><span class="soft-badge green">实时数据</span></div>'
+  +'<div class="card surface-card table-scroll"><div class="surface-title"><div><h2>近期决策记录</h2><p>来自 /api/decisions/recent，不使用浏览器 fixture。</p></div><span class="soft-badge green">实时数据</span></div>'
   +(rows.length?'<table class="log-table"><thead><tr><th>ID</th><th>Placement</th><th>Action</th><th>Propensity</th><th>Policy</th><th>Evidence</th></tr></thead><tbody>'+body+'</tbody></table>':'<p style="font-size:10px;color:#7d8899">当前服务端尚无决策记录。</p>')
   +'</div>';
  bindProductActions();
@@ -336,7 +336,7 @@ integrations=async function liveIntegrations(){
  const items=Array.isArray(raw)?raw:[];
  const cards=items.map(item=>'<div class="connector"><div class="connector-logo">'+esc(liveText(item.id).slice(0,2).toUpperCase())+'</div><div><strong>'+esc(liveText(item.label))+'</strong><span>'+esc(liveText(item.id))+' · '+esc(liveText(item.state))+'</span></div><i style="background:'+(item.state==='connected'?'#0db17d':item.state==='error'?'#d64545':'#c7ced9')+'"></i></div>').join('');
  $('#view').innerHTML=head('集成与渠道','当前服务端 Connector Registry 与真实激活状态。')
-  +'<div class="card surface-card"><div class="surface-title"><div><h2>Runtime Connector Registry</h2><p>状态来自 /api/system/connectors。</p></div><span class="soft-badge green">实时数据</span></div><div class="connector-grid">'+cards+'</div></div>';
+  +'<div class="card surface-card"><div class="surface-title"><div><h2>运行连接器</h2><p>状态来自 /api/system/connectors。</p></div><span class="soft-badge green">实时数据</span></div><div class="connector-grid">'+cards+'</div></div>';
  bindProductActions();
 };
 
@@ -348,13 +348,13 @@ settings=async function liveSettings(){
  const llm=runtime&&runtime.llm?runtime.llm:{};
  $('#view').innerHTML=head('设置','当前 Workspace 的公开安全运行配置；不展示密钥、token 或私有端点。')
   +'<div class="workbench-grid">'
-  +'<div class="card surface-card"><div class="surface-title"><div><h2>Runtime Configuration</h2><p>来自 /api/system/runtime。</p></div><span class="soft-badge green">实时数据</span></div>'
+  +'<div class="card surface-card"><div class="surface-title"><div><h2>运行配置</h2><p>来自 /api/system/runtime。</p></div><span class="soft-badge green">实时数据</span></div>'
   +'<div class="evidence-row"><span>Mode</span><strong>'+esc(liveText(runtime&&runtime.mode))+'</strong></div>'
   +'<div class="evidence-row"><span>Environment</span><strong>'+esc(liveText(runtime&&runtime.environment))+'</strong></div>'
   +'<div class="evidence-row"><span>Ready</span><strong>'+(runtime&&runtime.ready?'Yes':'No')+'</strong></div>'
   +'<div class="evidence-row"><span>Execution</span><strong>'+esc(liveText(runtime&&runtime.execution_mode))+'</strong></div>'
   +'<div class="evidence-row"><span>Side effects</span><strong>'+(runtime&&runtime.side_effects_enabled?'Enabled':'Disabled')+'</strong></div></div>'
-  +'<div class="card surface-card"><div class="surface-title"><div><h2>Boundaries</h2><p>只显示公开安全状态。</p></div></div>'
+  +'<div class="card surface-card"><div class="surface-title"><div><h2>安全边界</h2><p>只显示公开安全状态。</p></div></div>'
   +'<div class="evidence-row"><span>Persistence</span><strong>'+esc(liveText(persistence.backend))+' · '+(persistence.active?'active':'inactive')+'</strong></div>'
   +'<div class="evidence-row"><span>Authentication</span><strong>'+esc(liveText(authentication.backend))+' · '+(authentication.active?'active':'inactive')+'</strong></div>'
   +'<div class="evidence-row"><span>LLM routes</span><strong>'+esc(liveText(llm.available_routes,0))+' / '+esc(liveText(llm.route_count,0))+'</strong></div>'
