@@ -22,6 +22,7 @@ def _reset_database() -> None:
         conn.execute(
             """
             DROP TABLE IF EXISTS
+                growthevo_agent_state,
                 growthevo_idempotency,
                 growthevo_decisions,
                 growthevo_approvals,

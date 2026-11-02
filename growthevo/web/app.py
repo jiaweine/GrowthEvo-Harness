@@ -8,7 +8,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-from growthevo.agent_os import AgentTraceStore, EvolutionAuthority, GrowthOperator, GrowthTools
+from growthevo.agent_os import GrowthTools
+from growthevo.agent_os.journal import ExecutionConflict, MemoryAgentBackend, RunJournal, principal_scope
+from growthevo.agent_os.recovery import RecoverableOperator
+from growthevo.agent_os.durable_evolution import DurableEvolutionAuthority
 from growthevo.llm.agent_planner import GuardedLLMAgentPlanner
 from growthevo.llm.configuration import (
     activation_summary,
@@ -34,7 +37,7 @@ from .product_data import (
     opportunities,
 )
 from .runtime import RuntimeSettings, postgres_pool_config_from_env
-from .schemas import AgentPlanRequest, AgentRunRequest, AgentUiConfirmation, ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest
+from .schemas import AgentPlanRequest, AgentRunRequest, AgentResumeRequest, AgentUiConfirmation, ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest
 
 STATIC_DIR = Path(__file__).with_name("static")
 MAX_API_BODY_BYTES = 1_000_000
@@ -250,28 +253,48 @@ def create_app() -> Any:
     if llm_pool is not None:
         agent_planner = GuardedLLMAgentPlanner(llm_pool, critic=llm_pool)
 
-    agent_traces = AgentTraceStore()
-    evolution_authority = EvolutionAuthority()
-    operator_tools = GrowthTools(
-        readers={
-            "dashboard": lambda: build_dashboard_payload(product_state),
-            "opportunities": opportunities,
-            "campaigns": product_state.campaigns,
-            "experiments": experiments,
-            "approvals": product_state.approvals,
-            "evidence": lambda: build_dashboard_payload(product_state)["evidence"],
-            "actions": action_registry_payload,
-            # Model-facing privacy filtering happens once in GrowthTools._dispatch.
-            "decisions": lambda: decision_engine.recent(20),
-            "harness": lambda: agent_traces.recent(20),
-            "evolution": evolution_authority.candidates,
-        },
-        product_state=product_state,
-    )
-    agent_operator = (
-        GrowthOperator(llm_pool, operator_tools, agent_traces, evolution_authority)
-        if llm_pool is not None else None
-    )
+    if persistence_store is not None:
+        from .agent_persistence import PostgresAgentBackend
+        agent_backend = PostgresAgentBackend(persistence_store)
+    else:
+        agent_backend = MemoryAgentBackend(product_state.create_campaign_draft)
+
+    def execution_context(scope: str):
+        traces = RunJournal(agent_backend, scope)
+        authority = DurableEvolutionAuthority(agent_backend, scope)
+        tools = GrowthTools(
+            readers={
+                "dashboard": lambda: build_dashboard_payload(product_state),
+                "opportunities": opportunities,
+                "campaigns": product_state.campaigns,
+                "experiments": experiments,
+                "approvals": product_state.approvals,
+                "evidence": lambda: build_dashboard_payload(product_state)["evidence"],
+                "actions": action_registry_payload,
+                "decisions": lambda: decision_engine.recent(20),
+                "harness": lambda: traces.recent(20),
+                "evolution": authority.candidates,
+            }, product_state=product_state,
+        )
+        operator = RecoverableOperator(llm_pool, tools, traces, authority, journal=traces) if llm_pool else None
+        return traces, authority, tools, operator
+
+    def authorized_execution(authorization: str | None):
+        if authenticator is None:
+            if settings.production:
+                raise HTTPException(status_code=503, detail="Authenticated production execution is unavailable")
+            return execution_context("local-development")
+        from .auth import AuthenticationError, AuthenticationUnavailable
+        try:
+            claims = authenticator.authenticate_authorization_header(authorization)
+            scope = principal_scope(claims)
+        except AuthenticationUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Identity provider is temporarily unavailable") from exc
+        except (AuthenticationError, ValueError) as exc:
+            raise HTTPException(status_code=401, detail="valid bearer token required") from exc
+        return execution_context(scope)
+
+    agent_traces, evolution_authority, operator_tools, agent_operator = execution_context("local-development")
 
     @asynccontextmanager
     async def lifespan(_: Any):
@@ -303,6 +326,10 @@ def create_app() -> Any:
     app.state.agent_traces = agent_traces
     app.state.evolution_authority = evolution_authority
     app.state.runtime_settings = settings
+
+    @app.exception_handler(ExecutionConflict)
+    async def execution_conflict(_request: Any, _error: ExecutionConflict):
+        return JSONResponse(status_code=409, content={"detail": "Execution state changed or is owned by another worker; refresh before retrying"})
 
     def persistence_healthy() -> bool:
         if persistence_store is None:
@@ -398,6 +425,12 @@ def create_app() -> Any:
                 llm_payload["load_state"] = "ready"
         else:
             llm_payload["load_state"] = "inactive"
+        payload["agent_execution"] = {
+            "durability": agent_backend.durability,
+            "principal_isolation": authenticator is not None,
+            "checkpoint_recovery": True,
+            "external_browser": False,
+        }
         payload["llm"] = llm_payload
         for connector in connectors:
             if connector.get("id") == "llm":
@@ -423,6 +456,9 @@ def create_app() -> Any:
             and method != "OPTIONS"
             and path not in PRODUCTION_SYSTEM_PATHS
         )
+        protected_agent_api = authenticator is not None and method != "OPTIONS" and (
+            path.startswith("/api/agent/") or path.startswith("/api/evolution/") or path == "/api/harness/runs"
+        )
 
         if is_production_business_api and not runtime_ready():
             response = JSONResponse(
@@ -433,7 +469,7 @@ def create_app() -> Any:
                     "environment": settings.environment,
                 },
             )
-        elif is_production_business_api:
+        elif is_production_business_api or protected_agent_api:
             from .auth import AuthenticationError, AuthenticationUnavailable
 
             raw_headers = request.scope.get("headers", [])
@@ -561,19 +597,23 @@ def create_app() -> Any:
         return result
 
     @app.get("/api/harness/runs", tags=["harness"])
-    def runs() -> list[dict[str, Any]]:
-        return harness_runs() if settings.synthetic_data else agent_traces.recent(50)
+    def runs(authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+        traces, _, _, _ = authorized_execution(authorization)
+        return harness_runs() if settings.synthetic_data else traces.recent(50)
 
     @app.get("/api/evolution/candidates", tags=["evolution"])
-    def evolution() -> list[dict[str, Any]]:
-        return evolution_candidates() if settings.synthetic_data else evolution_authority.candidates()
+    def evolution(authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+        _, authority, _, _ = authorized_execution(authorization)
+        return evolution_candidates() if settings.synthetic_data else authority.candidates()
 
     @app.get("/api/evolution/policy", tags=["evolution"])
-    def evolution_policy() -> dict[str, Any]:
-        return evolution_authority.snapshot()
+    def evolution_policy(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        _, authority, _, _ = authorized_execution(authorization)
+        return authority.snapshot()
 
     @app.get("/api/evolution/readiness", tags=["evolution"])
-    def evolution_readiness() -> dict[str, Any]:
+    def evolution_readiness(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        traces, authority, _, _ = authorized_execution(authorization)
         if settings.synthetic_data:
             return {
                 "mode": "demo", "trace_count": 0, "required_trace_count": 8,
@@ -584,7 +624,7 @@ def create_app() -> Any:
                 "durability": "process_local",
                 "evaluation_available": False,
             }
-        return evolution_authority.readiness(agent_traces.recent(100)) | {
+        return authority.readiness(traces.recent(100)) | {
             "mode": "live",
             "evaluation_available": replay_suite is not None and llm_pool is not None,
             "evaluation_suite": replay_suite.suite_id if replay_suite else None,
@@ -592,23 +632,24 @@ def create_app() -> Any:
         }
 
     @app.post("/api/evolution/analyze", tags=["evolution"])
-    def evolution_analyze() -> dict[str, Any]:
+    def evolution_analyze(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        traces, authority, _, _ = authorized_execution(authorization)
         if settings.synthetic_data:
             raise HTTPException(status_code=409, detail="Demo traces cannot generate real evolution candidates")
-        recent = agent_traces.recent(100)
-        candidate = evolution_authority.propose(recent)
+        recent = traces.recent(100)
+        candidate = authority.propose(recent)
         return {
-            "trace_count": evolution_authority.readiness(recent)["trace_count"],
+            "trace_count": authority.readiness(recent)["trace_count"],
             "candidate_created": candidate is not None,
             "candidate_id": candidate.id if candidate else None,
-            "candidate_count": len(evolution_authority.candidates()),
-            "policy_fingerprint": evolution_authority.snapshot()["fingerprint"],
+            "candidate_count": len(authority.candidates()),
+            "policy_fingerprint": authority.snapshot()["fingerprint"],
             "evaluation_required": True,
-            "durability": "process_local",
+            "durability": agent_backend.durability,
             "created": candidate is not None,
             "candidate": asdict(candidate) if candidate is not None else None,
-            "readiness": evolution_authority.readiness(recent),
-            "candidates": evolution_authority.candidates(),
+            "readiness": authority.readiness(recent),
+            "candidates": authority.candidates(),
             "next_gate": "independent_offline_evaluation",
             "message": (
                 "Created a bounded candidate; independent offline evaluation is required."
@@ -618,12 +659,13 @@ def create_app() -> Any:
         }
 
     @app.post("/api/evolution/candidates/{candidate_id}/evaluate", tags=["evolution"])
-    async def evaluate_candidate(candidate_id: str) -> dict[str, Any]:
+    async def evaluate_candidate(candidate_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        traces, authority, _, _ = authorized_execution(authorization)
         if settings.synthetic_data:
             raise HTTPException(status_code=409, detail="Demo candidates cannot receive real evaluation evidence")
         if replay_suite is None or llm_pool is None:
             raise HTTPException(status_code=503, detail="Independent offline evaluation is not configured")
-        if not any(item["id"] == candidate_id for item in evolution_authority.candidates()):
+        if not any(item["id"] == candidate_id for item in authority.candidates()):
             raise HTTPException(status_code=404, detail="candidate not found")
         from starlette.concurrency import run_in_threadpool
 
@@ -631,7 +673,7 @@ def create_app() -> Any:
             # Use only server-owned task snapshots and a fresh provider pool.
             # The client cannot submit metrics, callbacks or executable code.
             evaluator = partial(replay_suite.evaluate, pool_factory=build_provider_pool_from_env)
-            candidate = await run_in_threadpool(evolution_authority.evaluate, candidate_id, evaluator)
+            candidate = await run_in_threadpool(authority.evaluate, candidate_id, evaluator)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail="Candidate is not eligible or evaluation evidence was rejected") from exc
         except Exception as exc:
@@ -648,29 +690,70 @@ def create_app() -> Any:
         return operator_tools.describe()
 
     @app.post("/api/agent/run", tags=["agent"])
-    async def operate(request: AgentRunRequest) -> dict[str, Any]:
-        if agent_operator is None:
+    async def operate(request: AgentRunRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        _, _, _, operator = authorized_execution(authorization)
+        if operator is None:
             return {
                 "status": "model_unavailable", "steps": [],
                 "message": "Autonomous execution needs an active model provider; no actions were run.",
                 "navigation": None, "durability": "process_local",
             }
-        return await agent_operator.run(
+        return await operator.run(
             request.goal,
             allow_drafts=request.allow_draft_writes,
             max_steps=request.max_steps,
         )
 
     @app.post("/api/agent/runs/{run_id}/ui-confirmation", tags=["agent"])
-    def confirm_agent_ui(run_id: str, request: AgentUiConfirmation) -> dict[str, Any]:
+    def confirm_agent_ui(run_id: str, request: AgentUiConfirmation,
+                         authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        traces, _, _, _ = authorized_execution(authorization)
         try:
-            return agent_traces.confirm_ui(
+            return traces.confirm_ui(
                 run_id, request.token, [item.model_dump() for item in request.receipts]
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="run confirmation not found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/agent/runs/{run_id}", tags=["agent"])
+    def agent_run_detail(run_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        traces, _, _, _ = authorized_execution(authorization)
+        try:
+            return traces.result(run_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+
+    @app.get("/api/agent/runs/{run_id}/events", tags=["agent"])
+    def agent_run_events(run_id: str, authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+        traces, _, _, _ = authorized_execution(authorization)
+        try:
+            return traces.events(run_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+
+    @app.post("/api/agent/runs/{run_id}/resume", tags=["agent"])
+    async def resume_agent_run(run_id: str, request: AgentResumeRequest,
+                               authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        traces, _, _, operator = authorized_execution(authorization)
+        try:
+            previous = traces.result(run_id)
+            if operator is None:
+                if previous["status"] == "awaiting_ui_confirmation" or not previous["resumable"]:
+                    return previous
+                raise HTTPException(status_code=503, detail="Resume requires an active model provider")
+            return await operator.run("", run_id=run_id, allow_drafts=request.allow_draft_writes)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+
+    @app.post("/api/agent/runs/{run_id}/cancel", tags=["agent"])
+    def cancel_agent_run(run_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        traces, _, _, _ = authorized_execution(authorization)
+        try:
+            return traces.cancel(run_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
 
     @app.post("/api/agent/plan", tags=["agent"])
     async def plan(request: AgentPlanRequest) -> dict[str, Any]:

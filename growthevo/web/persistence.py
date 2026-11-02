@@ -11,6 +11,7 @@ from .product_data import (
     APPROVALS,
     CAMPAIGNS,
     ApprovalDecisionConflict,
+    campaign_draft_payload,
     ReferenceProductState,
 )
 
@@ -72,7 +73,27 @@ _DURABLE_CORE_STATEMENTS = (
     """,
 )
 
-_MIGRATIONS = (("durable_core", _DURABLE_CORE_STATEMENTS),)
+_AGENT_EXECUTION_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS growthevo_agent_state (
+        owner_scope TEXT NOT NULL,
+        collection TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        revision BIGINT NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (owner_scope, collection, item_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS growthevo_agent_state_recent_idx
+    ON growthevo_agent_state (owner_scope, collection, created_at DESC, item_id DESC)
+    """,
+)
+
+_MIGRATIONS = (("durable_core", _DURABLE_CORE_STATEMENTS),
+               ("agent_execution", _AGENT_EXECUTION_STATEMENTS))
 
 
 
@@ -242,21 +263,7 @@ class PostgresStore:
         budget: float,
         candidate_action_ids: list[str],
     ) -> dict[str, Any]:
-        item = {
-            "id": f"cmp_{uuid.uuid4().hex[:8]}",
-            "name": name,
-            "type": "Campaign",
-            "status": "Draft",
-            "goal": goal,
-            "audience": audience,
-            "budget": budget,
-            "candidate_action_ids": list(candidate_action_ids),
-            "population": None,
-            "started_at": None,
-            "expected_lift": "pending causal evaluation",
-            "evidence_tier": "D",
-            "mode": "Draft",
-        }
+        item = campaign_draft_payload(name, goal, audience, budget, candidate_action_ids)
         with self._pool.connection() as conn:
             conn.execute(
                 "INSERT INTO growthevo_campaigns (id, payload) VALUES (%s, %s)",

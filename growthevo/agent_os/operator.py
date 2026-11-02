@@ -112,15 +112,16 @@ class GrowthTools:
         ]
 
     def execute(self, name: str, arguments: Any, *, allow_drafts: bool,
-                observed: bool) -> tuple[str, dict[str, Any]]:
+                observed: bool, draft_writer: Callable | None = None) -> tuple[str, dict[str, Any]]:
         try:
             return self.registry.call(name, arguments=arguments,
-                                      allow_drafts=allow_drafts, observed=observed)
+                                      allow_drafts=allow_drafts, observed=observed,
+                                      draft_writer=draft_writer)
         except KeyError as exc:
             raise ToolDenied("unknown or unregistered tool") from exc
 
     def _dispatch(self, name: str, *, arguments: Any, allow_drafts: bool,
-                  observed: bool) -> tuple[str, dict[str, Any]]:
+                  observed: bool, draft_writer: Callable | None = None) -> tuple[str, dict[str, Any]]:
         if name == "workspace.read":
             args = _contract_args(arguments, frozenset({"section"}))
             section = _string(args["section"], 40)
@@ -175,7 +176,7 @@ class GrowthTools:
             if not observed:
                 raise ToolDenied("a workspace read is required before any mutation")
             request = validated_campaign_draft(args, max_budget=1_000_000)
-            draft = self.product_state.create_campaign_draft(
+            draft = draft_writer(request) if draft_writer is not None else self.product_state.create_campaign_draft(
                 request["name"], request["goal"], request["audience"], request["budget"],
                 request["candidate_action_ids"],
             )
@@ -270,6 +271,34 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
             "additionalProperties": False,
         }
 
+    def validated_action(self, response: Any, seen: set[str], events: list[dict[str, Any]]
+                         ) -> tuple[str, str, dict[str, Any], str | None, str]:
+        """One action validator shared by live recovery and offline replay."""
+        if not isinstance(response, Mapping) or set(response) != {"kind", "tool", "arguments_json", "message"}:
+            raise ToolDenied("invalid model action schema")
+        kind, tool, message = response["kind"], response["tool"], response["message"]
+        if kind not in {"tool", "finish"} or not isinstance(message, str):
+            raise ToolDenied("invalid model action type")
+        if len(message) > 800:
+            raise ToolDenied("model message exceeded bound")
+        if not isinstance(response["arguments_json"], str) or len(response["arguments_json"]) > 3000:
+            raise ToolDenied("invalid or oversized model arguments")
+        if kind == "finish":
+            if tool != "none" or response["arguments_json"] != "{}":
+                raise ToolDenied("finish must not request an operation")
+            return kind, tool, {}, None, message
+        if tool not in self.tools.registry.names():
+            raise ToolDenied("model selected an unknown tool")
+        args = json.loads(response["arguments_json"])
+        if not isinstance(args, dict):
+            raise ToolDenied("arguments must be a JSON object")
+        fingerprint = sha256(json.dumps([tool, args], sort_keys=True).encode()).hexdigest()
+        if fingerprint in seen:
+            raise ToolDenied("repeated identical tool action")
+        if tool == "campaign.draft" and any(x["tool"] == tool and x["outcome"] == "ok" for x in events):
+            raise ToolDenied("only one campaign draft mutation is allowed per run")
+        return kind, tool, args, fingerprint, message
+
     async def run(self, goal: str, *, allow_drafts: bool = False,
                   max_steps: int | None = None) -> dict[str, Any]:
         if max_steps is not None and not 1 <= max_steps <= 8:
@@ -310,37 +339,13 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                 status, message = "provider_failure", "Model provider failed; no tools were run at this step."
                 break
             try:
-                if not isinstance(response, Mapping) or set(response) != {
-                    "kind", "tool", "arguments_json", "message"
-                }:
-                    raise ToolDenied("invalid model action schema")
-                kind, tool = response["kind"], response["tool"]
-                if kind not in {"tool", "finish"} or not isinstance(response["message"], str):
-                    raise ToolDenied("invalid model action type")
-                if len(response["message"]) > 800:
-                    raise ToolDenied("model message exceeded bound")
+                kind, tool, args, fingerprint, proposed_message = self.validated_action(response, seen, events)
                 if kind == "finish":
-                    if tool != "none" or response["arguments_json"] != "{}":
-                        raise ToolDenied("finish must not request an operation")
-                    message = response["message"]
-                    # A model can finish with no observed steps; do not mislabel
-                    # such a response as verified completion of a workspace task.
+                    message = proposed_message
                     status = "completed" if events else "unverified"
                     if not events:
                         message = "No workspace operation was performed. " + message
                     break
-                if tool not in self.tools.registry.names():
-                    raise ToolDenied("model selected an unknown tool")
-                args = json.loads(response["arguments_json"])
-                if not isinstance(args, dict):
-                    raise ToolDenied("arguments must be a JSON object")
-                fingerprint = sha256(json.dumps([tool, args], sort_keys=True).encode()).hexdigest()
-                if fingerprint in seen:
-                    raise ToolDenied("repeated identical tool action")
-                if tool == "campaign.draft" and any(
-                    x["tool"] == "campaign.draft" and x["outcome"] == "ok" for x in events
-                ):
-                    raise ToolDenied("only one campaign draft mutation is allowed per run")
                 seen.add(fingerprint)
                 outcome, data = self.tools.execute(tool, args, allow_drafts=allow_drafts,
                                                    observed=observed)

@@ -505,6 +505,17 @@ def test_live_api_executes_real_model_tool_loop(monkeypatch):
         traces = client.get("/api/harness/runs").json()
         assert len(traces) == 1
         assert traces[0]["run_id"] == response.json()["run_id"]
+        # The next model turn must wait for the browser observation.
+        assert len(provider.actions) == 1
+        run_id = response.json()["run_id"]
+        confirmation = client.post(f"/api/agent/runs/{run_id}/ui-confirmation", json={
+            "token": response.json()["ui_confirmation_token"],
+            "receipts": [{"step_index": 1, "status": "confirmed"}],
+        })
+        assert confirmation.json()["resumable"] is True
+        resumed = client.post(f"/api/agent/runs/{run_id}/resume", json={})
+        assert resumed.json()["status"] == "completed"
+        assert "browser_confirmation" in provider.inputs[-1]["previous_steps"][-1]["feedback"]
         assert client.get("/api/evolution/candidates").json() == []
         assert client.get("/api/evolution/policy").json()["step_budget"] == 6
         readiness = client.get("/api/evolution/readiness").json()

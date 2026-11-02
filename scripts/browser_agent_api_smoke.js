@@ -71,6 +71,36 @@
     await go('agent');
     check(document.querySelector('[data-agent-run-id="op_browser_contract"]')?.dataset.agentRunStatus==='ui_confirmed',
       'returning to the Agent workspace discarded the confirmed receipt');
+
+    // Exercise the real browser -> receipt -> resume loop, not just a rendered
+    // fixture card. The model continuation may start only after DOM verification.
+    const continuationCalls=[];
+    api=async(path,options={})=>{
+      if(path.startsWith('/api/agent/runs/op_browser_resume/')){
+        continuationCalls.push(path.split('/').pop());
+        if(path.endsWith('/ui-confirmation')){
+          check(document.getElementById('command-modal').hidden===false,'continuation preceded visible search');
+          check(JSON.parse(options.body).receipts[0].status==='confirmed','continuation received an unverified action');
+          return {run_id:'op_browser_resume',status:'ui_confirmed',resumable:true};
+        }
+        if(path.endsWith('/resume')){
+          check(continuationCalls.join(',')==='ui-confirmation,resume','model resumed before recorded browser receipt');
+          check(options.signal instanceof AbortSignal,'resumed request has no cancellation signal');
+          return {run_id:'op_browser_resume',status:'completed',steps:[{tool:'ui.control',outcome:'ui_pending',ui_confirmation:'confirmed'}],
+            message:'浏览器反馈后完成任务',ui_actions:[{step_index:0,kind:'control',target:'open_search',status:'confirmed'}]};
+        }
+      }
+      return realApi(path,options);
+    };
+    const continued=await continueAgentExecution({run_id:'op_browser_resume',status:'awaiting_ui_confirmation',
+      steps:[],ui_confirmation_token:'continuation-fixture-token',
+      ui_actions:[{step_index:0,kind:'control',target:'open_search',status:'pending'}]},new AbortController().signal);
+    check(continued.status==='completed','browser feedback did not continue the task');
+    check(continuationCalls.length===2,'confirmed action was unexpectedly repeated');
+    const continuedCards=document.querySelectorAll('[data-agent-run-id="op_browser_resume"]');
+    check(continuedCards.length===1&&continuedCards[0].dataset.agentRunStatus==='completed','task card did not advance to completed');
+    check(continuedCards[0]?.textContent.includes('浏览器已回执'),'completed step still reports pending browser verification');
+    document.getElementById('command-modal').hidden=true;
     api=realApi;
     api = async () => { throw Error('isolated agent fixture failure'); };
     input.value = '触发一次隔离失败';

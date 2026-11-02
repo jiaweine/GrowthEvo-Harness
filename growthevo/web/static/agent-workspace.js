@@ -97,7 +97,7 @@ async function agentWorkspaceTelemetry(){
     target.innerHTML='<span>真实运行记录 / 进化准备度</span><strong>'+
       esc(String(readiness.trace_count||0))+' / '+esc(String(readiness.required_trace_count||8))+
       ' 条轨迹</strong><small>候选 '+esc(String(readiness.candidate_count||0))+
-      ' · 进程内数据，不代表自动晋升</small>';
+      ' · '+(readiness.durability==='postgresql'?'记录已持久化':'进程内记录')+'，候选仍需验证</small>';
   }catch(_error){
     target.textContent='运行环境尚未连接，无法读取工具和演进状态';
   }

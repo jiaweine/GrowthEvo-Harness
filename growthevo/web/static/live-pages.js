@@ -41,7 +41,7 @@ experiments=async function liveExperiments(){
  if(useDemo)return fixtureExperimentsPage();
  const rows=await api('/api/experiments');
  const items=Array.isArray(rows)?rows:[];
- $('#view').innerHTML=`${head('实验中心','查看实验分组、主要指标、成熟度、保护指标和结果的不确定性。')}${sectionNav(STRATEGY_NAV,'experiments')}${items.length?`<div class="experiment-grid"><div class="card surface-card"><div class="surface-title"><div><h2>实验列表</h2><p>当前 API 返回的实验状态。</p></div><span class="soft-badge green">实时数据</span></div><div class="experiment-list">${items.map(x=>`<div class="experiment-card"><div class="experiment-head"><div><strong>${esc(liveText(x.name))}</strong><div class="evo-source">${esc(liveText(x.id))} · ${esc(liveText(x.assignment))}</div></div>${liveBadge(x.status)}</div><div class="experiment-meta"><div><span>主要指标</span><strong>${esc(liveText(x.primary_metric))}</strong></div><div><span>分配比例</span><strong>${esc(liveText(x.allocation))}</strong></div><div><span>成熟度</span><strong>${esc(liveText(x.maturity))}</strong></div><div><span>实验分组</span><strong>${esc(Array.isArray(x.variants)?x.variants.join(' / '):liveText(x.variants))}</strong></div></div><div class="result-box"><div><span>估计结果</span><strong class="value-positive">${esc(liveText(x.estimate))}</strong></div><div><span>不确定性</span><strong>${esc(liveText(x.ci))}</strong></div><div><span>保护指标</span><strong>${esc(Array.isArray(x.guardrails)?x.guardrails.join(', '):liveText(x.guardrails))}</strong></div></div><p style="font-size:8px;color:#7d8899;line-height:1.5">${esc(liveText(x.hypothesis))}</p></div>`).join('')}</div></div></div>`:emptyState('暂无实验','当前工作区没有实验记录。')}`;
+ $('#view').innerHTML=`${head('实验中心','查看实验分组、主要指标、成熟度、保护指标和结果的不确定性。')}${sectionNav(STRATEGY_NAV,'experiments')}${items.length?`<div class="experiment-grid"><div class="card surface-card"><div class="surface-title"><div><h2>实验列表</h2><p>当前 API 返回的实验状态。</p></div><span class="soft-badge green">实时数据</span></div><div class="experiment-list">${items.map(x=>`<div class="experiment-card"><div class="experiment-head"><div><strong>${esc(liveText(x.name))}</strong><div class="evo-source">${esc(liveText(x.id))} · ${esc(liveText(x.assignment))}</div></div>${liveBadge(x.status)}</div><div class="experiment-meta"><div><span>主要指标</span><strong>${esc(liveText(x.primary_metric))}</strong></div><div><span>分配比例</span><strong>${esc(liveText(x.allocation))}</strong></div><div><span>成熟度</span><strong>${esc(liveText(x.maturity))}</strong></div><div><span>实验分组</span><strong>${esc(Array.isArray(x.variants)?x.variants.map(value=>liveText(value)).join(' / '):liveText(x.variants))}</strong></div></div><div class="result-box"><div><span>估计结果</span><strong class="value-positive">${esc(liveText(x.estimate))}</strong></div><div><span>不确定性</span><strong>${esc(liveText(x.ci))}</strong></div><div><span>保护指标</span><strong>${esc(Array.isArray(x.guardrails)?x.guardrails.map(value=>liveText(value)).join('、'):liveText(x.guardrails))}</strong></div></div><p style="font-size:8px;color:#7d8899;line-height:1.5">${esc(liveText(x.hypothesis))}</p></div>`).join('')}</div></div></div>`:emptyState('暂无实验','当前工作区没有实验记录。')}`;
  bindProductActions();
 };
 
@@ -72,36 +72,44 @@ realtime=async function liveRealtime(){
  if(useDemo)return fixtureRealtimePage();
  const [actions,logs]=await Promise.all([api('/api/actions'),api('/api/decisions/recent?limit=50')]);
  const registry=Array.isArray(actions)?actions:[];const recent=Array.isArray(logs)?logs:[];
- $('#view').innerHTML=`${head('实时决策','查看当前动作目录、分配概率与决策记录；示例决策仅验证操作流程。','<button class="primary" id="run-reference-decision">运行安全示例决策</button>')}${sectionNav(EVIDENCE_NAV,'realtime')}<div class="page-grid"><div class="card surface-card span-4"><div class="surface-title"><div><h2>可用动作</h2><p>始终保留“不触达”作为备选动作。</p></div><span class="soft-badge green">实时数据</span></div>${registry.map(x=>`<div class="evidence-row"><span>${esc(liveText(x.label))}<br><small>${esc(liveText(x.action_id))}</small></span><strong>${esc(liveText(x.risk_level))} · ${liveMoney(x.cost)}</strong></div>`).join('')}</div><div class="card surface-card span-8 table-scroll"><div class="surface-title"><div><h2>决策记录</h2><p>记录策略身份、实际分配概率与安全回退。</p></div></div>${recent.length?`<table class="log-table"><thead><tr><th>ID</th><th>展示位置</th><th>动作</th><th>分配概率</th><th>策略</th><th>证据</th><th>模式</th></tr></thead><tbody>${recent.map(x=>`<tr><td><code>${esc(liveText(x.decision_id))}</code></td><td>${esc(liveText(x.placement))}</td><td>${esc(liveText(x.action_id))}</td><td>${esc(liveNumber(x.propensity)===null?'—':Number(x.propensity).toFixed(4))}</td><td>${esc(liveText(x.policy_id))}</td><td>${esc(liveText(x.evidence_tier))}</td><td>${esc(liveText(x.policy_randomization))}</td></tr>`).join('')}</tbody></table>`:'<p style="font-size:10px;color:#7d8899">尚无本进程决策记录。可运行一个无外部副作用的 示例决策。</p>'}</div></div>`;
+ $('#view').innerHTML=`${head('实时决策','查看当前动作目录、分配概率与决策记录；示例决策仅验证操作流程。','<button class="primary" id="run-reference-decision">运行安全示例决策</button>')}${sectionNav(EVIDENCE_NAV,'realtime')}<div class="page-grid"><div class="card surface-card span-4"><div class="surface-title"><div><h2>可用动作</h2><p>始终保留“不触达”作为备选动作。</p></div><span class="soft-badge green">实时数据</span></div>${registry.map(x=>`<div class="evidence-row"><span>${esc(liveText(x.label))}<br><small>${esc(liveText(x.action_id))}</small></span><strong>${esc(liveText(x.risk_level))} · ${liveMoney(x.cost)}</strong></div>`).join('')}</div><div class="card surface-card span-8 table-scroll"><div class="surface-title"><div><h2>决策记录</h2><p>记录策略身份、实际分配概率与安全回退。</p></div></div>${recent.length?`<table class="log-table"><thead><tr><th>编号</th><th>展示位置</th><th>动作</th><th>分配概率</th><th>策略</th><th>证据</th><th>模式</th></tr></thead><tbody>${recent.map(x=>`<tr><td><code>${esc(liveText(x.decision_id))}</code></td><td>${esc(liveText(x.placement))}</td><td>${esc(liveText(x.action_id))}</td><td>${esc(liveNumber(x.propensity)===null?'—':Number(x.propensity).toFixed(4))}</td><td>${esc(liveText(x.policy_id))}</td><td>${esc(liveText(x.evidence_tier))}</td><td>${esc(liveText(x.policy_randomization))}</td></tr>`).join('')}</tbody></table>`:'<p style="font-size:10px;color:#7d8899">当前没有决策记录。可运行一个无外部副作用的示例决策。</p>'}</div></div>`;
  bindProductActions();const run=$('#run-reference-decision');if(run)run.onclick=runReferenceDecision;
 };
 
 harness=async function liveHarness(){
   if(useDemo)return fixtureHarnessPage();
-  const raw=await api('/api/harness/runs');
+  const [raw,readiness]=await Promise.all([api('/api/harness/runs'),api('/api/evolution/readiness')]);
   const runs=Array.isArray(raw)?raw:[];
   const body=runs.map(run=>{
     const steps=Array.isArray(run.steps)?run.steps:[];
-    const names=steps.map(step=>(AGENT_TOOL_LABELS[step.tool]||'受控操作')+'：'+(AGENT_OUTCOME_LABELS[step.outcome]||'已记录')).join(' · ');
+    const names=steps.map(step=>(AGENT_TOOL_LABELS[step.tool]||'受控操作')+'：'+agentStepOutcomeLabel(step)).join(' · ');
     return '<tr><td><code>'+esc(liveText(run.run_id))+'</code></td>'
       +'<td>'+esc(AGENT_STATUS_LABELS[run.status]||'未知状态')+'</td>'
       +'<td>'+esc(liveText(run.tool_calls,0))+'</td>'
       +'<td>'+esc(liveText(run.policy_fingerprint))+'</td>'
-      +'<td>'+esc(names||'没有执行工具')+'</td></tr>';
+      +'<td>'+esc(names||'没有执行工具')+'</td>'
+      +'<td>'+(run.resumable?'<button class="secondary" type="button" data-resume-run="'+esc(run.run_id)+'">继续任务</button>':'')
+      +(run.status==='running'?'<button class="secondary" type="button" data-cancel-run="'+esc(run.run_id)+'">停止任务</button>':'')+'</td></tr>';
   }).join('');
-  $('#view').innerHTML=head('执行轨迹','真实运行轨迹：工具、结果和演进策略指纹。记录仅保留在当前服务进程，重启后会清空。')
+  $('#view').innerHTML=head('执行轨迹',readiness.durability==='postgresql'?'运行步骤、检查点与浏览器回执已持久化。可以从中断处继续，草案仍需当前授权。':'当前为进程内执行记录；接入 PostgreSQL 后，任务才能跨重启恢复。')
     +sectionNav(RUNTIME_NAV,'harness')
     +(runs.length?'<div class="card surface-card table-scroll"><table class="opportunity-table">'
-      +'<thead><tr><th>运行编号</th><th>状态</th><th>工具次数</th><th>策略指纹</th><th>已执行操作</th></tr></thead>'
+      +'<thead><tr><th>运行编号</th><th>状态</th><th>工具次数</th><th>策略指纹</th><th>已执行操作</th><th>任务操作</th></tr></thead>'
       +'<tbody>'+body+'</tbody></table></div>'
       :emptyState('还没有真实运行记录','在执行模式中输入目标，完成运行后这里会记录实际结果。'));
   bindProductActions();
+  $$('[data-resume-run]').forEach(button=>button.onclick=()=>resumeAgentRun(button.dataset.resumeRun));
+  $$('[data-cancel-run]').forEach(button=>button.onclick=async()=>{
+    button.disabled=true;
+    try{await api('/api/agent/runs/'+encodeURIComponent(button.dataset.cancelRun)+'/cancel',{method:'POST'});await harness();}
+    catch(_error){toast('任务未停止，请刷新后重试');button.disabled=false;}
+  });
 };
 
 function approvalActionLabel(decision){return ({approve_shadow:'批准影子验证',approve_1:'批准 1%',approve_5:'批准 5%',approve_25:'批准 25%',reject:'拒绝',return:'退回'})[decision]||decision}
 async function submitApprovalDecision(id,decision){
  try{
-  await api(`/api/approvals/${encodeURIComponent(id)}/decision`,{method:'POST',body:JSON.stringify({decision,note:`Reviewed from GrowthEvo Web: ${approvalActionLabel(decision)}`})});
+  await api(`/api/approvals/${encodeURIComponent(id)}/decision`,{method:'POST',body:JSON.stringify({decision,note:`在 GrowthEvo 网页中审查：${approvalActionLabel(decision)}`})});
   toast(`${id} · ${approvalActionLabel(decision)}`);await approvals();
  }catch(error){toast(`审批未提交：${error&&error.message?error.message:'未知原因'}`)}
 }
@@ -109,7 +117,7 @@ async function submitApprovalDecision(id,decision){
 approvals=async function liveApprovals(){
  if(useDemo)return fixtureApprovalsPage();
  const rows=await api('/api/approvals');const items=Array.isArray(rows)?rows:[];
- $('#view').innerHTML=`${head('治理与审批','当前服务端审批状态。已完成的审批不能被不同的二次决策覆盖。')}${sectionNav(RUNTIME_NAV,'approvals')}${items.length?`<div class="approval-list">${items.map(x=>{const pending=x.status==='pending';return `<div class="card approval-wide"><div class="approval-summary"><div class="approval-name"><strong>${esc(liveText(x.title))}</strong><p>${esc(liveText(x.id))} · ${esc(liveText(x.campaign))}</p></div><div class="approval-kv"><span>影响用户</span><strong>${esc(liveText(x.affected_users))}</strong></div><div class="approval-kv"><span>预算</span><strong>${liveMoney(x.budget)}</strong></div><div class="approval-kv"><span>最大风险</span><strong>${esc(liveText(x.max_risk))}</strong></div><div class="approval-kv"><span>预计增量价值</span><strong class="value-positive">${liveMoney(x.incremental_value)}</strong></div></div><div class="change-box"><strong>证据：</strong> 等级 ${esc(liveText(x.evidence_tier))}　·　<strong>不确定性：</strong> ${esc(liveText(x.uncertainty))}　·　<strong>状态：</strong> ${esc(liveText(x.status))}</div><div class="version-row"><span class="version-pill">Agent ${esc(liveText(x.agent_id))}</span><span class="version-pill">Harness ${esc(liveText(x.harness_id))}</span><span class="version-pill">Policy ${esc(liveText(x.policy_id))}</span></div>${pending?`<div class="approval-buttons"><button data-approval="${esc(x.id)}" data-decision="return">退回</button><button class="danger" data-approval="${esc(x.id)}" data-decision="reject">拒绝</button><button data-approval="${esc(x.id)}" data-decision="approve_shadow">影子验证</button><button data-approval="${esc(x.id)}" data-decision="approve_1">1%</button><button class="canary" data-approval="${esc(x.id)}" data-decision="approve_5">5%</button></div>`:'<div class="surface-badges"><span class="soft-badge green">已处理 · 服务端状态</span></div>'}</div>`}).join('')}</div>`:emptyState('暂无待审批记录','当前工作区没有待审批记录。')}`;
+ $('#view').innerHTML=`${head('治理与审批','当前服务端审批状态。已完成的审批不能被不同的二次决策覆盖。')}${sectionNav(RUNTIME_NAV,'approvals')}${items.length?`<div class="approval-list">${items.map(x=>{const pending=x.status==='pending';return `<div class="card approval-wide"><div class="approval-summary"><div class="approval-name"><strong>${esc(liveText(x.title))}</strong><p>${esc(liveText(x.id))} · ${esc(liveText(x.campaign))}</p></div><div class="approval-kv"><span>影响用户</span><strong>${esc(liveText(x.affected_users))}</strong></div><div class="approval-kv"><span>预算</span><strong>${liveMoney(x.budget)}</strong></div><div class="approval-kv"><span>最大风险</span><strong>${esc(liveText(x.max_risk))}</strong></div><div class="approval-kv"><span>预计增量价值</span><strong class="value-positive">${liveMoney(x.incremental_value)}</strong></div></div><div class="change-box"><strong>证据：</strong> 等级 ${esc(liveText(x.evidence_tier))}　·　<strong>不确定性：</strong> ${esc(liveText(x.uncertainty))}　·　<strong>状态：</strong> ${esc(liveText(x.status))}</div><div class="version-row"><span class="version-pill">智能体 ${esc(liveText(x.agent_id))}</span><span class="version-pill">运行框架 ${esc(liveText(x.harness_id))}</span><span class="version-pill">策略 ${esc(liveText(x.policy_id))}</span></div>${pending?`<div class="approval-buttons"><button data-approval="${esc(x.id)}" data-decision="return">退回</button><button class="danger" data-approval="${esc(x.id)}" data-decision="reject">拒绝</button><button data-approval="${esc(x.id)}" data-decision="approve_shadow">影子验证</button><button data-approval="${esc(x.id)}" data-decision="approve_1">1%</button><button class="canary" data-approval="${esc(x.id)}" data-decision="approve_5">5%</button></div>`:'<div class="surface-badges"><span class="soft-badge green">已处理 · 服务端状态</span></div>'}</div>`}).join('')}</div>`:emptyState('暂无待审批记录','当前工作区没有待审批记录。')}`;
  bindProductActions();$$('[data-approval][data-decision]').forEach(button=>button.onclick=()=>submitApprovalDecision(button.dataset.approval,button.dataset.decision));
 };
 
@@ -141,7 +149,7 @@ evolution=async function liveEvolution(){
   const traceCount=Number(readiness.trace_count)||0;
   const policyCard='<div class="card surface-card evo-policy-card"><div class="surface-title"><div>'
     +'<h2>当前操作策略</h2><p>改进从真实智能体操作中产生；未经过独立评测、灰度验证和人工批准，绝不会自动采用。</p></div>'
-    +'<span class="soft-badge">进程内状态</span></div>'
+    +'<span class="soft-badge">'+(readiness.durability==='postgresql'?'已持久化':'进程内状态')+'</span></div>'
     +'<div class="evo-policy-facts"><div><span>当前策略有效轨迹</span><strong>'+traceCount+' / '+(Number(readiness.required_trace_count)||8)+'</strong></div>'
     +'<div><span>待评测候选</span><strong>'+items.filter(x=>x.status==='requires_independent_eval').length+'</strong></div>'
     +'<div><span>已采用候选</span><strong>'+items.filter(x=>x.status==='promoted').length+'</strong></div></div>'
@@ -164,7 +172,7 @@ evolution=async function liveEvolution(){
       +'</div><p class="evo-policy-note">离线证据：<code>'+esc(item.evaluation.evidence_id)+'</code></p>':'')
     +'<div class="evo-path"><span class="done">真实运行</span><b>→</b><span class="done">提出候选</span><b>→</b>'
     +'<span'+(item.evaluation?' class="done"':'')+'>独立评测</span><b>→</b><span>灰度与审批</span><b>→</b><span>采用</span></div>'
-    +(item.status==='requires_independent_eval'?'<div class="evo-action-row"><button class="secondary" type="button" data-evaluate-candidate="'+esc(item.id)+'" '
+    +((item.status==='requires_independent_eval'||item.retryable_evaluation)?'<div class="evo-action-row"><button class="secondary" type="button" data-evaluate-candidate="'+esc(item.id)+'" '
       +(readiness.evaluation_available&&item.parent===policy.fingerprint?'':'disabled')+'>运行独立离线评测</button></div>':'')
     +'</article>').join('');
   const action='<div class="card surface-card evo-analyze">'
@@ -201,13 +209,13 @@ evolution=async function liveEvolution(){
   if(trigger)trigger.onclick=async()=>{
     trigger.disabled=true;
     const result=$('#evolution-analysis-result');
-    if(result)result.textContent='正在检查本进程真实运行记录…';
+    if(result)result.textContent='正在检查当前策略的真实运行记录…';
     try{
       const analyzed=await api('/api/evolution/analyze',{method:'POST'});
       if(state.route!=='evolution')return;
       const message=analyzed.candidate_created
         ?'已从 '+analyzed.trace_count+' 条真实运行中发现候选 '+analyzed.candidate_id+'，等待独立评测。'
-        :'本进程目前只有 '+analyzed.trace_count+' 条实际运行记录，或尚无可确认的改进模式；未创建虚假候选。';
+        :'当前策略有 '+analyzed.trace_count+' 条实际运行记录，或尚无可确认的改进模式；未创建虚假候选。';
       if(result)result.textContent=message;
       if(analyzed.candidate_created){await evolution();toast('已创建待评测的真实改进候选');}
     }catch(error){
@@ -352,7 +360,7 @@ dataCenter=async function liveDataCenter(){
   +'<div class="stat-box"><span>环境</span><strong>'+esc(liveText(runtime.environment))+'</strong><em>'+esc(liveText(runtime.mode))+'</em></div>'
   +'</div>'
   +'<div class="card surface-card table-scroll"><div class="surface-title"><div><h2>近期决策记录</h2><p>来自 /api/decisions/recent，不使用浏览器样例数据。</p></div><span class="soft-badge green">实时数据</span></div>'
-  +(rows.length?'<table class="log-table"><thead><tr><th>ID</th><th>展示位置</th><th>动作</th><th>分配概率</th><th>策略</th><th>证据</th></tr></thead><tbody>'+body+'</tbody></table>':'<p style="font-size:10px;color:#7d8899">当前服务端尚无决策记录。</p>')
+  +(rows.length?'<table class="log-table"><thead><tr><th>编号</th><th>展示位置</th><th>动作</th><th>分配概率</th><th>策略</th><th>证据</th></tr></thead><tbody>'+body+'</tbody></table>':'<p style="font-size:10px;color:#7d8899">当前服务端尚无决策记录。</p>')
   +'</div>';
  bindProductActions();
 };

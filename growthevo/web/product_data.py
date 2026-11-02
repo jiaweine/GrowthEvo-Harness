@@ -69,6 +69,17 @@ EVIDENCE = [
 ]
 
 
+def campaign_draft_payload(name: str, goal: str, audience: str, budget: float,
+                           candidate_action_ids: list[str]) -> dict[str, Any]:
+    """Canonical shape shared by direct and checkpointed campaign writes."""
+    return {
+        "id": f"cmp_{uuid.uuid4().hex[:8]}", "name": name, "type": "Campaign", "status": "Draft",
+        "goal": goal, "audience": audience, "budget": budget,
+        "candidate_action_ids": list(candidate_action_ids), "population": None, "started_at": None,
+        "expected_lift": "pending causal evaluation", "evidence_tier": "D", "mode": "Draft",
+    }
+
+
 class ReferenceProductState:
     """Bounded, process-local product state used only by the reference surface.
 
@@ -154,21 +165,7 @@ class ReferenceProductState:
         budget: float,
         candidate_action_ids: list[str],
     ) -> dict[str, Any]:
-        item = {
-            "id": f"cmp_{uuid.uuid4().hex[:8]}",
-            "name": name,
-            "type": "Campaign",
-            "status": "Draft",
-            "goal": goal,
-            "audience": audience,
-            "budget": budget,
-            "candidate_action_ids": list(candidate_action_ids),
-            "population": None,
-            "started_at": None,
-            "expected_lift": "pending causal evaluation",
-            "evidence_tier": "D",
-            "mode": "Draft",
-        }
+        item = campaign_draft_payload(name, goal, audience, budget, candidate_action_ids)
         with self._lock:
             self._campaign_state.insert(0, item)
             del self._campaign_state[self._max_campaigns :]
