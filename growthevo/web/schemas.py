@@ -32,6 +32,16 @@ class AgentRunRequest(RequestModel):
     max_steps: int | None = Field(default=None, ge=1, le=8)
 
 
+class UiStepReceipt(RequestModel):
+    step_index: int = Field(ge=0, le=7, strict=True)
+    status: Literal["confirmed", "failed"]
+
+
+class AgentUiConfirmation(RequestModel):
+    token: str = Field(min_length=40, max_length=100)
+    receipts: list[UiStepReceipt] = Field(min_length=1, max_length=8)
+
+
 class ApprovalDecisionRequest(RequestModel):
     decision: Literal["approve_shadow", "approve_1", "approve_5", "approve_25", "reject", "return"]
     note: str = Field(min_length=1, max_length=1000)

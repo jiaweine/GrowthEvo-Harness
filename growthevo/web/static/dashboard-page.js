@@ -20,7 +20,7 @@ function dashboardTrendMarkup(data,metric,granularity){
   const spec=dashboardTrendSeries(data,metric,granularity);
   const latest=spec.values[spec.values.length-1]||0;
   const formatted=spec.digits?latest.toFixed(spec.digits):Math.round(latest).toLocaleString('zh-CN');
-  return `<div class="chart-key"><span><i class="key-dot actual"></i>${esc(spec.label)}</span><span><i class="key-dot band"></i>预测区间</span><span><i class="key-dash"></i>上期对比</span></div>${trendChart(spec.values,{unit:spec.unit,digits:spec.digits})}<div class="tooltip-card"><strong>${granularity==='week'?'本周':'当前窗口'}</strong><div class="tooltip-line"><i></i>${esc(spec.label)}　${formatted}${esc(spec.unit)}</div><div class="tooltip-line"><i></i>趋势　持续更新</div><div class="tooltip-line blue"><i></i>证据　Incrementality</div></div>`;
+  return `<div class="chart-key"><span><i class="key-dot actual"></i>${esc(spec.label)}</span><span><i class="key-dot band"></i>预测区间</span><span><i class="key-dash"></i>上期对比</span></div>${trendChart(spec.values,{unit:spec.unit,digits:spec.digits})}<div class="tooltip-card"><strong>${granularity==='week'?'本周':'当前窗口'}</strong><div class="tooltip-line"><i></i>${esc(spec.label)}　${formatted}${esc(spec.unit)}</div><div class="tooltip-line"><i></i>趋势　持续更新</div><div class="tooltip-line blue"><i></i>证据　增量效果</div></div>`;
 }
 
 async function dashboard(){
@@ -38,7 +38,7 @@ async function dashboard(){
     ['⌘','cyan','接入新的数据源','连接数据仓库或业务系统','integrations'],
   ];
 
-  $('#view').innerHTML=`${head('早上好，李明','今天有 3 个关键事项需要关注。系统正在为你优化 12 个活动，预期带来 +28% 的增量收益。','<button class="primary" id="new-c" type="button">＋ 新建活动</button><button class="secondary" id="talk" type="button">◉ 与 Agent 对话</button><button class="more-btn" id="dashboard-more" type="button" aria-label="更多驾驶舱操作">•••</button>')}
+  $('#view').innerHTML=`${head('增长驾驶舱',useDemo?'当前展示演示数据，可从智能体操作系统探索业务工作流。':'当前展示服务端返回的业务数据；增长结果以实际证据为准。','<button class="primary" id="new-c" type="button">＋ 新建活动</button><button class="secondary" id="talk" type="button">◉ 与 Agent 对话</button><button class="more-btn" id="dashboard-more" type="button" aria-label="更多驾驶舱操作">•••</button>')}
   <div class="kpi-grid">${kpis.map((k,index)=>`<div class="card kpi"><div class="kpi-label">${esc(k.label)}</div><div class="kpi-value">${esc(k.formatted)}</div><div class="kpi-delta">↑ ${esc(k.delta)}<span>${esc(k.suffix||'')}</span></div>${spark(k.spark||DEMO.kpis[index]?.spark||[1,2,3],safeColor(k.color,DEMO.kpis[index]?.color||'#5361f0'))}</div>`).join('')}</div>
   <div class="dashboard-grid">
     <div class="card panel">
@@ -48,13 +48,13 @@ async function dashboard(){
     </div>
     <div class="card panel">
       <div class="panel-head"><h2>渠道贡献</h2><button id="channel-details" type="button">查看详情 →</button></div>
-      <div class="donut-layout"><div class="donut"><div class="donut-label">¥ 2,846 万<span>增量收入</span></div></div><div class="legend">${channels.map((channel,index)=>{const item=Array.isArray(channel)?channel:[channel.name,channel.share,DEMO.channels[index]?.[2]||'#9da9bc'];const color=safeColor(item[2],'#9da9bc');return `<div class="legend-row"><span class="legend-dot" style="background:${color}"></span><span>${esc(item[0])}</span><strong>${esc(item[1])}%</strong></div>`}).join('')}</div></div>
+      <div class="donut-layout"><div class="donut"><div class="donut-label">${esc(kpis[0]?.formatted||"—")}<span>增量收入</span></div></div><div class="legend">${channels.map((channel,index)=>{const item=Array.isArray(channel)?channel:[channel.name,channel.share,DEMO.channels[index]?.[2]||'#9da9bc'];const color=safeColor(item[2],'#9da9bc');return `<div class="legend-row"><span class="legend-dot" style="background:${color}"></span><span>${esc(item[0])}</span><strong>${esc(item[1])}%</strong></div>`}).join('')}</div></div>
     </div>
   </div>
   <div class="lower-grid">
     <div class="card table-card">
       <div class="table-toolbar"><div class="panel-head" style="margin:0"><h2>当前运行的策略与实验</h2></div><button class="panel-link" id="all-c" type="button">查看全部 →</button></div>
-      <div class="table-toolbar" style="padding-top:7px;padding-bottom:6px"><div class="table-tabs"><button class="active" type="button" data-dashboard-filter="all">全部(${campaigns.length})</button><button type="button" data-dashboard-filter="Campaign">Campaign (${campaigns.filter(item=>item.type==='Campaign').length})</button><button type="button" data-dashboard-filter="Experiment">Experiment (${campaigns.filter(item=>item.type==='Experiment').length})</button><button type="button" data-go="realtime">实时决策 →</button></div></div>
+      <div class="table-toolbar" style="padding-top:7px;padding-bottom:6px"><div class="table-tabs"><button class="active" type="button" data-dashboard-filter="all">全部(${campaigns.length})</button><button type="button" data-dashboard-filter="Campaign">活动 (${campaigns.filter(item=>item.type==='Campaign').length})</button><button type="button" data-dashboard-filter="Experiment">实验 (${campaigns.filter(item=>item.type==='Experiment').length})</button><button type="button" data-go="realtime">实时决策 →</button></div></div>
       <div id="dashboard-strategies">${campaignsTable(campaigns)}</div>
     </div>
     <div class="card panel">

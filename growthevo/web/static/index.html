@@ -7,25 +7,25 @@
   <meta name="description" content="GrowthEvo — AI 原生因果增长执行平台" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="stylesheet" href="./assets/styles.css" />
-  <title>GrowthEvo · Agent OS / Recursive Evolution</title>
+  <title>GrowthEvo · 智能体操作系统与自进化中心</title>
 </head>
 <body>
   <div id="app" class="app-shell">
     <aside class="sidebar" id="sidebar" aria-label="主导航">
       <div class="brand-block">
         <div class="brand-name">GrowthEvo</div>
-        <div class="brand-subtitle">AGENT OS · RECURSIVE INTELLIGENCE</div>
+        <div class="brand-subtitle">智能体操作系统 · 自进化</div>
       </div>
       <nav id="main-nav" class="nav-list"></nav>
       <div class="sidebar-bottom">
         <div class="workspace-card">
           <div class="avatar avatar-blue">✦</div>
-          <div class="workspace-copy"><strong>GrowthEvo Workspace</strong><span>Operations Control</span></div>
+          <div class="workspace-copy"><strong>GrowthEvo 工作空间</strong><span>智能增长控制台</span></div>
           <span class="chev">⌄</span>
         </div>
         <div class="user-card">
           <div class="avatar avatar-photo">OP</div>
-          <div class="workspace-copy"><strong>Workspace Operator</strong><span>权限由登录态决定</span></div>
+          <div class="workspace-copy"><strong>工作区操作员</strong><span>权限由登录态决定</span></div>
         </div>
         <button class="collapse-btn" id="sidebar-collapse" type="button" aria-label="收起侧栏" aria-expanded="true"><span>‹</span> 收起</button>
       </div>
@@ -49,17 +49,17 @@
 
       <section class="content" id="view"></section>
       <footer class="statusbar">
-        <div><span class="brand-foot">GrowthEvo</span><span class="divider-v"></span><span>From Insight to Impact.</span></div>
+        <div><span class="brand-foot">GrowthEvo</span><span class="divider-v"></span><span>从洞察到行动</span></div>
         <div class="status-right"><span><i class="dot gray"></i>正在校验运行状态</span><span>真实运行状态由 API 返回</span></div>
       </footer>
     </main>
 
-    <aside class="agent-sidecar" id="agent-sidecar" aria-label="Growth Agent">
+    <aside class="agent-sidecar" id="agent-sidecar" aria-label="智能体助手">
       <div class="agent-head">
-        <div class="agent-title"><span class="agent-logo">✦</span><strong>Growth Agent</strong><span class="online-dot"></span><span class="online-text">在线</span></div>
+        <div class="agent-title"><span class="agent-logo">✦</span><strong>智能体助手</strong><span class="online-dot"></span><span class="online-text">连接状态待确认</span></div>
         <div class="agent-head-actions">
           <button class="mode-btn" id="agent-mode" type="button">执行模式⌄</button>
-          <button class="agent-close" id="agent-close" type="button" aria-label="关闭 Growth Agent">×</button>
+          <button class="agent-close" id="agent-close" type="button" aria-label="关闭智能体助手">×</button>
         </div>
       </div>
       <div class="agent-body" id="agent-body"></div>
@@ -67,7 +67,7 @@
         <textarea id="agent-input" rows="2" placeholder="继续提问，或输入指令..."></textarea>
         <label class="agent-draft-consent" >
           <input id="agent-draft-consent" type="checkbox" />
-          授权 AI 创建 Campaign 草案（不含发布或审批）
+          授权助手创建活动草案（不含发布或审批）
         </label>
         <input id="agent-file-input" type="file" hidden />
         <div class="composer-tools"><button id="agent-attach" type="button" aria-label="附件">⌕</button><button id="agent-voice" type="button" aria-label="语音">♩</button><button class="send" type="submit" aria-label="发送">➤</button></div>
@@ -75,7 +75,7 @@
       <div class="agent-achievement" id="agent-achievement"></div>
       <div class="agent-banner">
         <div class="banner-overlay"></div>
-        <div class="banner-copy"><strong>CONTROL THE LOOP.<br/>VERIFY THE CHANGE.</strong><span>AGENT OS / REPLAY / SHADOW / APPROVAL</span></div>
+        <div class="banner-copy"><strong>观察每次执行。<br/>验证每次改变。</strong><span>操作 · 回放 · 评测 · 审批</span></div>
         <button class="video-btn" id="product-intro" type="button"><span>▶</span> 查看系统工作流</button>
       </div>
     </aside>
@@ -96,10 +96,10 @@
 
   <div class="command-modal" id="intro-modal" hidden>
     <div class="command-panel intro-panel">
-      <div class="intro-head"><div><strong>GrowthEvo / Control Loop</strong><span>Agent 操作与自进化均以真实证据为依据</span></div><button id="intro-close" type="button" aria-label="关闭产品介绍">×</button></div>
-      <div class="intro-flow"><span>Discover</span><b>→</b><span>Decide</span><b>→</b><span>Design</span><b>→</b><span>Validate</span><b>→</b><span>Approve</span><b>→</b><span>Execute</span><b>→</b><span>Learn</span></div>
-      <p>Agent OS 基于受控工具执行和观测反馈完成操作；自进化通过 Replay、独立评测、Shadow、Canary 与人工审批逐级验证。高风险业务动作不会由模型自行放行。</p>
-      <div class="intro-actions"><button class="secondary" id="intro-evidence" type="button">查看增长证据</button><button class="primary" id="intro-campaign" type="button">进入 Campaign Studio</button></div>
+      <div class="intro-head"><div><strong>GrowthEvo · 工作闭环</strong><span>智能体操作与自进化均以真实证据为依据</span></div><button id="intro-close" type="button" aria-label="关闭产品介绍">×</button></div>
+      <div class="intro-flow"><span>发现</span><b>→</b><span>决策</span><b>→</b><span>设计</span><b>→</b><span>验证</span><b>→</b><span>审批</span><b>→</b><span>执行</span><b>→</b><span>学习</span></div>
+      <p>智能体基于受控工具执行并记录反馈；改进候选需通过离线回放、独立评测、灰度验证与人工审批。高风险业务动作不会由模型自行放行。</p>
+      <div class="intro-actions"><button class="secondary" id="intro-evidence" type="button">查看增长证据</button><button class="primary" id="intro-campaign" type="button">进入活动工作台</button></div>
     </div>
   </div>
 
@@ -115,5 +115,6 @@
   <script src="./assets/pages.js" defer></script>
   <script src="./assets/live-pages.js" defer></script>
   <script src="./assets/app.js" defer></script>
+  <script src="./assets/agent-workspace.js" defer></script>
 </body>
 </html>

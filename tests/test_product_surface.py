@@ -22,7 +22,7 @@ def test_nightfall_surface_and_agent_first_navigation_are_real_assets() -> None:
     assert "cyber-surface.css" in styles
     assert '"cyber-surface.css"' in build
     assert "./assets/cyber-surface.css" in service_worker
-    assert "AGENT OS" in index
+    assert "智能体操作系统" in index
     assert "data-route" in app
     assert "renderAgentOsHero" in app
     pages = (STATIC / "pages.js").read_text(encoding="utf-8")
@@ -79,8 +79,8 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     assert index.index("data.js") < index.index("auth.js") < index.index("runtime-ui.js") < index.index("product-data.js")
     assert index.index("product-data.js") < index.index("product-advanced-data.js") < index.index("pages.js")
     assert index.index("pages.js") < index.index("live-pages.js") < index.index("app.js")
-    assert "不会把 synthetic demo 数据伪装成真实生产数据" in runtime_ui
-    assert "Demo Workspace · Synthetic Data" in runtime_ui
+    assert "重新连接后才能读取工作区数据" in runtime_ui
+    assert "演示工作区 · 样例数据" in runtime_ui
     assert "using demo mode because MODE=auto" not in runtime_ui
     assert "/api/ready" in runtime_ui
     assert "typeof requestOptions.body === 'string'" in runtime_ui
@@ -102,7 +102,7 @@ def test_browser_bootstrap_runs_after_all_deferred_modules() -> None:
     assert "llm.load_state === 'busy'" in runtime_ui
     assert "capacity.in_flight" in runtime_ui
     assert "capacity.max_concurrency" in runtime_ui
-    assert "Data: ${dataMode}" in runtime_ui
+    assert "数据：${productLabel(dataMode)}" in runtime_ui
     for route in (
         "/api/campaigns",
         "/api/campaigns/draft",
@@ -165,7 +165,7 @@ def test_core_product_workbenches_are_real_routes() -> None:
         assert route in product_data or route in pages
     assert "NO_TREATMENT" in pages
     assert "propensity" in pages
-    assert "Replay" in pages and "Shadow" in pages and "Canary" in pages
+    assert "离线回放" in pages and "灰度" in pages and "小流量" in pages
     assert "creatives" in advanced_data and "journeys" in advanced_data and "memories" in advanced_data
     assert "models" in advanced_data and "policies" in advanced_data and "entities" in advanced_data
 
@@ -239,15 +239,15 @@ def test_mutable_dashboard_fields_are_html_escaped() -> None:
     live_pages = (STATIC / "live-pages.js").read_text(encoding="utf-8")
     assert "${esc(c.name)}" in views
     assert "${esc(c.goal)}" in views
-    assert "${esc(c.type)}" in views
+    assert "${esc(productLabel(c.type))}" in views
     assert "c.population==null?'—'" in views
     assert "${esc(k.label)}" in dashboard
     assert "safeColor" in dashboard
     assert "go('campaignStudio')" in dashboard
     assert "esc(liveText(x.title))" in live_pages
     assert "esc(liveText(run.run_id))" in live_pages
-    assert "esc(liveText(run.status))" in live_pages
-    assert "esc(liveText(item.reason))" in live_pages
+    assert "esc(AGENT_STATUS_LABELS[run.status]||'未知状态')" in live_pages
+    assert "esc(EVOLUTION_REASON_LABELS[item.reason]||liveText(item.reason))" in live_pages
 
 
 def test_browser_auth_smoke_covers_bearer_and_401_reauthentication() -> None:
@@ -276,8 +276,8 @@ def test_agent_composer_calls_real_api_outside_demo() -> None:
     assert "AGENT_RUN_TIMEOUT_MS=90000" in app
     assert "timeoutMs:strategyMode?AGENT_PLAN_TIMEOUT_MS:AGENT_RUN_TIMEOUT_MS" in app
     assert "renderAgentPlan(result)" in app
-    assert "Deterministic 安全规划" in app
-    assert "AI + Critic 已通过" in app
+    assert "规则安全规划" in app
+    assert "方案与审核已通过" in app
     assert "主工作区隔离" in app
     assert "void probeRuntime()" in app
     assert "setAgentAvailability('safe'" in runtime_ui

@@ -34,7 +34,7 @@
 
     click('#channel-filter');
     click('#utility-popover [data-utility-index="1"]');
-    check(document.querySelector('#channel-filter-label').textContent === 'App Push', 'channel filter did not change');
+    check(document.querySelector('#channel-filter-label').textContent === '应用推送', 'channel filter did not change');
 
     click('#notification-open');
     check(document.querySelector('#utility-popover').textContent.includes('待审批'), 'notification menu missing content');
@@ -58,7 +58,7 @@
 
     click('[data-dashboard-filter="Experiment"]');
     check(document.querySelectorAll('#dashboard-strategies tbody tr').length >= 1, 'dashboard list filter returned no rows');
-    check([...document.querySelectorAll('#dashboard-strategies tbody tr')].every(row => row.textContent.includes('Experiment')), 'dashboard filter kept wrong row types');
+    check([...document.querySelectorAll('#dashboard-strategies tbody tr')].every(row => row.textContent.includes('实验')), 'dashboard filter kept wrong row types');
 
     click('#dashboard-strategies .action-view');
     await sleep(60);
@@ -99,7 +99,7 @@
     await sleep(60);
     click('[data-demo-action="preflight"]');
     check(document.body.dataset.lastPreflight === 'pass', 'preflight did not run');
-    check(document.querySelector('#demo-preflight-result').textContent.includes('PASS'), 'preflight result did not render');
+    check(document.querySelector('#demo-preflight-result').textContent.includes('通过'), 'preflight result did not render');
 
     go('realtime');
     await sleep(60);
@@ -129,7 +129,7 @@
     click('[data-demo-action="reject-candidate"][data-candidate-id="EV-DEMO"]');
     await sleep(40);
     check(document.body.dataset.lastEvolutionDecision === 'EV-DEMO:rejected', 'evolution reject did not mutate state');
-    check(document.querySelector('#view').textContent.includes('Rejected'), 'rejected candidate status did not render');
+    check(document.querySelector('#view').textContent.includes('已拒绝'), 'rejected candidate status did not render');
 
     click('[data-route="integrations"]');
     await sleep(60);
@@ -140,31 +140,57 @@
     await sleep(60);
     click('[data-demo-action="deployment-check"]');
     check(document.body.dataset.lastDeploymentCheck === 'pass', 'deployment check did not run');
-    check(document.querySelector('#demo-deployment-result').textContent.includes('PASS'), 'deployment check result did not render');
+    check(document.querySelector('#demo-deployment-result').textContent.includes('通过'), 'deployment check result did not render');
 
     click('[data-route="dashboard"]');
     await sleep(60);
     click('#dashboard-strategies .row-more');
     check(!document.querySelector('#utility-popover').hidden, 'campaign overflow menu closed immediately');
-    check(document.querySelector('#utility-popover').textContent.includes('查看 Evidence'), 'campaign overflow menu did not open');
+    check(document.querySelector('#utility-popover').textContent.includes('查看证据'), 'campaign overflow menu did not open');
     document.querySelector('#utility-popover').hidden = true;
 
     click('[data-route="agent"]');
-    click('#agent-close');
-    check(document.body.classList.contains('agent-collapsed'), 'agent did not close on desktop');
-    click('[data-route="agent"]');
-    check(!document.body.classList.contains('agent-collapsed'), 'agent did not reopen');
+    await sleep(80);
+    check(location.hash === '#agent', 'Agent OS did not open the dedicated route');
+    check(Boolean(document.querySelector('.aw-shell')), 'three-pane Agent workspace missing: '+JSON.stringify({
+      hash:location.hash,route:state.route,renderType:typeof renderAgentWorkspace,
+      hasAsset:!!document.querySelector('script[src$="agent-workspace.js"]'),
+      hasBody:!!document.getElementById('agent-body'),
+      hasForm:!!document.getElementById('agent-form'),
+      goName:go.name,renderName:render.name,
+      bodyAgentRoute:document.body.classList.contains('agent-workspace-route'),
+      view:document.getElementById('view')?.textContent?.slice(0,75)
+    }));
+    check(Boolean(document.querySelector('#agent-workspace-threads')), 'conversation list missing');
+    check(Boolean(document.querySelector('#aw-tool-list')), 'toolkit panel missing');
+    check(Boolean(document.querySelector('#aw-chat-mount #agent-body')), 'real chat body not mounted');
+    click('#aw-new-session');
+    check(document.querySelectorAll('[data-aw-thread]').length >= 2, 'new conversation was not created');
+    click('[data-aw-prompt]');
+    check(Boolean(document.querySelector('#agent-input').value), 'quick suggestion did not fill composer');
 
     const agentInput = document.querySelector('#agent-input');
     agentInput.value = '帮我分析增长机会';
     document.querySelector('#agent-form').requestSubmit();
     await sleep(40);
     check(document.querySelector('#agent-body').textContent.includes('帮我分析增长机会'), 'agent did not render user message');
-    check(document.querySelector('#agent-body').textContent.includes('Population'), 'agent did not render demo response');
+    check(document.querySelector('#agent-body').textContent.includes('人群规模'), 'agent did not render localized demo response');
 
     const beforeMode = document.querySelector('#agent-mode').textContent;
-    click('#agent-mode');
-    check(document.querySelector('#agent-mode').textContent !== beforeMode, 'agent mode did not change');
+    click('#aw-mode');
+    check(document.querySelector('#agent-mode').textContent !== beforeMode, 'workspace mode did not change');
+    await confirmFirstPartyUiControls({ui_actions:[{step_index:0,kind:'control',target:'open_search'}]});
+    check(document.body.dataset.agentLastUiConfirmation.includes('浏览器已验证'),
+      'first-party UI action was not verified in browser');
+    check(!document.querySelector('#command-modal').hidden, 'controlled search command did not open');
+    document.querySelector('#command-modal').hidden = true;
+    click('[data-route="dashboard"]');
+    await sleep(80);
+    check(Boolean(document.querySelector('#agent-sidecar #agent-body')), 'Agent chat not returned to sidecar');
+    click('#agent-close');
+    check(document.body.classList.contains('agent-collapsed'), 'agent sidecar did not close on desktop');
+    openAgent();
+    check(!document.body.classList.contains('agent-collapsed'), 'agent sidecar did not reopen');
 
     click('#product-intro');
     check(!document.querySelector('#intro-modal').hidden, 'product intro did not open');

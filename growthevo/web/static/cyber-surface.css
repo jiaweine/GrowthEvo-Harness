@@ -321,3 +321,28 @@ body.sidebar-collapsed .brand-name:after{color:#e3fcfa}
 #view .form-grid label,#view .studio-form label{color:#acc3d8}
 #view .opportunity-table td,#view .data-table td{background:transparent}
 #view .opportunity-table tr:hover td,#view .data-table tr:hover td{background:rgba(91,181,195,.045)}
+
+/* Live evolution control panel: only trace-backed results, honest empty states. */
+.evo-policy-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:15px 0 12px}
+.evo-policy-facts>div{padding:18px 15px;border:1px solid #2f4857;border-radius:11px;background:#122332}
+.evo-policy-facts span{display:block;color:#91adbd;font-size:11px;margin-bottom:11px}
+.evo-policy-facts strong{font-size:23px;font-weight:720;color:#d9fbf4}
+.evo-policy-note{color:#9fb9cc;font-size:11px;line-height:1.8;overflow-wrap:anywhere;margin:10px 0 0}
+.evo-policy-note code{color:#afe9e6}
+.evo-analyze{margin:16px 0 20px;background:linear-gradient(115deg,#182a3a,#122433)}
+.evo-action-row{display:flex;flex-wrap:wrap;gap:10px;margin:17px 0 10px}
+.evo-action-row button{min-height:38px;padding:8px 18px;font-size:12px}
+.evo-path{display:flex;gap:8px;flex-wrap:wrap;margin-top:17px;border-top:1px solid #2a4054;padding-top:14px;font-size:10px;color:#9bb0c4}
+.evo-path b{color:#52798a;font-weight:400}
+.evo-path .done{color:#85e3d6}
+@media(max-width:760px){.evo-policy-facts{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.evo-policy-facts>div{padding:12px 9px}.evo-policy-facts strong{font-size:18px}.evo-policy-facts span{font-size:9px}}
+
+/* Evaluation shares the same controls and readable evidence surfaces. */
+.evo-action-row button:disabled{opacity:.5;cursor:not-allowed}
+.evo-card .evo-action-row{margin-top:16px}
+.evo-card code{overflow-wrap:anywhere}
+
+/* Keep dense product evidence legible across workspaces. */
+.evo-source,.eval-cell span,.studio-step span,.field label,.metric-chip span{font-size:11px;line-height:1.6}
+.eval-cell strong{font-size:14px;line-height:1.5}
+.evo-head strong,.studio-step strong{font-size:13px}

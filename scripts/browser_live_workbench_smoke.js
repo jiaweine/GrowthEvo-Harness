@@ -37,13 +37,13 @@
       const ready = await waitFor(() => runtimeAvailability === 'ready');
       check(ready, 'runtime not ready: ' + runtimeAvailability);
 
-      await visit('campaigns', 'Campaign Registry');
-      await visit('evidence', 'Locked Evidence');
-      await visit('execution', 'Execution Boundary');
-      await visit('data', 'Recent Decision Log');
-      await visit('integrations', 'Runtime Connector Registry');
-      await visit('settings', 'Runtime Configuration');
-      await visit('campaignStudio', 'Campaign Draft');
+      await visit('campaigns', '策略与执行');
+      await visit('evidence', '智能与证据');
+      await visit('execution', '执行中心');
+      await visit('data', '数据中心');
+      await visit('integrations', '集成与渠道');
+      await visit('settings', '设置');
+      await visit('campaignStudio', '活动草案');
 
       const form = document.querySelector('#live-campaign-form');
       check(Boolean(form), 'live campaign form missing');

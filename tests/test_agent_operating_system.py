@@ -17,6 +17,9 @@ class FakeModel:
         self.actions = list(actions)
         self.inputs = []
 
+    def generate(self, **kwargs):
+        return asyncio.run(self.agenerate(**kwargs))
+
     async def agenerate(self, *, system, user, schema):
         assert "UNTRUSTED" in system
         assert schema["additionalProperties"] is False
@@ -84,7 +87,7 @@ def test_model_directed_read_navigation_finish_and_trace():
     )
     operator = GrowthOperator(model, make_tools(state), traces)
     result = run(operator)
-    assert result["status"] == "completed", result["message"]
+    assert result["status"] == "awaiting_ui_confirmation", result["message"]
     assert result["tool_calls"] == 2
     assert result["navigation"] == "campaignStudio"
     assert result["steps"][0]["section"] == "opportunities"
@@ -108,19 +111,49 @@ def test_user_level_decision_data_is_not_exported_to_model():
     assert "private@example.com" not in feedback
 
 
-def test_user_level_decision_data_is_not_exported_to_model():
+def test_browser_control_is_a_pending_verified_ui_intent_not_server_success():
     tools = make_tools(ReferenceProductState())
-    tools.readers["decisions"] = lambda: [
-        {"decision_id": "safe-id", "action_id": "NO_TREATMENT",
-         "entity_id": "private-customer", "context": {"email": "private@example.com"}}
+    result = run(GrowthOperator(FakeModel(
+        step("workspace.read", {"section": "dashboard"}),
+        step("ui.control", {"command": "open_search"}),
+        finish("I opened the search panel"),
+    ), tools, AgentTraceStore()))
+    assert result["status"] == "awaiting_ui_confirmation"
+    assert result["ui_commands"] == ["open_search"]
+    assert result["steps"][1]["outcome"] == "ui_pending"
+    assert result["steps"][1]["ui_command"] == "open_search"
+    assert result["steps"][1]["effect"] == "ui_intent"
+
+    denied = run(GrowthOperator(FakeModel(
+        step("ui.control", {"command": "open_search"})
+    ), tools, AgentTraceStore()))
+    assert denied["status"] == "blocked"
+    assert denied["ui_commands"] == []
+
+    external = run(GrowthOperator(FakeModel(
+        step("workspace.read", {"section": "dashboard"}),
+        step("ui.control", {"command": "javascript:fetch('https://evil.test')"})
+    ), tools, AgentTraceStore()))
+    assert external["status"] == "blocked"
+    assert external["ui_commands"] == []
+
+
+def test_evolution_readiness_only_counts_actual_trace_rows():
+    authority = EvolutionAuthority()
+    rows = [
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        for i in range(7)
     ]
-    model = FakeModel(step("workspace.read", {"section": "decisions"}), finish())
-    result = run(GrowthOperator(model, tools, AgentTraceStore()))
-    assert result["status"] == "completed"
-    feedback = model.inputs[1]["previous_steps"][0]["feedback"]
-    assert "safe-id" in feedback
-    assert "private-customer" not in feedback
-    assert "private@example.com" not in feedback
+    rows += [{"policy_fingerprint": authority.active.fingerprint, "run_id": "demo_1", "status": "completed", "steps": []}]
+    readiness = authority.readiness(rows)
+    assert readiness["trace_count"] == 7
+    assert readiness["required_trace_count"] == 8
+    assert readiness["enough_traces"] is False
+    assert readiness["candidate_count"] == 0
+    ready = authority.readiness([{"policy_fingerprint": authority.active.fingerprint, "run_id": "op_8", "status": "completed", "steps": []}] + rows)
+    assert ready["enough_traces"] is True
+    assert ready["step_limit_count"] == 7
+    assert ready["completed_count"] == 1
 
 
 def test_mutation_needs_consent_and_prior_workspace_observation():
@@ -144,7 +177,7 @@ def test_mutation_needs_consent_and_prior_workspace_observation():
                                        finish("Draft created")),
                              make_tools(state), AgentTraceStore())
     response = run(allowed, allow_drafts=True)
-    assert response["status"] == "completed", response["message"]
+    assert response["status"] == "awaiting_ui_confirmation", response["message"]
     assert response["has_draft_write"]
     assert len(state.campaigns()) == before + 1
     assert state.campaigns()[0]["status"] == "Draft"
@@ -186,7 +219,7 @@ def test_draft_tool_uses_existing_request_validator_and_control_action():
                       step("campaign.draft", draft), finish())
     result = run(GrowthOperator(model, make_tools(state), AgentTraceStore()),
                  allow_drafts=True)
-    assert result["status"] == "completed"
+    assert result["status"] == "awaiting_ui_confirmation"
     assert state.campaigns()[0]["candidate_action_ids"] == [
         "NO_TREATMENT", "push_reminder"
     ]
@@ -204,11 +237,100 @@ def test_provider_failure_is_not_silent_success():
     assert "private provider token" not in result["message"]
 
 
+def test_heldout_eval_does_not_lock_live_operator_or_share_mutable_claims():
+    from threading import Thread
+
+    authority = EvolutionAuthority()
+    candidate = authority.propose([
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        for i in range(8)
+    ])
+    assert candidate is not None
+
+    def evaluate_live(baseline, proposal):
+        observed = []
+        thread = Thread(target=lambda: observed.append(authority.snapshot()),
+                        daemon=True)
+        thread.start()
+        thread.join(timeout=2)
+        assert not thread.is_alive(), "held-out replay blocked live policy reads"
+        assert observed[0]["fingerprint"] == baseline.fingerprint
+        assert authority.candidates()[0]["status"] == "evaluating"
+        # Another evaluator may not run the same candidate concurrently.
+        with pytest.raises(ValueError, match="already been evaluated"):
+            authority.evaluate(candidate.id, lambda a, b: {})
+        return {"baseline_success": 0.6, "candidate_success": 0.9,
+                "baseline_violations": 0, "candidate_violations": 0,
+                "baseline_cost": 1, "candidate_cost": 1.04,
+                "sample_size": 40, "evidence_id": "locked-independent-evidence"}
+
+    result = authority.evaluate(candidate.id, evaluate_live)
+    assert result.status == "awaiting_shadow_canary"
+    assert result.evaluation["candidate_success"] == 0.9
+
+
+def test_heldout_evaluator_failure_releases_claim_without_fabricated_results():
+    authority = EvolutionAuthority()
+    candidate = authority.propose([
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        for i in range(8)
+    ])
+    assert candidate is not None
+
+    def offline_failure(_baseline, _proposal):
+        raise RuntimeError("isolated replay unavailable")
+
+    with pytest.raises(RuntimeError, match="unavailable"):
+        authority.evaluate(candidate.id, offline_failure)
+    assert candidate.status == "requires_independent_eval"
+    assert candidate.evaluation is None
+    assert authority.active.step_budget == 6
+
+
+def test_heldout_results_are_rejected_if_active_parent_changes_during_replay():
+    authority = EvolutionAuthority()
+    step_traces = [
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_limited_{i}", "status": "step_limit", "steps": []}
+        for i in range(8)
+    ]
+    candidate = authority.propose(step_traces)
+    assert candidate is not None
+    read_traces = [
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_observed_{i}", "status": "completed",
+         "steps": [{"tool": "workspace.read", "section": "opportunities", "outcome": "ok"}]}
+        for i in range(8)
+    ]
+    second = authority.propose(read_traces)
+    assert second is not None
+
+    def metrics(_baseline, _proposal):
+        return {"baseline_success": 0.60, "candidate_success": 0.85,
+                "baseline_violations": 0, "candidate_violations": 0,
+                "baseline_cost": 1, "candidate_cost": 1,
+                "sample_size": 40, "evidence_id": "verified-independent-replay"}
+
+    authority.evaluate(second.id, metrics)
+
+    def stale_replay(baseline, proposal):
+        assert baseline.step_budget == 6
+        assert proposal.step_budget == 7
+        authority.promote(second.id, operator_approved=True,
+                          shadow_passed=True, canary_passed=True,
+                          evidence_reference="separate-human-canary-evidence")
+        return metrics(baseline, proposal)
+
+    with pytest.raises(ValueError, match="active policy changed"):
+        authority.evaluate(candidate.id, stale_replay)
+    assert candidate.status == "stale_evaluation"
+    assert candidate.evaluation is None
+    assert authority.active.preferred_first_read == "opportunities"
+
+
 def test_evolution_archives_descendants_only_after_external_evidence():
     authority = EvolutionAuthority()
 
     def traces(count):
-        return [{"run_id": f"op_real_{i}", "status": "step_limit",
+        return [{"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_real_{i}", "status": "step_limit",
                  "steps": [{"tool": "workspace.read", "section": "opportunities",
                             "outcome": "ok"}]} for i in range(count)]
 
@@ -256,7 +378,7 @@ def test_evolution_archives_descendants_only_after_external_evidence():
 def test_evolution_rejects_unmeasured_or_regressive_changes():
     authority = EvolutionAuthority()
     candidate = authority.propose([
-        {"run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_{i}", "status": "step_limit", "steps": []}
         for i in range(8)
     ])
     assert candidate is not None
@@ -304,7 +426,7 @@ def test_paired_replay_evaluates_actual_agent_loops_and_candidate_budget():
     )
     authority = EvolutionAuthority()
     candidate = authority.propose([
-        {"run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        {"policy_fingerprint": authority.active.fingerprint, "run_id": f"op_{i}", "status": "step_limit", "steps": []}
         for i in range(8)
     ])
     assert candidate is not None
@@ -340,6 +462,11 @@ def test_web_operator_unconfigured_fails_closed(monkeypatch):
         assert client.post("/api/agent/run", json={
             "goal": "Find incremental impact", "allow_draft_writes": "yes"
         }).status_code == 422
+        readiness = client.get("/api/evolution/readiness")
+        assert readiness.status_code == 200
+        assert readiness.json()["mode"] == "demo"
+        assert readiness.json()["trace_count"] == 0
+        assert client.post("/api/evolution/analyze").status_code == 409
 
 
 
@@ -372,7 +499,7 @@ def test_live_api_executes_real_model_tool_loop(monkeypatch):
             "allow_draft_writes": False
         })
         assert response.status_code == 200
-        assert response.json()["status"] == "completed"
+        assert response.json()["status"] == "awaiting_ui_confirmation"
         assert response.json()["navigation"] == "experiments"
         assert len(response.json()["steps"]) == 2
         traces = client.get("/api/harness/runs").json()
@@ -380,3 +507,14 @@ def test_live_api_executes_real_model_tool_loop(monkeypatch):
         assert traces[0]["run_id"] == response.json()["run_id"]
         assert client.get("/api/evolution/candidates").json() == []
         assert client.get("/api/evolution/policy").json()["step_budget"] == 6
+        readiness = client.get("/api/evolution/readiness").json()
+        assert readiness["mode"] == "live"
+        assert readiness["trace_count"] == 1
+        analysis = client.post("/api/evolution/analyze")
+        assert analysis.status_code == 200
+        assert analysis.json()["created"] is False
+        assert analysis.json()["readiness"]["trace_count"] == 1
+        assert analysis.json()["trace_count"] == 1
+        assert analysis.json()["candidate_created"] is False
+        assert analysis.json()["candidate_count"] == 0
+        assert analysis.json()["evaluation_required"] is True

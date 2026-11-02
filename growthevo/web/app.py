@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -33,7 +34,7 @@ from .product_data import (
     opportunities,
 )
 from .runtime import RuntimeSettings, postgres_pool_config_from_env
-from .schemas import AgentPlanRequest, AgentRunRequest, ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest
+from .schemas import AgentPlanRequest, AgentRunRequest, AgentUiConfirmation, ApprovalDecisionRequest, CampaignDraftRequest, DecisionRequest
 
 STATIC_DIR = Path(__file__).with_name("static")
 MAX_API_BODY_BYTES = 1_000_000
@@ -218,6 +219,19 @@ def create_app() -> Any:
         decision_engine = ReferenceDecisionEngine()
         product_state = ReferenceProductState()
 
+    replay_suite = None
+    replay_path = os.getenv("GROWTHEVO_AGENT_BENCHMARK_PATH", "").strip()
+    replay_digest = os.getenv("GROWTHEVO_AGENT_BENCHMARK_SHA256", "").strip()
+    if (replay_path or replay_digest) and not settings.synthetic_data:
+        from growthevo.agent_os.manifest import LockedReplaySuite
+        try:
+            replay_suite = LockedReplaySuite(replay_path, replay_digest)
+        except Exception as exc:
+            if persistence_store is not None:
+                persistence_store.close()
+            raise RuntimeError("configured offline evaluation manifest is invalid") from exc
+
+
     # Demo is credential-free by contract and never reaches an external model,
     # even if API keys leak into its environment. API/production activation needs
     # a complete Key + explicitly pinned model pair. Build this last so failures
@@ -397,14 +411,6 @@ def create_app() -> Any:
     # leaves CORS outside it. Rejections therefore retain the exact configured
     # Access-Control-Allow-Origin and remain readable by the Pages UI.
     app.add_middleware(ApiBodyLimitMiddleware, max_bytes=MAX_API_BODY_BYTES)
-    if settings.cors_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=list(settings.cors_origins),
-            allow_credentials=False,
-            allow_methods=["GET", "POST", "OPTIONS"],
-            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
-        )
 
     @app.middleware("http")
     async def runtime_headers(request: Any, call_next: Any) -> Any:
@@ -468,6 +474,17 @@ def create_app() -> Any:
         if is_api:
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    # Keep CORS outside authentication/readiness early responses too.
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(settings.cors_origins),
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+        )
+
 
     @app.get("/api/health", tags=["system"])
     def health() -> dict[str, object]:
@@ -555,6 +572,77 @@ def create_app() -> Any:
     def evolution_policy() -> dict[str, Any]:
         return evolution_authority.snapshot()
 
+    @app.get("/api/evolution/readiness", tags=["evolution"])
+    def evolution_readiness() -> dict[str, Any]:
+        if settings.synthetic_data:
+            return {
+                "mode": "demo", "trace_count": 0, "required_trace_count": 8,
+                "step_limit_count": 0, "completed_count": 0,
+                "candidate_count": 0, "enough_traces": False,
+                "evaluation_runner": "independent_offline_only",
+                "promotion": "separate_shadow_canary_and_human_approval",
+                "durability": "process_local",
+                "evaluation_available": False,
+            }
+        return evolution_authority.readiness(agent_traces.recent(100)) | {
+            "mode": "live",
+            "evaluation_available": replay_suite is not None and llm_pool is not None,
+            "evaluation_suite": replay_suite.suite_id if replay_suite else None,
+            "evaluation_digest": replay_suite.digest if replay_suite else None,
+        }
+
+    @app.post("/api/evolution/analyze", tags=["evolution"])
+    def evolution_analyze() -> dict[str, Any]:
+        if settings.synthetic_data:
+            raise HTTPException(status_code=409, detail="Demo traces cannot generate real evolution candidates")
+        recent = agent_traces.recent(100)
+        candidate = evolution_authority.propose(recent)
+        return {
+            "trace_count": evolution_authority.readiness(recent)["trace_count"],
+            "candidate_created": candidate is not None,
+            "candidate_id": candidate.id if candidate else None,
+            "candidate_count": len(evolution_authority.candidates()),
+            "policy_fingerprint": evolution_authority.snapshot()["fingerprint"],
+            "evaluation_required": True,
+            "durability": "process_local",
+            "created": candidate is not None,
+            "candidate": asdict(candidate) if candidate is not None else None,
+            "readiness": evolution_authority.readiness(recent),
+            "candidates": evolution_authority.candidates(),
+            "next_gate": "independent_offline_evaluation",
+            "message": (
+                "Created a bounded candidate; independent offline evaluation is required."
+                if candidate is not None else
+                "No eligible new proposal from the observed runs; no improvement has been claimed."
+            ),
+        }
+
+    @app.post("/api/evolution/candidates/{candidate_id}/evaluate", tags=["evolution"])
+    async def evaluate_candidate(candidate_id: str) -> dict[str, Any]:
+        if settings.synthetic_data:
+            raise HTTPException(status_code=409, detail="Demo candidates cannot receive real evaluation evidence")
+        if replay_suite is None or llm_pool is None:
+            raise HTTPException(status_code=503, detail="Independent offline evaluation is not configured")
+        if not any(item["id"] == candidate_id for item in evolution_authority.candidates()):
+            raise HTTPException(status_code=404, detail="candidate not found")
+        from starlette.concurrency import run_in_threadpool
+
+        try:
+            # Use only server-owned task snapshots and a fresh provider pool.
+            # The client cannot submit metrics, callbacks or executable code.
+            evaluator = partial(replay_suite.evaluate, pool_factory=build_provider_pool_from_env)
+            candidate = await run_in_threadpool(evolution_authority.evaluate, candidate_id, evaluator)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail="Candidate is not eligible or evaluation evidence was rejected") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Offline evaluation failed; no result was accepted. Retry is safe.") from exc
+        return {
+            "candidate": asdict(candidate), "suite_id": replay_suite.suite_id,
+            "evidence_scope": "offline_tool_and_route_contracts",
+            "promotion_performed": False,
+        }
+
+
     @app.get("/api/agent/tools", tags=["agent"])
     def agent_tools() -> list[dict[str, str]]:
         return operator_tools.describe()
@@ -572,6 +660,17 @@ def create_app() -> Any:
             allow_drafts=request.allow_draft_writes,
             max_steps=request.max_steps,
         )
+
+    @app.post("/api/agent/runs/{run_id}/ui-confirmation", tags=["agent"])
+    def confirm_agent_ui(run_id: str, request: AgentUiConfirmation) -> dict[str, Any]:
+        try:
+            return agent_traces.confirm_ui(
+                run_id, request.token, [item.model_dump() for item in request.receipts]
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="run confirmation not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/api/agent/plan", tags=["agent"])
     async def plan(request: AgentPlanRequest) -> dict[str, Any]:

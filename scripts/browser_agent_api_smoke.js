@@ -30,7 +30,7 @@
     const input = document.querySelector('#agent-input');
     input.value = '查看当前工作区';
     document.querySelector('#agent-form').requestSubmit();
-    const unavailable = await waitFor(() => document.querySelector('#agent-body').textContent.includes('model_unavailable'));
+    const unavailable = await waitFor(() => Boolean(document.querySelector('#agent-body [data-agent-run-status="model_unavailable"]')));
     check(unavailable, 'unconfigured execution must report no model and no actions');
     document.querySelector('#agent-mode').click();
     check(document.querySelector('#agent-mode').textContent.includes('策略模式'), 'failed to switch to conservative planner');
@@ -40,13 +40,38 @@
     check(rendered, 'real API agent plan card did not render');
     const cards = Array.from(document.querySelectorAll('.agent-plan-card'));
     const cardText = cards[cards.length - 1]?.textContent || '';
-    check(cardText.includes('Deterministic 安全规划'), 'safe plan status missing');
+    check(cardText.includes('规则安全规划'), 'safe plan status missing');
     check(cardText.includes('新用户 7 日首购增量策略'), 'strategy title missing from live API result');
-    check(cardText.includes('NO_TREATMENT vs 首单免邮'), 'experiment direction missing from live API result');
-    check(cardText.includes('Shadow preflight'), 'next safety gate missing from live API result');
+    check(cardText.includes('不触达 对照 首单免邮'), 'experiment direction missing from live API result');
+    check(cardText.includes('灰度前检查'), 'next safety gate missing from live API result');
     check(runtimeAvailability === 'ready', 'successful agent plan changed global runtime state');
 
     const realApi = api;
+    const receiptRequests=[];
+    api=async(path,options={})=>{
+      if(path.endsWith('/ui-confirmation')){
+        receiptRequests.push(JSON.parse(options.body));
+        return {status:'ui_confirmed'};
+      }
+      return realApi(path,options);
+    };
+    await renderAgentOperation({run_id:'op_browser_contract',status:'awaiting_ui_confirmation',
+      message:'等待浏览器操作',steps:[],ui_confirmation_token:'browser-fixture-token',
+      ui_actions:[{step_index:0,kind:'navigate',target:'campaignStudio'},
+        {step_index:1,kind:'control',target:'focus_campaign_name'}]});
+    check(document.activeElement?.id==='live-campaign-name','controlled form did not retain focus');
+    check(receiptRequests.length===1,'UI receipts were not sent back to the API');
+    check(receiptRequests[0]?.receipts.every(item=>item.status==='confirmed'),'ordered UI operations did not verify');
+    check(receiptRequests[0]?.receipts.map(item=>item.step_index).join(',')==='0,1','UI receipt step order changed');
+    await confirmFirstPartyUiControls({ui_actions:[{step_index:0,kind:'control',target:'open_date_filter'}]});
+    check(document.querySelector('#utility-popover .utility-title')?.textContent==='时间范围','wrong date filter menu');
+    await confirmFirstPartyUiControls({ui_actions:[{step_index:0,kind:'control',target:'open_channel_filter'}]});
+    check(document.querySelector('#utility-popover .utility-title')?.textContent==='渠道','wrong channel filter menu');
+    closeUtilityMenu();
+    await go('agent');
+    check(document.querySelector('[data-agent-run-id="op_browser_contract"]')?.dataset.agentRunStatus==='ui_confirmed',
+      'returning to the Agent workspace discarded the confirmed receipt');
+    api=realApi;
     api = async () => { throw Error('isolated agent fixture failure'); };
     input.value = '触发一次隔离失败';
     document.querySelector('#agent-form').requestSubmit();

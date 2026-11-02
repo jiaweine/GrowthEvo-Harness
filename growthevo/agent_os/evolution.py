@@ -8,6 +8,7 @@ Promotion requires a separate trusted authority and real shadow/canary gates.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+from copy import deepcopy
 from hashlib import sha256
 import json
 from threading import RLock
@@ -61,17 +62,49 @@ class EvolutionAuthority:
         with self._lock:
             return asdict(self.active) | {"fingerprint": self.active.fingerprint}
 
+    def _eligible_traces(self, traces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        recent = []
+        for trace in traces:
+            run_id = trace.get("run_id", "")
+            if (not isinstance(run_id, str) or not run_id.startswith("op_") or run_id in seen
+                or not isinstance(trace.get("steps"), list)
+                or trace.get("policy_fingerprint") != self.active.fingerprint):
+                continue
+            seen.add(run_id)
+            recent.append(trace)
+            if len(recent) == 30:
+                break
+        return recent
+
+    def readiness(self, traces: list[dict[str, Any]]) -> dict[str, Any]:
+        """Explain the real trace gate without manufacturing improvement metrics."""
+        with self._lock:
+            recent = self._eligible_traces(traces)
+            step_limits = sum(t.get("status") == "step_limit" for t in recent)
+            completed = sum(t.get("status") in {"completed", "ui_confirmed"} for t in recent)
+            return {
+                "trace_count": len(recent),
+                "required_trace_count": 8,
+                "step_limit_count": step_limits,
+                "completed_count": completed,
+                "candidate_count": len(self.archive),
+                "active_policy_fingerprint": self.active.fingerprint,
+                "enough_traces": len(recent) >= 8,
+                "evaluation_runner": "independent_offline_only",
+                "promotion": "separate_shadow_canary_and_human_approval",
+                "durability": "process_local",
+            }
+
     def propose(self, traces: list[dict[str, Any]]) -> EvolutionCandidate | None:
         """Mine only actual operator traces; ignore fixtures and unverifiable runs."""
         with self._lock:
-            real = [t for t in traces if str(t.get("run_id", "")).startswith("op_")
-                    and isinstance(t.get("steps"), list)]
-            if len(real) < 8:
+            recent = self._eligible_traces(traces)
+            if len(recent) < 8:
                 return None
-            recent = real[:30]
             step_limited = sum(t.get("status") == "step_limit" for t in recent)
             # A model finish is not evidence of task success; this only mines a candidate.
-            completed = [t for t in recent if t.get("status") == "completed"]
+            completed = [t for t in recent if t.get("status") in {"completed", "ui_confirmed"}]
             new_policy: OperatorPolicy | None = None
             reason = ""
             if step_limited >= 3 and self.active.step_budget < 8:
@@ -105,10 +138,12 @@ class EvolutionAuthority:
     def evaluate(self, candidate_id: str,
                  heldout_evaluator: Callable[[OperatorPolicy, OperatorPolicy], Mapping[str, Any]]
                  ) -> EvolutionCandidate:
-        """Evaluation happens outside the model and must use an independent holdout.
+        """Run independent evaluation WITHOUT holding the policy control lock.
 
-        The evaluator must return measured baseline/candidate task success,
-        safety violation rates, normalized cost and a unique evidence identity.
+        Claim the candidate atomically, run the held-out suite on immutable
+        policy snapshots, then check lineage again before recording evidence.
+        Only one evaluator may claim a candidate at a time. Failed evaluators
+        release their claim, and a changed parent invalidates stale results.
         """
         with self._lock:
             candidate = next((c for c in self.archive if c.id == candidate_id), None)
@@ -116,18 +151,22 @@ class EvolutionAuthority:
                 raise ValueError("candidate is missing or no longer descended from active policy")
             if candidate.status != "requires_independent_eval":
                 raise ValueError("candidate has already been evaluated")
-            measured = dict(heldout_evaluator(self.active, candidate.proposal))
+            baseline, proposal = self.active, candidate.proposal
+            parent = baseline.fingerprint
+            candidate.status = "evaluating"
+
+        try:
+            measured = dict(heldout_evaluator(baseline, proposal))
             expected = {"baseline_success", "candidate_success", "baseline_violations",
                         "candidate_violations", "baseline_cost", "candidate_cost",
                         "sample_size", "evidence_id"}
             if set(measured) != expected:
                 raise ValueError("heldout evidence schema is incomplete")
+            from math import isfinite
             for key in expected - {"sample_size", "evidence_id"}:
                 value = measured[key]
-                if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise ValueError("invalid heldout measurement")
-                from math import isfinite
-                if not isfinite(value) or value < 0:
+                if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not isfinite(value) or value < 0):
                     raise ValueError("heldout measurements must be finite and nonnegative")
             if (not isinstance(measured["sample_size"], int)
                 or isinstance(measured["sample_size"], bool)
@@ -139,6 +178,23 @@ class EvolutionAuthority:
             if any(measured[k] > 1 for k in ("baseline_success", "candidate_success",
                                             "baseline_violations", "candidate_violations")):
                 raise ValueError("invalid probability metric")
+        except BaseException:
+            # Even if the evaluator is cancelled, the candidate remains safely
+            # retryable, with no fabricated result or partially promoted policy.
+            with self._lock:
+                if candidate.status == "evaluating":
+                    candidate.status = (
+                        "requires_independent_eval"
+                        if self.active.fingerprint == parent else "stale_evaluation"
+                    )
+            raise
+
+        with self._lock:
+            if self.active.fingerprint != parent or candidate.parent != parent:
+                candidate.status = "stale_evaluation"
+                raise ValueError("active policy changed during independent evaluation")
+            if candidate.status != "evaluating":
+                raise ValueError("candidate evaluation claim was invalidated")
             candidate.evaluation = measured
             eligible = (
                 measured["candidate_success"] > measured["baseline_success"]
@@ -169,9 +225,9 @@ class EvolutionAuthority:
 
     def candidates(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [
+            return deepcopy([
                 {"id": c.id, "parent": c.parent, "proposal": asdict(c.proposal),
                  "reason": c.reason, "source_count": c.source_count, "status": c.status,
                  "evaluation": c.evaluation}
                 for c in reversed(self.archive)
-            ]
+            ])

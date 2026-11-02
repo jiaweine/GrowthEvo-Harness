@@ -15,6 +15,8 @@ def test_idempotency_header_stays_single_string_in_openapi() -> None:
     parameters = schema["paths"]["/api/decide"]["post"]["parameters"]
     header = next(item for item in parameters if item.get("in") == "header" and item.get("name") == "Idempotency-Key")
     assert header["required"] is False
-    assert header["schema"]["type"] == "string"
-    assert header["schema"]["minLength"] == 1
-    assert header["schema"]["maxLength"] == 256
+    variants = header["schema"].get("anyOf", [header["schema"]])
+    string_schema = next(item for item in variants if item.get("type") == "string")
+    assert all(item.get("type") in {"string", "null"} for item in variants)
+    assert string_schema["minLength"] == 1
+    assert string_schema["maxLength"] == 256
