@@ -150,10 +150,16 @@
     document.querySelector('#utility-popover').hidden = true;
 
     click('[data-route="agent"]');
-    click('#agent-close');
-    check(document.body.classList.contains('agent-collapsed'), 'agent did not close on desktop');
-    click('[data-route="agent"]');
-    check(!document.body.classList.contains('agent-collapsed'), 'agent did not reopen');
+    await sleep(80);
+    check(location.hash === '#agent', 'Agent OS did not open the dedicated route');
+    check(Boolean(document.querySelector('.aw-shell')), 'three-pane Agent workspace missing');
+    check(Boolean(document.querySelector('#agent-workspace-threads')), 'conversation list missing');
+    check(Boolean(document.querySelector('#aw-tool-list')), 'toolkit panel missing');
+    check(Boolean(document.querySelector('#aw-chat-mount #agent-body')), 'real chat body not mounted');
+    click('#aw-new-session');
+    check(document.querySelectorAll('[data-aw-thread]').length >= 2, 'new conversation was not created');
+    click('[data-aw-prompt]');
+    check(Boolean(document.querySelector('#agent-input').value), 'quick suggestion did not fill composer');
 
     const agentInput = document.querySelector('#agent-input');
     agentInput.value = '帮我分析增长机会';
@@ -163,8 +169,15 @@
     check(document.querySelector('#agent-body').textContent.includes('Population'), 'agent did not render demo response');
 
     const beforeMode = document.querySelector('#agent-mode').textContent;
-    click('#agent-mode');
-    check(document.querySelector('#agent-mode').textContent !== beforeMode, 'agent mode did not change');
+    click('#aw-mode');
+    check(document.querySelector('#agent-mode').textContent !== beforeMode, 'workspace mode did not change');
+    click('[data-route="dashboard"]');
+    await sleep(80);
+    check(Boolean(document.querySelector('#agent-sidecar #agent-body')), 'Agent chat not returned to sidecar');
+    click('#agent-close');
+    check(document.body.classList.contains('agent-collapsed'), 'agent sidecar did not close on desktop');
+    openAgent();
+    check(!document.body.classList.contains('agent-collapsed'), 'agent sidecar did not reopen');
 
     click('#product-intro');
     check(!document.querySelector('#intro-modal').hidden, 'product intro did not open');
