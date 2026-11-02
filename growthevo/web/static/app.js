@@ -320,10 +320,20 @@ function renderAgentOperation(result){
 }
 
 function demoAgentResponse(goal){
-  if(/审批|风险/.test(goal))return '我会先检查影响用户、预算、证据等级和最大风险敞口，再把高影响动作送入审批路径。';
-  if(/机会|增量|人群/.test(goal))return '我会优先按 Population × Incremental Lift × Support 排序，并保留 NO_TREATMENT 作为一等候选动作。';
-  if(/实验|验证|canary/i.test(goal))return '建议先定义主指标与 guardrail，再用 Holdout / Canary 收集成熟窗口内的增量证据。';
-  return '已收到。我会把目标、证据、约束和执行边界放在同一条决策链里，并优先选择可验证的下一步。';
+  if(/审批|风险/.test(goal))return '演示建议：先检查受众影响、预算、证据和风险，再将高影响动作送入人工审批。';
+  if(/机会|增量|人群/.test(goal))return '演示建议：结合人群规模、增量效果与证据支持度审视机会，同时保留“不触达”选项。';
+  if(/实验|验证|灰度/.test(goal))return '演示建议：先明确主要指标和风险边界，再通过对照实验收集结果。';
+  return '演示建议：把目标、证据、约束和下一步操作放在同一工作流中。';
+}
+function demoNavigationTarget(goal){
+  // Explicit user-directed preview navigation only; not model inference.
+  if(!/(打开|导航到|带我进入|进入)/.test(goal))return null;
+  if(/自进化|演进/.test(goal))return 'evolution';
+  if(/审批/.test(goal))return 'approvals';
+  if(/实验/.test(goal))return 'experiments';
+  if(/活动|草案/.test(goal))return 'campaignStudio';
+  if(/机会/.test(goal))return 'opportunities';
+  return null;
 }
 
 async function submitAgentPrompt(event){
@@ -339,8 +349,10 @@ async function submitAgentPrompt(event){
   appendAgentMessage('user',goal);
   input.value='';
   if(useDemo){
-    appendAgentMessage('agent',demoAgentResponse(goal));
-    toast('演示建议已生成（未执行任何操作）');
+    const route=demoNavigationTarget(goal);
+    appendAgentMessage('agent',demoAgentResponse(goal)+(route?' 正在打开对应的演示页面；这只是本地导航，并非 AI 模型执行。':''));
+    if(route){go(route);toast('已打开演示页面（未调用模型）');}
+    else toast('演示建议已生成（未调用模型）');
     return;
   }
 
