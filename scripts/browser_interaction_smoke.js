@@ -129,7 +129,7 @@
     click('[data-demo-action="reject-candidate"][data-candidate-id="EV-DEMO"]');
     await sleep(40);
     check(document.body.dataset.lastEvolutionDecision === 'EV-DEMO:rejected', 'evolution reject did not mutate state');
-    check(document.querySelector('#view').textContent.includes('Rejected'), 'rejected candidate status did not render');
+    check(document.querySelector('#view').textContent.includes('已拒绝'), 'rejected candidate status did not render');
 
     click('[data-route="integrations"]');
     await sleep(60);
