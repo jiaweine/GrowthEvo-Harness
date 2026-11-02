@@ -345,6 +345,44 @@ function renderAgentPlan(result){
   target.scrollTop=target.scrollHeight;
 }
 
+async function confirmFirstPartyUiControls(result){
+  const commands=Array.isArray(result&&result.ui_commands)?result.ui_commands:[];
+  if(!commands.length)return;
+  const allowed=new Set(['open_search','open_date_filter','open_channel_filter','focus_campaign_name']);
+  const verified=[];
+  for(const command of commands){
+    if(!allowed.has(command)){verified.push(command+': 拒绝未知命令');continue;}
+    try{
+      let success=false;
+      if(command==='open_search'){
+        openCommand();
+        success=!document.getElementById('command-modal').hidden&&
+          Boolean(document.getElementById('command-input'));
+      }else if(command==='open_date_filter'||command==='open_channel_filter'){
+        const id=command==='open_date_filter'?'date-filter':'channel-filter';
+        document.getElementById(id).click();
+        success=!document.getElementById('utility-popover').hidden;
+      }else if(command==='focus_campaign_name'){
+        go('campaignStudio');
+        const target=await new Promise(resolve=>{
+          const direct=document.getElementById('live-campaign-name');
+          if(direct){resolve(direct);return;}
+          const observer=new MutationObserver(()=>{
+            const node=document.getElementById('live-campaign-name');
+            if(node){observer.disconnect();clearTimeout(timer);resolve(node);}
+          });
+          observer.observe(document.getElementById('view'),{childList:true,subtree:true});
+          const timer=setTimeout(()=>{observer.disconnect();resolve(null);},4000);
+        });
+        if(target){target.focus();success=document.activeElement===target;}
+      }
+      verified.push(command+': '+(success?'浏览器已验证':'未确认界面效果'));
+    }catch(_error){verified.push(command+': 浏览器操作失败');}
+  }
+  appendAgentMessage('agent','界面操作回执（浏览器本地验证）：'+verified.join('；'));
+  document.body.dataset.agentLastUiConfirmation=verified.join('|');
+}
+
 function renderAgentOperation(result){
   const target=$('#agent-body');
   if(!target)return;
@@ -370,6 +408,7 @@ function renderAgentOperation(result){
     'experiments','approvals','evolution','harness','realtime','evidence','execution',
     'dataCenter','integrations','settings']);
   if(approvedRoutes.has(route))go(route);
+  if(Array.isArray(result&&result.ui_commands)&&result.ui_commands.length)void confirmFirstPartyUiControls(result);
 }
 
 function demoAgentResponse(goal){
@@ -388,6 +427,7 @@ async function submitAgentPrompt(event){
   const input=$('#agent-input');
   const goal=input.value.trim();
   if(!goal)return;
+  if(typeof recordAgentWorkspacePrompt==='function')recordAgentWorkspacePrompt(goal);
   appendAgentMessage('user',goal);
   input.value='';
   const session=agentSessions.find(item=>item.id===activeAgentSessionId);
