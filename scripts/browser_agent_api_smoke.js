@@ -40,7 +40,7 @@
     check(rendered, 'real API agent plan card did not render');
     const cards = Array.from(document.querySelectorAll('.agent-plan-card'));
     const cardText = cards[cards.length - 1]?.textContent || '';
-    check(cardText.includes('Deterministic 安全规划'), 'safe plan status missing');
+    check(cardText.includes('规则安全规划'), 'safe plan status missing');
     check(cardText.includes('新用户 7 日首购增量策略'), 'strategy title missing from live API result');
     check(cardText.includes('NO_TREATMENT vs 首单免邮'), 'experiment direction missing from live API result');
     check(cardText.includes('Shadow preflight'), 'next safety gate missing from live API result');
