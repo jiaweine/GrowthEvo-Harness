@@ -143,6 +143,7 @@ jobs:
             test -s "ui-screenshots/${name}.png"
           }
           chrome_shot growthevo-desktop dashboard
+          chrome_shot growthevo-agent-cockpit agent
           chrome_shot growthevo-opportunities opportunities
           chrome_shot growthevo-campaign-studio campaignStudio
           chrome_shot growthevo-experiments experiments
