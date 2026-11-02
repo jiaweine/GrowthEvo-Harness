@@ -40,6 +40,7 @@ TOOL_EFFECTS = {
     "page.navigate": "navigation",
     "campaign.draft": "draft",
     "approval.review": "approval",
+    "ui.control": "ui_intent",
 }
 
 def _contract_args(args: Any, expected: frozenset[str]) -> dict[str, Any]:
@@ -88,6 +89,14 @@ class GrowthTools:
                 read_only=True,
                 description="Request human review; never approve automatically. Args: {approval_id:string}",
             ),
+            ToolSpec(
+                "ui.control", partial(self._dispatch, "ui.control"),
+                read_only=True,
+                description="Ask the first-party browser to open a UI panel. Args: {command:string}. "
+                "Allowed commands: open_search, open_date_filter, open_channel_filter, "
+                "focus_campaign_name. The browser must confirm the actual effect; "
+                "the server reports only pending UI intent.",
+            ),
         )
         for spec in specs:
             self.registry.register(spec)
@@ -130,6 +139,18 @@ class GrowthTools:
             if route not in ROUTES:
                 raise ToolDenied("unknown first-party route")
             return "ok", {"navigation": route}
+
+        if name == "ui.control":
+            args = _contract_args(arguments, frozenset({"command"}))
+            command = _string(args["command"], 40)
+            allowed = {"open_search", "open_date_filter", "open_channel_filter",
+                       "focus_campaign_name"}
+            if command not in allowed:
+                raise ToolDenied("unknown first-party UI control")
+            if not observed:
+                raise ToolDenied("workspace observation required before UI control")
+            return "ui_pending", {"ui_command": command,
+                                  "message": "Browser must independently confirm the UI action."}
 
         if name == "approval.review":
             args = _contract_args(arguments, frozenset({"approval_id"}))
@@ -229,6 +250,7 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
         observed = False
         seen: set[str] = set()
         navigation: str | None = None
+        ui_commands: list[str] = []
         status = "step_limit"
         message = "Reached the tool-call limit; task may be incomplete."
         for _ in range(max_steps):
@@ -295,6 +317,9 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                 if "navigation" in data:
                     navigation = data["navigation"]
                     event["navigation"] = navigation
+                if "ui_command" in data:
+                    ui_commands.append(data["ui_command"])
+                    event["ui_command"] = data["ui_command"]
                 if "draft" in data:
                     event["draft"] = data["draft"]
                 events.append(event)
@@ -315,6 +340,9 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
                 status, message = "tool_failure", "A first-party tool failed: " + type(exc).__name__
                 break
 
+        if status == "completed" and ui_commands:
+            status = "awaiting_ui_confirmation"
+            message = "Server validated UI commands; browser confirmation is still required."
         trace = {"run_id": run_id, "status": status, "steps": events,
                  "tool_calls": len(events), "policy_fingerprint": policy["fingerprint"],
                  "has_draft_write": any(x["effect"] == "draft" and x["outcome"] == "ok" for x in events)}
@@ -322,4 +350,5 @@ Choose exactly ONE tool per turn and use arguments_json as a JSON object string.
         if self.evolution is not None:
             self.evolution.propose(self.traces.recent(30))
         return {**trace, "message": message, "navigation": navigation,
+                "ui_commands": ui_commands,
                 "durability": "process_local", "execution_authority": "typed_first_party_tools"}
