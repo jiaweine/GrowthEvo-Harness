@@ -574,7 +574,14 @@ def create_app() -> Any:
             raise HTTPException(status_code=409, detail="Demo traces cannot generate real evolution candidates")
         recent = agent_traces.recent(30)
         candidate = evolution_authority.propose(recent)
-        return {\n            "trace_count": len(recent),\n            "candidate_created": candidate is not None,\n            "candidate_id": candidate.id if candidate else None,\n            "candidate_count": len(evolution_authority.candidates()),\n            "policy_fingerprint": evolution_authority.snapshot()["fingerprint"],\n            "evaluation_required": True,\n            "durability": "process_local",
+        return {
+            "trace_count": len(recent),
+            "candidate_created": candidate is not None,
+            "candidate_id": candidate.id if candidate else None,
+            "candidate_count": len(evolution_authority.candidates()),
+            "policy_fingerprint": evolution_authority.snapshot()["fingerprint"],
+            "evaluation_required": True,
+            "durability": "process_local",
             "created": candidate is not None,
             "candidate": asdict(candidate) if candidate is not None else None,
             "readiness": evolution_authority.readiness(recent),
