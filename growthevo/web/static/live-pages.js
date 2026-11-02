@@ -264,7 +264,7 @@ campaignStudio=async function liveCampaignStudio(){
   +'</div>'
   +'<div class="card evidence-panel"><div class="surface-title"><div><h2>写入权限</h2><p>提交只创建草案，不会向外部发送。</p></div><span class="soft-badge green">仅保存草案</span></div>'
   +'<div class="evidence-row"><span>接口</span><strong>/api/campaigns/draft</strong></div>'
-  +'<div class="evidence-row"><span>NO_TREATMENT</span><strong>必须保留</strong></div>'
+  +'<div class="evidence-row"><span>不触达对照</span><strong>必须保留</strong></div>'
   +'<div class="evidence-row"><span>外部执行</span><strong>未启用</strong></div>'
   +'<button id="live-campaign-submit" class="primary" type="submit" style="width:100%;margin-top:14px">创建活动草案</button></div>'
   +'</form>';

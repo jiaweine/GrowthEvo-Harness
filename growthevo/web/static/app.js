@@ -12,7 +12,7 @@ function markReferenceFixture(route){
   note.dataset.referenceFixture='true';
   note.className='card';
   note.style.cssText='margin-bottom:10px;padding:9px 12px;border:1px solid #e2d6a6;background:#fffaf0;color:#6f5a16;font-size:10px;line-height:1.5';
-  note.textContent='Reference UI Fixture · 此工作台仍包含静态参考数据，不代表生产状态。服务不可用时不会用样例数据替代。';
+  note.textContent='参考演示 · 此工作台仍包含静态参考数据，不代表生产状态。服务不可用时不会用样例数据替代。';
   view.prepend(note);
 }
 
@@ -55,7 +55,7 @@ function renderAgentOsHero(){
   hero.innerHTML='<div class="os-hero-copy"><div class="os-eyebrow"><span class="os-signal"></span> 智能增长 · 受控操作工作区</div>'
     +'<h2>从指令，到真实行动。<br><em>从执行，到持续进化。</em></h2>'
     +'<p>让 AI 在受控工作空间内观察、选择工具、执行与校验；用真实轨迹发现可改进的策略，经过独立评测再推广。</p>'
-    +'<div class="os-hero-actions"><button class="os-cta" type="button" id="os-start-agent">启动 Agent 操作 <span>↗</span></button>'
+    +'<div class="os-hero-actions"><button class="os-cta" type="button" id="os-start-agent">启动智能体操作 <span>↗</span></button>'
     +'<button class="os-cta-secondary" type="button" id="os-open-evolution">查看进化中心 <span>↗</span></button></div></div>'
     +'<div class="os-flow" aria-label="执行与进化闭环">'
     +'<span class="os-flow-heading">操作闭环 <b>● 过程可追溯</b></span>'
@@ -518,10 +518,20 @@ function bindShellInteractions(){
     }})));
   };
 
-  $('#notification-open').onclick=event=>{
+  $('#notification-open').onclick=async event=>{
     event.stopPropagation();
     const dot=$('#notification-open i');
     if(dot)dot.style.display='none';
+    if(!useDemo){
+      try{
+        const records=await api('/api/approvals');
+        const pending=(Array.isArray(records)?records:[]).filter(item=>item.status==='pending').length;
+        openUtilityMenu('需要关注',[
+          {label:pending?'有 '+pending+' 项待审批':'暂无待审批事项',detail:'来自当前工作区',action:()=>go('approvals')}
+        ]);
+      }catch(_error){toast('暂时无法读取待办事项，请检查工作区连接');}
+      return;
+    }
     openUtilityMenu('需要关注',[
       {label:'2 个活动待审批',detail:'查看风险与证据',action:()=>go('approvals')},
       {label:'实验结果已成熟',detail:'查看增量结果',action:()=>go('experiments')},

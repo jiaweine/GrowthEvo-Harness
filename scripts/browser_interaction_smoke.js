@@ -34,7 +34,7 @@
 
     click('#channel-filter');
     click('#utility-popover [data-utility-index="1"]');
-    check(document.querySelector('#channel-filter-label').textContent === 'App Push', 'channel filter did not change');
+    check(document.querySelector('#channel-filter-label').textContent === '应用推送', 'channel filter did not change');
 
     click('#notification-open');
     check(document.querySelector('#utility-popover').textContent.includes('待审批'), 'notification menu missing content');
@@ -99,7 +99,7 @@
     await sleep(60);
     click('[data-demo-action="preflight"]');
     check(document.body.dataset.lastPreflight === 'pass', 'preflight did not run');
-    check(document.querySelector('#demo-preflight-result').textContent.includes('PASS'), 'preflight result did not render');
+    check(document.querySelector('#demo-preflight-result').textContent.includes('通过'), 'preflight result did not render');
 
     go('realtime');
     await sleep(60);
@@ -140,13 +140,13 @@
     await sleep(60);
     click('[data-demo-action="deployment-check"]');
     check(document.body.dataset.lastDeploymentCheck === 'pass', 'deployment check did not run');
-    check(document.querySelector('#demo-deployment-result').textContent.includes('PASS'), 'deployment check result did not render');
+    check(document.querySelector('#demo-deployment-result').textContent.includes('通过'), 'deployment check result did not render');
 
     click('[data-route="dashboard"]');
     await sleep(60);
     click('#dashboard-strategies .row-more');
     check(!document.querySelector('#utility-popover').hidden, 'campaign overflow menu closed immediately');
-    check(document.querySelector('#utility-popover').textContent.includes('查看 Evidence'), 'campaign overflow menu did not open');
+    check(document.querySelector('#utility-popover').textContent.includes('查看证据'), 'campaign overflow menu did not open');
     document.querySelector('#utility-popover').hidden = true;
 
     click('[data-route="agent"]');

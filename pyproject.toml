@@ -94,6 +94,7 @@ include = ["growthevo*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-q"
 
 [tool.coverage.run]
