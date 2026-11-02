@@ -1,4 +1,17 @@
 /* Agent OS cockpit: a real three-pane workspace, not fabricated chat history. */
+/* Localized tool names are presentation-only; the server still controls permissions. */
+const WORKSPACE_TOOL_LABELS={
+  'workspace.read':'读取工作区',
+  'page.navigate':'打开站内页面',
+  'campaign.draft':'创建活动草案',
+  'approval.review':'申请人工审核',
+  'ui.control':'操作界面控件'
+};
+const WORKSPACE_EFFECT_LABELS={
+  read:'只读',navigation:'站内导航',draft:'需用户授权',
+  approval:'需要人工处理',ui_intent:'待浏览器确认'
+};
+
 const agentWorkspaceSessions=[{id:1,title:'当前会话',html:null}];
 let agentWorkspaceActive=1;
 let agentWorkspaceCounter=1;
@@ -79,8 +92,8 @@ async function agentWorkspaceTelemetry(){
     if(!document.contains(target))return;
     const sections=Array.isArray(tools)?tools:[];
     document.getElementById('aw-tool-list').innerHTML=sections.map(tool=>
-      '<div class="aw-capability"><span>◇</span><div><strong>'+esc(tool.name)+
-      '</strong><small>'+esc(tool.effect)+'</small></div></div>').join('');
+      '<div class="aw-capability"><span>◇</span><div><strong>'+esc(WORKSPACE_TOOL_LABELS[tool.name]||'受控操作')+
+      '</strong><small>'+esc(WORKSPACE_EFFECT_LABELS[tool.effect]||'权限由服务端决定')+'</small></div></div>').join('');
     target.innerHTML='<span>真实运行记录 / 进化准备度</span><strong>'+
       esc(String(readiness.trace_count||0))+' / '+esc(String(readiness.required_trace_count||8))+
       ' 条轨迹</strong><small>候选 '+esc(String(readiness.candidate_count||0))+
