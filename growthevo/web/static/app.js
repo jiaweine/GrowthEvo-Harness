@@ -86,6 +86,7 @@ const AGENT_MODES=['执行模式','策略模式'];
 let utilityMenuActions=[];
 let agentModeIndex=0;
 let agentRequestController=null;
+let agentActiveRunId=null;
 
 function closeUtilityMenu(){
   const pop=$('#utility-popover');
@@ -242,7 +243,9 @@ function renderAgentPlan(result){
 }
 
 async function confirmFirstPartyUiControls(result){
-  const actions=Array.isArray(result&&result.ui_actions)?result.ui_actions:[];
+  if(!useDemo&&result.run_id&&!result.ui_confirmation_token)return;
+  const actions=(Array.isArray(result&&result.ui_actions)?result.ui_actions:[])
+    .filter(action=>action.status!=='confirmed'&&action.status!=='failed');
   if(!actions.length)return;
   const commands={open_search:'打开搜索',open_date_filter:'打开时间筛选',
     open_channel_filter:'打开渠道筛选',focus_campaign_name:'定位活动名称'};
@@ -313,6 +316,7 @@ async function confirmFirstPartyUiControls(result){
 }
 
 const AGENT_STATUS_LABELS={
+  running:'正在执行',interrupted:'已中断，可继续',cancelled:'已取消',
   completed:'操作已结束',needs_approval:'等待人工审批',needs_consent:'需要授权',
   blocked:'已被安全规则阻止',provider_failure:'模型服务不可用',
   tool_failure:'工具执行失败',step_limit:'达到操作步数限制',
@@ -328,6 +332,11 @@ const AGENT_TOOL_LABELS={
 const AGENT_OUTCOME_LABELS={ok:'成功',ui_pending:'等待浏览器核验',
   blocked:'已阻止',needs_approval:'等待审批',needs_consent:'等待授权',
   error:'失败',tool_failure:'工具失败'};
+function agentStepOutcomeLabel(step){
+  if(step.ui_confirmation==='confirmed')return '浏览器已回执';
+  if(step.ui_confirmation==='failed')return '浏览器报告失败';
+  return AGENT_OUTCOME_LABELS[String(step.outcome||'')]||'已记录';
+}
 function agentOperationMessage(status,message){
   const messages={
     awaiting_ui_confirmation:'服务端已校验操作请求，正在等待浏览器执行并报告界面结果。',
@@ -348,9 +357,13 @@ async function renderAgentOperation(result){
   const status=String(result&&result.status||'unknown');
   const message=String(result&&result.message||'没有返回可验证的运行结果');
   const steps=Array.isArray(result&&result.steps)?result.steps:[];
+  if(result.run_id){
+    const previous=target.querySelector('[data-agent-run-id="'+CSS.escape(result.run_id)+'"]');
+    if(previous)previous.closest('.chat-row')?.remove();
+  }
   const details=steps.map((step,index)=>{
     const label=AGENT_TOOL_LABELS[String(step.tool||'')]||'受控操作';
-    const outcome=AGENT_OUTCOME_LABELS[String(step.outcome||'')]||'已记录';
+    const outcome=agentStepOutcomeLabel(step);
     return '<div class="agent-plan-meta"><span>'+esc(String(index+1))+'. '+esc(label)+'</span><span>'+esc(outcome)+'</span></div>';
   }).join('');
   target.insertAdjacentHTML('beforeend',
@@ -361,7 +374,41 @@ async function renderAgentOperation(result){
     +'<small>执行记录来自实际 API 调用；审批、发布和外部发送不会自动完成。</small>'
     +'</article></div></div>');
   target.scrollTop=target.scrollHeight;
-  await confirmFirstPartyUiControls(result);
+  return await confirmFirstPartyUiControls(result);
+}
+
+async function continueAgentExecution(result,signal){
+  for(let round=0;round<8;round++){
+    if(signal?.aborted)throw new DOMException('Cancelled','AbortError');
+    agentActiveRunId=result.run_id||null;
+    const confirmation=await renderAgentOperation(result);
+    if(confirmation?.status!=='ui_confirmed'||!confirmation.resumable)return confirmation||result;
+    if(signal?.aborted)throw new DOMException('Cancelled','AbortError');
+    result=await api('/api/agent/runs/'+encodeURIComponent(agentActiveRunId)+'/resume',{
+      method:'POST',signal,timeoutMs:AGENT_RUN_TIMEOUT_MS,
+      body:JSON.stringify({allow_draft_writes:Boolean($('#agent-draft-consent')?.checked)})
+    });
+  }
+  await renderAgentOperation(result);
+  return result;
+}
+
+async function resumeAgentRun(runId){
+  if(agentRequestController){toast('请先停止当前任务');return;}
+  const controller=new AbortController();
+  agentRequestController=controller;agentActiveRunId=runId;setAgentBusy(true);
+  try{
+    const result=await api('/api/agent/runs/'+encodeURIComponent(runId)+'/resume',{
+      method:'POST',signal:controller.signal,timeoutMs:AGENT_RUN_TIMEOUT_MS,
+      body:JSON.stringify({allow_draft_writes:Boolean($('#agent-draft-consent')?.checked)})
+    });
+    await continueAgentExecution(result,controller.signal);
+    if(state.route==='harness')await harness();
+  }catch(error){
+    toast(error?.status===409?'任务状态已改变，请刷新后重试':'任务暂未继续，请检查连接或模型配置');
+  }finally{
+    agentRequestController=null;agentActiveRunId=null;setAgentBusy(false);
+  }
 }
 
 function demoAgentResponse(goal){
@@ -385,6 +432,7 @@ async function submitAgentPrompt(event){
   event.preventDefault();
   if(agentRequestController){
     agentRequestController.abort('user_cancelled');
+    if(agentActiveRunId)void api('/api/agent/runs/'+encodeURIComponent(agentActiveRunId)+'/cancel',{method:'POST'}).catch(()=>{});
     return;
   }
   const input=$('#agent-input');
@@ -408,7 +456,7 @@ async function submitAgentPrompt(event){
   try{
     const strategyMode=agentModeIndex===1;
     const draftPermission=agentModeIndex===0&&Boolean($('#agent-draft-consent')&&$('#agent-draft-consent').checked);
-    const result=await api(strategyMode?'/api/agent/plan':'/api/agent/run',{
+    let result=await api(strategyMode?'/api/agent/plan':'/api/agent/run',{
       method:'POST',
       body:JSON.stringify(strategyMode
         ? {goal,primary_metric:'incremental_profit',guardrails:[]}
@@ -422,7 +470,7 @@ async function submitAgentPrompt(event){
       const audit=result&&result.planner_audit?result.planner_audit:null;
       toast(audit&&audit.accepted?'智能策略已通过审核':'安全计划已生成');
     }else{
-      await renderAgentOperation(result);
+      result=await continueAgentExecution(result,controller.signal);
       void renderAchievement();
       toast(result.status==='completed'?'智能体操作已返回结果':'智能体操作停止：'+(AGENT_STATUS_LABELS[result.status]||'请查看详情'));
     }
@@ -446,6 +494,7 @@ async function submitAgentPrompt(event){
     }
   }finally{
     if(agentRequestController===controller)agentRequestController=null;
+    agentActiveRunId=null;
     setAgentBusy(false);
   }
 }
@@ -453,7 +502,7 @@ async function submitAgentPrompt(event){
 async function renderAchievement(){
   const target=$('#agent-achievement');
   if(!target)return;
-  // Report observations from the real process-local runtime, not promotional
+  // Report observations from the configured runtime, not promotional
   // uplift numbers or a fixture masquerading as production evidence.
   const isDemo=useDemo;
   target.innerHTML='<div class="achievement-head"><strong>执行与演进观测</strong><button id="achievement-evidence" type="button">证据中心 →</button></div>'

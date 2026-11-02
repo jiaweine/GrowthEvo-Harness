@@ -69,7 +69,8 @@ class EvolutionAuthority:
             run_id = trace.get("run_id", "")
             if (not isinstance(run_id, str) or not run_id.startswith("op_") or run_id in seen
                 or not isinstance(trace.get("steps"), list)
-                or trace.get("policy_fingerprint") != self.active.fingerprint):
+                or trace.get("policy_fingerprint") != self.active.fingerprint
+                or trace.get("status") in {"running", "interrupted", "awaiting_ui_confirmation"}):
                 continue
             seen.add(run_id)
             recent.append(trace)
@@ -135,67 +136,56 @@ class EvolutionAuthority:
             self.archive.append(candidate)
             return candidate
 
-    def evaluate(self, candidate_id: str,
-                 heldout_evaluator: Callable[[OperatorPolicy, OperatorPolicy], Mapping[str, Any]]
-                 ) -> EvolutionCandidate:
-        """Run independent evaluation WITHOUT holding the policy control lock.
-
-        Claim the candidate atomically, run the held-out suite on immutable
-        policy snapshots, then check lineage again before recording evidence.
-        Only one evaluator may claim a candidate at a time. Failed evaluators
-        release their claim, and a changed parent invalidates stale results.
-        """
+    def _claim_evaluation(self, candidate_id: str) -> tuple[OperatorPolicy, OperatorPolicy, str]:
         with self._lock:
             candidate = next((c for c in self.archive if c.id == candidate_id), None)
             if candidate is None or candidate.parent != self.active.fingerprint:
                 raise ValueError("candidate is missing or no longer descended from active policy")
             if candidate.status != "requires_independent_eval":
                 raise ValueError("candidate has already been evaluated")
-            baseline, proposal = self.active, candidate.proposal
-            parent = baseline.fingerprint
             candidate.status = "evaluating"
+            return self.active, candidate.proposal, self.active.fingerprint
 
-        try:
-            measured = dict(heldout_evaluator(baseline, proposal))
-            expected = {"baseline_success", "candidate_success", "baseline_violations",
-                        "candidate_violations", "baseline_cost", "candidate_cost",
-                        "sample_size", "evidence_id"}
-            if set(measured) != expected:
-                raise ValueError("heldout evidence schema is incomplete")
-            from math import isfinite
-            for key in expected - {"sample_size", "evidence_id"}:
-                value = measured[key]
-                if (isinstance(value, bool) or not isinstance(value, (int, float))
-                    or not isfinite(value) or value < 0):
-                    raise ValueError("heldout measurements must be finite and nonnegative")
-            if (not isinstance(measured["sample_size"], int)
-                or isinstance(measured["sample_size"], bool)
-                or measured["sample_size"] < 30):
-                raise ValueError("insufficient independent evaluation samples")
-            if (not isinstance(measured["evidence_id"], str)
-                or len(measured["evidence_id"].strip()) < 12):
-                raise ValueError("missing independent evidence identity")
-            if any(measured[k] > 1 for k in ("baseline_success", "candidate_success",
-                                            "baseline_violations", "candidate_violations")):
-                raise ValueError("invalid probability metric")
-        except BaseException:
-            # Even if the evaluator is cancelled, the candidate remains safely
-            # retryable, with no fabricated result or partially promoted policy.
-            with self._lock:
-                if candidate.status == "evaluating":
-                    candidate.status = (
-                        "requires_independent_eval"
-                        if self.active.fingerprint == parent else "stale_evaluation"
-                    )
-            raise
+    @staticmethod
+    def _validate_evidence(measured: Mapping[str, Any]) -> None:
+        expected = {"baseline_success", "candidate_success", "baseline_violations",
+                    "candidate_violations", "baseline_cost", "candidate_cost",
+                    "sample_size", "evidence_id"}
+        if set(measured) != expected:
+            raise ValueError("heldout evidence schema is incomplete")
+        from math import isfinite
+        for key in expected - {"sample_size", "evidence_id"}:
+            value = measured[key]
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not isfinite(value) or value < 0):
+                raise ValueError("heldout measurements must be finite and nonnegative")
+        if (not isinstance(measured["sample_size"], int)
+            or isinstance(measured["sample_size"], bool)
+            or measured["sample_size"] < 30):
+            raise ValueError("insufficient independent evaluation samples")
+        if (not isinstance(measured["evidence_id"], str)
+            or len(measured["evidence_id"].strip()) < 12):
+            raise ValueError("missing independent evidence identity")
+        if any(measured[k] > 1 for k in ("baseline_success", "candidate_success",
+                                        "baseline_violations", "candidate_violations")):
+            raise ValueError("invalid probability metric")
 
+    def _release_evaluation(self, candidate_id: str, parent: str) -> None:
         with self._lock:
+            candidate = next(c for c in self.archive if c.id == candidate_id)
+            if candidate.status == "evaluating":
+                candidate.status = ("requires_independent_eval" if self.active.fingerprint == parent
+                                    else "stale_evaluation")
+
+    def _finish_evaluation(self, candidate_id: str, parent: str, measured: dict[str, Any]) -> EvolutionCandidate:
+        with self._lock:
+            candidate = next(c for c in self.archive if c.id == candidate_id)
             if self.active.fingerprint != parent or candidate.parent != parent:
                 candidate.status = "stale_evaluation"
                 raise ValueError("active policy changed during independent evaluation")
             if candidate.status != "evaluating":
                 raise ValueError("candidate evaluation claim was invalidated")
-            candidate.evaluation = measured
+            candidate.evaluation = deepcopy(measured)
             eligible = (
                 measured["candidate_success"] > measured["baseline_success"]
                 and measured["candidate_violations"] <= measured["baseline_violations"]
@@ -203,6 +193,30 @@ class EvolutionAuthority:
             )
             candidate.status = "awaiting_shadow_canary" if eligible else "rejected_by_eval"
             return candidate
+
+    def evaluate(self, candidate_id: str,
+                 heldout_evaluator: Callable[[OperatorPolicy, OperatorPolicy], Mapping[str, Any]]
+                 ) -> EvolutionCandidate:
+        baseline, proposal, parent = self._claim_evaluation(candidate_id)
+        try:
+            measured = dict(heldout_evaluator(baseline, proposal))
+            self._validate_evidence(measured)
+        except BaseException:
+            self._release_evaluation(candidate_id, parent)
+            raise
+        return self._finish_evaluation(candidate_id, parent, measured)
+
+    def export_state(self) -> dict[str, Any]:
+        with self._lock:
+            return {"active": asdict(self.active), "archive": [asdict(c) for c in self.archive]}
+
+    @classmethod
+    def from_state(cls, state: dict[str, Any]) -> EvolutionAuthority:
+        authority = cls()
+        authority.active = OperatorPolicy(**state["active"])
+        authority.archive = [EvolutionCandidate(**(item | {"proposal": OperatorPolicy(**item["proposal"])}))
+                             for item in state["archive"]]
+        return authority
 
     def promote(self, candidate_id: str, *, operator_approved: bool,
                 shadow_passed: bool, canary_passed: bool,

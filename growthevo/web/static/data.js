@@ -32,6 +32,8 @@ const PRODUCT_LABELS={
   "ready": "就绪",
   "pending": "待处理",
   "process-local": "进程内存",
+  "process_local": "进程内存",
+  "LLM Provider Pool": "模型服务池",
   "memory": "进程内存",
   "postgresql": "PostgreSQL",
   "reference-only": "仅本地验证",

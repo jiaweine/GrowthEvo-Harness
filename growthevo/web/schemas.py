@@ -32,6 +32,10 @@ class AgentRunRequest(RequestModel):
     max_steps: int | None = Field(default=None, ge=1, le=8)
 
 
+class AgentResumeRequest(RequestModel):
+    allow_draft_writes: StrictBool = False
+
+
 class UiStepReceipt(RequestModel):
     step_index: int = Field(ge=0, le=7, strict=True)
     status: Literal["confirmed", "failed"]

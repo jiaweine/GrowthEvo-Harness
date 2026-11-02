@@ -1,6 +1,6 @@
 # GrowthEvo-Harness · Implementation Status
 
-**Priority capabilities:** [Agent Operating System + Recursive Evolution](AGENT_OPERATING_SYSTEM.md). The model can choose constrained first-party workspace tools, receive real tool feedback and navigate internal pages; evolution candidates derive from recorded traces and require independent gates before activation. Run ledger and candidate archive remain process-local; no production self-editing or high-risk autonomous execution is claimed.
+**Priority capabilities:** [Agent Operating System + Recursive Evolution](AGENT_OPERATING_SYSTEM.md). The model chooses constrained first-party tools and continues only after browser actions report their observations. Configured PostgreSQL stores principal-scoped execution checkpoints, fenced/idempotent draft effects, candidates and shared evaluation claims across restarts and replicas. Development without PostgreSQL remains process-local. Independent evaluation and trusted approval still gate adoption; production self-editing and high-risk autonomous execution are not claimed.
 
 
 GrowthEvo-Harness provides an integrated causal decision and product runtime for incremental user growth. The implementation combines causal effect estimation, constrained policy improvement, off-policy evaluation, locked evidence, guarded LLM proposals, durable product state, production authentication, browser/mobile product surfaces, and self-host recovery.
@@ -23,7 +23,7 @@ GrowthEvo-Harness provides an integrated causal decision and product runtime for
 | **Causal LLM evaluation** | Typed evidence tiers, validation-only candidate selection, deferred one-shot holdout |
 | **Online promotion** | Reference randomized canary controllers, continuous safety, frozen CUPED, planned sequential success, rollback and authority evidence |
 | **Product API** | Stable `/api/*` FastAPI contract, strict failure behavior, realtime decisions, campaigns, approvals, harness/evolution and decision logs |
-| **Durable state** | PostgreSQL-backed decision/idempotency/Campaign/Approval state with migrations, restart recovery and multi-replica concurrency checks |
+| **Durable state** | PostgreSQL-backed business state plus principal-scoped Agent checkpoints, idempotent draft effects, policy archives and evaluation leases; migrations, restart recovery and multi-replica checks |
 | **Production authentication** | Explicit OIDC/JWKS trust contract with signed bearer verification, issuer/audience/expiry validation and fail-closed IdP outage handling |
 | **Web / PWA** | Responsive Growth OS UI, real-browser API integration, strict outage UI, installable PWA shell |
 | **Mobile** | Expo / React Native companion app with official Expo compatibility check, TypeScript gate and production HTTPS transport |
