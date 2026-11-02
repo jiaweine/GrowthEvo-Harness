@@ -152,7 +152,11 @@
     click('[data-route="agent"]');
     await sleep(80);
     check(location.hash === '#agent', 'Agent OS did not open the dedicated route');
-    check(Boolean(document.querySelector('.aw-shell')), 'three-pane Agent workspace missing');
+    check(Boolean(document.querySelector('.aw-shell')), 'three-pane Agent workspace missing: '+JSON.stringify({
+      hash:location.hash,route:state.route,renderType:typeof renderAgentWorkspace,
+      hasAsset:!!document.querySelector('script[src$="agent-workspace.js"]'),
+      view:document.getElementById('view')?.textContent?.slice(0,75)
+    }));
     check(Boolean(document.querySelector('#agent-workspace-threads')), 'conversation list missing');
     check(Boolean(document.querySelector('#aw-tool-list')), 'toolkit panel missing');
     check(Boolean(document.querySelector('#aw-chat-mount #agent-body')), 'real chat body not mounted');
