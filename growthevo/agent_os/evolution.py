@@ -61,6 +61,28 @@ class EvolutionAuthority:
         with self._lock:
             return asdict(self.active) | {"fingerprint": self.active.fingerprint}
 
+    def readiness(self, traces: list[dict[str, Any]]) -> dict[str, Any]:
+        """Explain the real trace gate without manufacturing improvement metrics."""
+        with self._lock:
+            recent = [
+                t for t in traces[:30] if str(t.get("run_id", "")).startswith("op_")
+                and isinstance(t.get("steps"), list)
+            ]
+            step_limits = sum(t.get("status") == "step_limit" for t in recent)
+            completed = sum(t.get("status") == "completed" for t in recent)
+            return {
+                "trace_count": len(recent),
+                "required_trace_count": 8,
+                "step_limit_count": step_limits,
+                "completed_count": completed,
+                "candidate_count": len(self.archive),
+                "active_policy_fingerprint": self.active.fingerprint,
+                "enough_traces": len(recent) >= 8,
+                "evaluation_runner": "independent_offline_only",
+                "promotion": "separate_shadow_canary_and_human_approval",
+                "durability": "process_local",
+            }
+
     def propose(self, traces: list[dict[str, Any]]) -> EvolutionCandidate | None:
         """Mine only actual operator traces; ignore fixtures and unverifiable runs."""
         with self._lock:
