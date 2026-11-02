@@ -574,7 +574,7 @@ def create_app() -> Any:
             raise HTTPException(status_code=409, detail="Demo traces cannot generate real evolution candidates")
         recent = agent_traces.recent(30)
         candidate = evolution_authority.propose(recent)
-        return {
+        return {\n            "trace_count": len(recent),\n            "candidate_created": candidate is not None,\n            "candidate_id": candidate.id if candidate else None,\n            "candidate_count": len(evolution_authority.candidates()),\n            "policy_fingerprint": evolution_authority.snapshot()["fingerprint"],\n            "evaluation_required": True,\n            "durability": "process_local",
             "created": candidate is not None,
             "candidate": asdict(candidate) if candidate is not None else None,
             "readiness": evolution_authority.readiness(recent),
@@ -588,24 +588,6 @@ def create_app() -> Any:
         }
 
 
-    @app.post("/api/evolution/analyze", tags=["evolution"])
-    def analyze_evolution_traces() -> dict[str, Any]:
-        """Explicit operator-requested candidate discovery from ACTUAL traces.
-
-        No fixture data, hidden evaluation, or privileged promotion is involved.
-        This only proposes a bounded, unpromoted policy descendant.
-        """
-        traces = [] if settings.synthetic_data else agent_traces.recent(50)
-        candidate = evolution_authority.propose(traces) if traces else None
-        return {
-            "trace_count": len(traces),
-            "candidate_created": candidate is not None,
-            "candidate_id": candidate.id if candidate else None,
-            "candidate_count": len(evolution_authority.candidates()),
-            "policy_fingerprint": evolution_authority.snapshot()["fingerprint"],
-            "evaluation_required": True,
-            "durability": "process_local",
-        }
 
     @app.get("/api/agent/tools", tags=["agent"])
     def agent_tools() -> list[dict[str, str]]:
