@@ -166,7 +166,7 @@
     document.querySelector('#agent-form').requestSubmit();
     await sleep(40);
     check(document.querySelector('#agent-body').textContent.includes('帮我分析增长机会'), 'agent did not render user message');
-    check(document.querySelector('#agent-body').textContent.includes('Population'), 'agent did not render demo response');
+    check(document.querySelector('#agent-body').textContent.includes('人群规模'), 'agent did not render localized demo response');
 
     const beforeMode = document.querySelector('#agent-mode').textContent;
     click('#aw-mode');
