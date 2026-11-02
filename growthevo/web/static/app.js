@@ -306,7 +306,7 @@ function renderAgentOperation(result){
   target.insertAdjacentHTML('beforeend',
     '<div class="chat-row agent-plan-row"><div class="chat-avatar agent">✦</div><div>'
     +'<div class="chat-name">Growth Agent · 操作记录</div>'
-    +'<article class="agent-plan-card"><div class="agent-plan-head"><strong>'+esc(AGENT_STATUS_LABELS[status]||'请查看操作详情')+'</strong></div>'
+    +'<article class="agent-plan-card" data-agent-run-status="'+esc(status)+'"><div class="agent-plan-head"><strong>'+esc(AGENT_STATUS_LABELS[status]||'请查看操作详情')+'</strong></div>'
     +'<p>'+esc(message)+'</p>'+details
     +'<small>执行记录来自实际 API 调用；审批、发布和外部发送不会自动完成。</small>'
     +'</article></div></div>');
