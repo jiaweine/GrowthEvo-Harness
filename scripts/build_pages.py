@@ -129,7 +129,6 @@ def build(output: Path, source: Path) -> None:
         "responsive.css",
         "fidelity.css",
         "cyber-surface.css",
-        "agent-workspace.css",
         "data.js",
         "auth.js",
         "runtime-ui.js",
@@ -140,7 +139,6 @@ def build(output: Path, source: Path) -> None:
         "pages.js",
         "live-pages.js",
         "app.js",
-        "agent-workspace.js",
         "icon.svg",
     ):
         shutil.copy2(source / name, output / "assets" / name)
