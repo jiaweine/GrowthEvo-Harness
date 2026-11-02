@@ -453,4 +453,14 @@ def test_live_api_executes_real_model_tool_loop(monkeypatch):
         assert len(traces) == 1
         assert traces[0]["run_id"] == response.json()["run_id"]
         assert client.get("/api/evolution/candidates").json() == []
+        analysis = client.post("/api/evolution/analyze")
+        assert analysis.status_code == 200
+        assert analysis.json()["candidate_created"] is False
+        assert analysis.json()["trace_count"] == 0
+        assert analysis.json()["evaluation_required"] is True
         assert client.get("/api/evolution/policy").json()["step_budget"] == 6
+        analyzed = client.post("/api/evolution/analyze")
+        assert analyzed.status_code == 200
+        assert analyzed.json()["trace_count"] == 1
+        assert analyzed.json()["candidate_created"] is False
+        assert analyzed.json()["candidate_count"] == 0
