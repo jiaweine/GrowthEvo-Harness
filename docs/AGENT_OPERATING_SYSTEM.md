@@ -7,6 +7,35 @@ GrowthEvo puts two capabilities at the front of the product:
 
 Causal evidence, consent, budget and the legal action gate are **not** evolvable targets. No product-generation labels are used.
 
+## Interactive Agent OS cockpit and evidence-ready Evolution Lab
+
+The Agent OS navigation now opens a dedicated three-pane Nightfall workspace:
+a browser-session conversation list, live tool-composer/trace panel, and an
+operating-context sidebar. The conversation list is **browser-memory-only** and
+does not imply durable chat threads or automatic cross-turn memory. The same
+existing `POST /api/agent/run` and `POST /api/agent/plan` handlers, consent
+checkbox, cancellation and failure behavior power the expanded workspace.
+
+`ui.control` adds **strictly allowlisted first-party UI intentions**:
+`open_search`, `open_date_filter`, `open_channel_filter`, and
+`focus_campaign_name`. A prior workspace observation is mandatory. The
+server emits `ui_pending` and `awaiting_ui_confirmation`; it cannot claim the
+browser changed until the client performs and verifies the actual action.
+The browser verifies a visible menu, focused input, or matching target state
+and displays the local confirmation separately. This is not unrestricted DOM,
+browser scripting, or cross-site computer use. Page navigation still uses the
+approved route list; Campaign drafts still require user consent and server
+verification.
+
+The Evolution Lab now reads `GET /api/evolution/readiness` for **genuine**
+minimum-trace counts and status, and operators may trigger
+`POST /api/evolution/analyze` to examine their process-local real traces for
+eligible bounded policy candidates. The endpoint fails on synthetic Demo
+data. Running analysis cannot invent evaluations or promote candidates;
+independent offline replay, production shadow/canary attestation and trusted
+approval remain separate gates. No live production self-evolving code is
+claimed. Model-unavailable workspaces honestly show insufficient traces.
+
 ## Implemented execution surface
 
 The live browser sidecar defaults to **执行模式**. It calls POST /api/agent/run, which has a genuine bounded tool-use loop. POST /api/agent/plan remains available as the conservative strategy-only mode.
