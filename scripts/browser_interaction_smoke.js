@@ -171,6 +171,11 @@
     const beforeMode = document.querySelector('#agent-mode').textContent;
     click('#aw-mode');
     check(document.querySelector('#agent-mode').textContent !== beforeMode, 'workspace mode did not change');
+    await confirmFirstPartyUiControls({ui_commands:['open_search']});
+    check(document.body.dataset.agentLastUiConfirmation.includes('浏览器已验证'),
+      'first-party UI action was not verified in browser');
+    check(!document.querySelector('#command-modal').hidden, 'controlled search command did not open');
+    document.querySelector('#command-modal').hidden = true;
     click('[data-route="dashboard"]');
     await sleep(80);
     check(Boolean(document.querySelector('#agent-sidecar #agent-body')), 'Agent chat not returned to sidecar');
