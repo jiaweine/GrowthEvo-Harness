@@ -1,0 +1,64 @@
+/* Nightfall cockpit: practical three-pane conversation workspace inspired by modern
+   multi-agent desks, with real first-party actions and truthful empty states. */
+body.agent-workspace-route .app-shell{grid-template-columns:190px minmax(0,1fr);background:#0a101b}
+body.agent-workspace-route #agent-sidecar{display:none!important}
+body.agent-workspace-route .main-column{min-width:0}
+body.agent-workspace-route #view{padding:0!important;margin:0!important;max-width:none!important}
+body.agent-workspace-route .statusbar{display:none}
+body.agent-workspace-route .topbar{border-bottom:1px solid #253449}
+.aw-shell{display:grid;grid-template-columns:minmax(190px,236px) minmax(0,1fr) minmax(210px,248px);min-height:calc(100dvh - 66px);height:calc(100dvh - 66px);background:#0d1420;color:#e6eefb}
+.aw-conversations,.aw-participants{background:#0e1622;padding:24px 17px;min-width:0;overflow-y:auto}
+.aw-conversations{border-right:1px solid #263449;display:flex;flex-direction:column}
+.aw-participants{border-left:1px solid #263449}
+.aw-panel-title{display:flex;align-items:center;justify-content:space-between;letter-spacing:.13em;color:#b2c0d3;font-size:11px;font-weight:700;margin-bottom:20px}
+.aw-panel-title button{background:#202e42;color:#8fe9e6;border:1px solid #304459;border-radius:11px;font-size:19px;width:32px;height:32px;cursor:pointer}
+.aw-muted{font-size:11px;color:#798da7}
+.aw-thread{display:flex;width:100%;align-items:center;gap:12px;background:transparent;color:#bfcbda;border:1px solid transparent;border-radius:10px;padding:13px 10px;margin:4px 0;text-align:left;cursor:pointer}
+.aw-thread span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aw-thread.active,.aw-thread:hover{background:#1b3444;border-color:#2b5361;color:#edfcff}
+.aw-thread-icon{color:#5bd9da}
+.aw-conversation-footer{margin-top:auto;border-top:1px solid #2a3442;padding-top:20px;color:#91a5bc;font-size:11px;line-height:1.7}
+.aw-conversation-footer strong{font-size:10px;letter-spacing:.14em;color:#a9bbd2}
+.aw-chat{min-width:0;display:flex;flex-direction:column;background:#0b111d}
+.aw-chat-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 24px;border-bottom:1px solid #273449}
+.aw-identity{display:flex;align-items:center;gap:13px}
+.aw-identity strong{display:block;color:#f1f6ff;font-size:14px}
+.aw-identity small{display:block;font-size:10px;color:#8ca3bb;margin-top:4px}
+.aw-agent-icon{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;background:linear-gradient(145deg,#1b6674,#6542ac);color:#bafaf2;font-size:20px}
+.aw-head-actions{display:flex;gap:8px;align-items:center}
+.aw-head-actions button{border:1px solid #2d4157;background:#1a273b;border-radius:9px;color:#c4d5e8;padding:9px 12px;cursor:pointer;font-size:11px}
+.aw-head-actions button:hover{border-color:#68e4e0;color:#fff}
+.aw-messages{display:flex;flex:1;min-height:0;overflow:hidden;padding:24px 24px 4px}
+.aw-messages #agent-body{flex:1;overflow-y:auto;max-height:none;height:auto;background:none;padding:0 8px 10px 0;min-width:0}
+.aw-messages .chat-row{max-width:100%;margin-bottom:18px}
+.aw-messages .bubble{font-size:13px;line-height:1.7;max-width:none;background:#192231;color:#eff5fd;border:1px solid #29374a;border-radius:12px;padding:15px 17px}
+.aw-messages .chat-avatar{flex-shrink:0}
+.aw-messages .agent-onboarding{margin:8% auto 0;max-width:550px}
+.aw-composer-mount{padding:0 20px}
+.aw-composer-mount #agent-form{position:static;display:block;width:100%;box-sizing:border-box;padding:15px;border:1px solid #334154;border-radius:16px;background:#151e2d;box-shadow:none}
+.aw-composer-mount #agent-input{min-height:44px;width:100%;max-width:100%;background:none;color:#f2f7ff}
+.aw-composer-mount .composer-tools{border-top:1px solid #26374a;margin-top:10px}
+.aw-chat-disclaimer{color:#8094aa;font-size:10px;text-align:center;padding:10px 20px 17px;line-height:1.5}
+.aw-participants .aw-group{border-bottom:1px solid #2a3547;padding:0 0 18px;margin-bottom:18px}
+.aw-participants .aw-group h3{color:#a8bcd2;font-size:12px;font-weight:650;letter-spacing:.06em;margin:0 0 14px}
+.aw-participant{border:1px solid transparent;border-radius:10px;display:flex;align-items:center;gap:9px;padding:8px;margin-bottom:6px;font-size:11px;color:#ccd8e8}
+.aw-participant.active{border-color:#326b7d;background:#1a303c}
+.aw-participant .aw-agent-icon{width:30px;height:30px;font-size:15px}
+.aw-participant small{margin-left:auto;color:#74ded7}
+.aw-person{display:grid;place-items:center;border-radius:50%;background:#273a52;width:30px;height:30px;font-size:10px}
+.aw-tool-list{display:grid;gap:9px}
+.aw-capability{display:flex;align-items:center;gap:9px;color:#72d9d7}
+.aw-capability div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.aw-capability strong{color:#e5f0fb;font-weight:500;font-size:11px;white-space:normal;overflow-wrap:anywhere}
+.aw-capability small{color:#8da2b9;font-size:10px}
+.aw-telemetry{display:grid;gap:6px;background:#172535;padding:11px;border-radius:9px;font-size:11px;color:#a2b9ce}
+.aw-telemetry strong{font-size:15px;color:#eafaf8}
+.aw-telemetry small{font-size:10px;color:#849cb4}
+.aw-quick{display:block;width:100%;text-align:left;margin:6px 0;padding:9px 11px;border-radius:8px;border:1px solid #2d4056;background:#1a2637;color:#cedeee;font-size:11px;cursor:pointer}
+.aw-quick:hover{border-color:#68e4e0;color:#fff}
+body.agent-workspace-route #agent-sidecar.open{display:none!important}
+@media(max-width:1380px){.aw-shell{grid-template-columns:185px minmax(0,1fr) 220px}.aw-conversations,.aw-participants{padding:19px 11px}}
+@media(max-width:1120px){body.agent-workspace-route .app-shell{grid-template-columns:80px minmax(0,1fr)}body.agent-workspace-route .sidebar{padding-left:7px;padding-right:7px}body.agent-workspace-route .sidebar .brand-block{overflow:hidden;font-size:0}body.agent-workspace-route .sidebar .nav-item{font-size:0;justify-content:center;padding:13px 8px}body.agent-workspace-route .sidebar .nav-icon{font-size:14px}body.agent-workspace-route .sidebar .sidebar-bottom{display:none}.aw-shell{grid-template-columns:180px minmax(0,1fr) 200px}}
+@media(max-width:840px){.aw-shell{grid-template-columns:180px minmax(0,1fr)}.aw-participants{display:none}.aw-chat-head{padding:14px}.aw-messages{padding:14px 12px 4px}.aw-composer-mount{padding:0 12px}}
+@media(max-width:760px){body.agent-workspace-route .app-shell{grid-template-columns:minmax(0,1fr)}body.agent-workspace-route .sidebar{position:fixed}body.agent-workspace-route .content{padding:0}.aw-shell{height:calc(100dvh - 116px);min-height:calc(100dvh - 116px);grid-template-columns:minmax(0,1fr)}.aw-conversations{display:none}.aw-head-actions{gap:5px}.aw-head-actions button{font-size:10px;padding:7px}.aw-chat-disclaimer{padding:8px}}
+@media(prefers-reduced-motion:reduce){.aw-shell *{scroll-behavior:auto!important;transition:none!important}}
