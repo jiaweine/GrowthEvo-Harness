@@ -247,7 +247,7 @@ def test_mutable_dashboard_fields_are_html_escaped() -> None:
     assert "esc(liveText(x.title))" in live_pages
     assert "esc(liveText(run.run_id))" in live_pages
     assert "esc(liveText(run.status))" in live_pages
-    assert "esc(liveText(item.reason))" in live_pages
+    assert "esc(EVOLUTION_REASON_LABELS[item.reason]||liveText(item.reason))" in live_pages
 
 
 def test_browser_auth_smoke_covers_bearer_and_401_reauthentication() -> None:
@@ -276,7 +276,7 @@ def test_agent_composer_calls_real_api_outside_demo() -> None:
     assert "AGENT_RUN_TIMEOUT_MS=90000" in app
     assert "timeoutMs:strategyMode?AGENT_PLAN_TIMEOUT_MS:AGENT_RUN_TIMEOUT_MS" in app
     assert "renderAgentPlan(result)" in app
-    assert "Deterministic 安全规划" in app
+    assert "规则安全规划" in app
     assert "AI + Critic 已通过" in app
     assert "主工作区隔离" in app
     assert "void probeRuntime()" in app
