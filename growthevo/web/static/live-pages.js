@@ -115,29 +115,69 @@ approvals=async function liveApprovals(){
 
 evolution=async function liveEvolution(){
   if(useDemo)return fixtureEvolutionPage();
-  const [raw,policy]=await Promise.all([
-    api('/api/evolution/candidates'),api('/api/evolution/policy')
+  const [raw,policy,readiness]=await Promise.all([
+    api('/api/evolution/candidates'),api('/api/evolution/policy'),
+    api('/api/evolution/readiness')
   ]);
   const items=Array.isArray(raw)?raw:[];
+  const observed=Number(readiness.trace_count)||0;
+  const required=Number(readiness.required_trace_count)||8;
+  const waiting=Math.max(0,required-observed);
+  const stage=(candidate)=>{
+    const status=String(candidate.status||'requires_independent_eval');
+    if(status==='awaiting_shadow_canary')return '离线评测合格 · 等待独立 Shadow/Canary + 人工授权';
+    if(status==='rejected_by_eval')return '独立评测未通过 · 候选不晋升';
+    if(status==='stale_evaluation')return '父策略已变更 · 旧证据作废';
+    if(status==='evaluating')return '独立离线评测进行中';
+    if(status==='promoted')return '已由可信操作员完成受控晋升';
+    return '待独立离线评测 · 不可直接晋升';
+  };
   const current='<div class="card surface-card"><div class="surface-title"><div>'
-    +'<h2>Active operator policy</h2><p>完成独立评测、Shadow、Canary 和人工批准后，才可推广新的策略。'
-    +' 进程内状态不代表跨实例持久化。</p></div></div>'
-    +'<p>Fingerprint: <code>'+esc(liveText(policy.fingerprint))+'</code>'
-    +' · Step budget: '+esc(liveText(policy.step_budget))+'</p></div>';
-  const cards=items.map(item=>'<div class="card evo-card"><div class="evo-head">'
+    +'<h2>真实进化诊断 / Evolution Diagnostics</h2>'
+    +'<p>直接观察真实 Agent 运行轨迹。分析只会生成候选，不会伪造评测成功，也不会自动推广。</p></div>'
+    +'<span class="soft-badge">LIVE · PROCESS LOCAL</span></div>'
+    +'<div class="stat-strip"><div class="stat-box"><span>已观察真实轨迹</span><strong>'+esc(observed)+'</strong><em>需要至少 '+esc(required)+' 条</em></div>'
+    +'<div class="stat-box"><span>步数受限</span><strong>'+esc(Number(readiness.step_limit_count)||0)+'</strong><em>可用于识别执行瓶颈</em></div>'
+    +'<div class="stat-box"><span>已结束任务</span><strong>'+esc(Number(readiness.completed_count)||0)+'</strong><em>完成状态不等于任务结果验证</em></div>'
+    +'<div class="stat-box"><span>候选改进</span><strong>'+esc(items.length)+'</strong><em>仅真实运行生成</em></div></div>'
+    +'<div class="evidence-row"><span>当前策略指纹</span><strong>'+esc(liveText(policy.fingerprint))+'</strong></div>'
+    +'<div class="evidence-row"><span>最大操作步数</span><strong>'+esc(liveText(policy.step_budget))+'</strong></div>'
+    +'<div class="evidence-row"><span>离线评测</span><strong>仅外部可信运行器 · 当前页面不可晋升</strong></div>'
+    +'<p style="margin:14px 0;color:var(--muted)">'+
+    (waiting?'还差 '+esc(waiting)+' 条真实运行轨迹才达到最小候选挖掘门槛。':'已达到最低运行数量；只有发现明确、未重复的安全变更时才会新建候选。')+
+    '</p><button class="primary" type="button" id="evolution-analyze">分析当前真实轨迹</button>'+
+    '<p id="evolution-analyze-result" role="status" aria-live="polite" style="margin-top:12px;color:var(--muted)"></p></div>';
+  const cards=items.map(item=>'<article class="card evo-card"><div class="evo-head">'
     +'<strong>'+esc(liveText(item.id))+'</strong>'+liveBadge(item.status)+'</div>'
-    +'<div class="evo-problem">来源轨迹：'+esc(liveText(item.source_count))
-    +' · Parent: <code>'+esc(liveText(item.parent))+'</code>'
+    +'<div class="evo-problem"><p><strong>'+esc(stage(item))+'</strong></p>'
+    +'<p>来源真实轨迹：'+esc(liveText(item.source_count))+' · Parent: <code>'+
+    esc(liveText(item.parent))+'</code></p>'
     +'<p>'+esc(liveText(item.reason))+'</p>'
     +'<p>候选策略：'+esc(JSON.stringify(item.proposal||{}))+'</p>'
-    +(item.evaluation?'<p>独立评测：'+esc(JSON.stringify(item.evaluation))+'</p>':
-      '<p>等待独立评测，尚无经过验证的提升结果。</p>')
-    +'</div></div>').join('');
-  $('#view').innerHTML=head('Evolution Lab','从真实失败轨迹构建递归改进候选；没有独立证据就不会声称进化成功。')
+    +(item.evaluation?'<p>独立评测报告：'+esc(JSON.stringify(item.evaluation))+'</p>':
+      '<p>暂无独立评测报告：目前不存在可验证的性能提升结论。</p>')
+    +'</div></article>').join('');
+  $('#view').innerHTML=head('Evolution Lab · 递归自进化','真实执行 → 候选分析 → 独立验证 → Shadow / Canary → 人工批准；每一步都需要证据。')
     +sectionNav(RUNTIME_NAV,'evolution')+current
     +(items.length?'<div class="evolution-list">'+cards+'</div>':
-      emptyState('暂无可验证的进化候选','真实运行轨迹不足，或尚未发现可提议的安全修改。'));
+      emptyState('尚无真实可验证的候选','完成更多 Agent 受控操作后，可以再次执行轨迹分析；不会显示虚构的成功率。'));
   bindProductActions();
+  const analyze=$('#evolution-analyze');
+  if(analyze)analyze.onclick=async()=>{
+    analyze.disabled=true;analyze.textContent='正在分析真实执行轨迹…';
+    const status=$('#evolution-analyze-result');
+    try{
+      const result=await api('/api/evolution/analyze',{method:'POST'});
+      if(status)status.textContent=result.created
+        ?'已生成安全候选 '+result.candidate.id+'，等待独立离线评测，尚未晋升。'
+        :'没有找到符合条件的新候选：轨迹不足、未发现足够的可改进模式，或同类候选已存在。';
+      await evolution();
+    }catch(error){
+      if(status)status.textContent='分析未完成：请检查工作区身份、API 连接与真实执行记录。';
+    }finally{
+      if(document.contains(analyze)){analyze.disabled=false;analyze.textContent='分析当前真实轨迹';}
+    }
+  };
 };
 
 campaigns=async function liveCampaigns(){
