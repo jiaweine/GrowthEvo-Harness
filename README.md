@@ -16,7 +16,7 @@
 </div>
 
 <p align="center">
-  <img src="docs/assets/product/nightfall-dashboard.png" alt="GrowthEvo Nightfall 智能体操作系统主界面：任务控制台、增长驾驶舱与 Agent 操作侧栏" width="100%" />
+  <img src="docs/assets/product/nightfall-agent.png" alt="GrowthEvo Nightfall 智能体工作台：会话列表、任务对话与能力上下文" width="100%" />
 </p>
 <p align="center"><sub>Nightfall 桌面工作台 · 真实浏览器截图（示例业务数据）</sub></p>
 
@@ -64,9 +64,9 @@
 ### 不只是完成今天的任务，还要让下一次更好
 
 <p align="center">
-  <img src="docs/assets/product/nightfall-evolution.png" alt="GrowthEvo Evolution Lab 自进化中心：改进候选、验证阶段与审批状态" width="100%" />
+  <img src="docs/assets/product/nightfall-evolution.png" alt="GrowthEvo 自进化中心：改进候选、验证阶段与审批状态" width="100%" />
 </p>
-<p align="center"><sub>Evolution Lab · 浏览器实拍，候选与数值为演示样例，不代表实际进化收益</sub></p>
+<p align="center"><sub>自进化中心 · 浏览器实拍，候选与数值为演示样例，不代表实际进化收益</sub></p>
 
 
 真正长期有价值的 Agent，不应该每一次都像第一次工作。
@@ -158,7 +158,7 @@ GrowthEvo 的 **Nightfall** 设计语言，不是用大量霓虹装饰来制造�
 </table>
 
 ### 一次真实的产品旅程<p align="center">
-  <img src="docs/assets/product/nightfall-campaign-studio.png" alt="GrowthEvo Campaign Studio：目标、受众、活动设计与实验工作流" width="100%" />
+  <img src="docs/assets/product/nightfall-campaign-studio.png" alt="GrowthEvo 活动设计工作台：目标、受众、活动设计与实验工作流" width="100%" />
 </p>
 <p align="center"><sub>Campaign Studio · 浏览器实拍（演示工作空间）</sub></p>
 
@@ -249,7 +249,7 @@ GROWTHEVO_MODE=demo growthevo-web --host 127.0.0.1 --port 8765
 
 ### GrowthEvo
 
-**From insight to action. From action to evolution.**
+**从洞察到行动，从行动到持续改进。**
 
 <sub>让 AI 真正参与工作，让每一次行动成为下一次进步的起点。</sub>
 
