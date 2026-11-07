@@ -75,7 +75,9 @@ def sample_ratio_diagnostics(
         raise ValueError("SRM arms or weights do not match the experiment")
     total = sum(observed.values())
     expected = {arm: total * weight / 100 for arm, weight in weights.items()}
-    if total < 20:
+    if (total < 20 or min(expected.values()) < 5):
+        # The chi-square approximation is unreliable when an expected
+        # allocation cell is too small. Do not turn it into a "pass".
         return {
             "status": "insufficient_exposures", "p_value": None,
             "chi_square": None, "exposed_total": total,
