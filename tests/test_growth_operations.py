@@ -138,6 +138,41 @@ def test_channel_webhook_rejects_untrusted_or_insecure_hosts():
 
 
 
+
+def test_real_gateway_receipt_requires_prior_submission_and_profile_consent():
+    fake = _FakeStore()
+    service = GrowthOperations(fake, "test")
+    service.create("customers", "customer_real", {
+        "customer_id": "customer_real", "attributes": {"lifecycle": "new"}, "consent": True,
+    })
+    service.create("creatives", "creative_real", {
+        "creative_id": "creative_real", "channel": "email",
+        "title": "Welcome", "body": "Your welcome message",
+    })
+    service.create_journey({
+        "journey_id": "journey_real", "name": "Real welcome",
+        "trigger_event": "signup", "segment_id": None,
+        "steps": [{"channel": "email", "creative_id": "creative_real",
+                   "offer_id": None, "delay_seconds": 0}],
+    })
+    service.activate_journey("journey_real")
+    service.ingest_event(_event("event_real", "customer_real", "signup"))
+    delivery_id = service.process_due()["processed"][0]["delivery_id"]
+    receipt = {"provider_event_id": "receipt_real", "status": "delivered",
+               "occurred_at": datetime.now(timezone.utc).isoformat()}
+    with pytest.raises(GrowthConflict, match="must be submitted"):
+        service.record_receipt(delivery_id, receipt, permit_simulation=False)
+    command = service.reserve_external_submission(delivery_id)
+    assert command["idempotency_key"] == delivery_id
+    with pytest.raises(GrowthConflict, match="already reserved"):
+        service.reserve_external_submission(delivery_id)
+    service.finish_external_submission(delivery_id, accepted=True, reason="gateway accepted")
+    assert service.record_receipt(delivery_id, receipt, permit_simulation=False)["delivery"]["status"] == "delivered"
+    assert service.update_customer("customer_real", {"consent": False})["consent"] is False
+    assert service.ingest_event(_event("event_real_second", "customer_real", "signup"))["new_enrollments"] == 0
+
+
+
 def test_postgres_demo_survives_store_recreation_when_configured():
     database_url = os.getenv("GROWTHEVO_TEST_DATABASE_URL")
     if not database_url:
