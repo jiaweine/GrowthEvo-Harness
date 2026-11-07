@@ -20,7 +20,6 @@ from growthevo.llm.configuration import (
     llm_environment_configured,
 )
 
-from .growth_api import growth_router
 from .growth_store import GrowthConflict, GrowthMissing, GrowthStore
 from .data import build_dashboard_payload
 from .decisioning import (
@@ -160,6 +159,7 @@ def create_app() -> Any:
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import FileResponse, JSONResponse
         from fastapi.staticfiles import StaticFiles
+        from .growth_api import growth_router
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("GrowthEvo web dependencies are not installed. Install: pip install -e '.[web]'") from exc
 
