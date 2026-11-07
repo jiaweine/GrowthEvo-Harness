@@ -345,7 +345,7 @@ def test_growth_workbench_forms_are_bound_to_database_and_existing_nightfall_sty
         "experiment-exposure", "personalization", "offline-evidence",
         "journey", "creative", "offer",
     ):
-        assert f"named==='{operation}'" in growth or f"named==='{'customer' if operation == 'event' else operation}'" in growth
+        assert f"named==='{operation}'" in growth
     for endpoint in (
         "/api/growth/overview", "/api/growth/customers",
         "/api/growth/segments", "/api/growth/events", "/api/growth/journeys",
