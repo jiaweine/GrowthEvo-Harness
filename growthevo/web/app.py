@@ -389,6 +389,31 @@ def create_app() -> Any:
 
     def runtime_payload() -> dict[str, object]:
         payload = settings.public_payload()
+        gateway_configured = False
+        if settings.production:
+            from .growth_channels import ChannelConfigurationError, ChannelWebhook
+            try:
+                ChannelWebhook.from_environment()
+                gateway_configured = (
+                    len(os.getenv("GROWTHEVO_CHANNEL_SUBMIT_SECRET", "")) >= 16
+                    and len(os.getenv("GROWTHEVO_CHANNEL_RECEIPT_SECRET", "")) >= 16
+                )
+            except ChannelConfigurationError:
+                pass
+        gateway_enabled = bool(gateway_configured and growth_store is not None and runtime_ready())
+        payload["side_effects_enabled"] = gateway_enabled
+        if gateway_enabled:
+            payload["execution_mode"] = "separately-authorized-webhook"
+        payload["growth_operations"] = {
+            "backend": "postgresql" if growth_store is not None else "unavailable",
+            "journey_worker_configured": (
+                growth_store is not None
+                and os.getenv("GROWTHEVO_JOURNEY_WORKER_ENABLED", "").strip().lower()
+                in {"1", "true", "yes"}
+            ),
+            "channel_gateway_configured": gateway_configured,
+            "external_submission_enabled": gateway_enabled,
+        }
         persistence_ok = persistence_healthy()
         authentication_ok = authentication_healthy()
         payload["ready"] = bool(settings.ready and persistence_ok and authentication_ok)
@@ -467,6 +492,12 @@ def create_app() -> Any:
                 connector["label"] = "LLM Provider Pool"
                 connector["state"] = llm_state
 
+        if settings.channel_configured:
+            for connector in connectors:
+                if connector.get("id") == "channels":
+                    connector["state"] = (
+                        "configured" if gateway_configured else "configured_not_active"
+                    )
         payload["connectors"] = connectors
         return payload
 
