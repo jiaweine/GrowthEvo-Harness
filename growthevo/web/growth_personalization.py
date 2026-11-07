@@ -161,12 +161,12 @@ class ContextualPersonalizer:
                 raise GrowthMissing("personalization not found")
             if surface != decision["placement"]:
                 raise GrowthConflict("exposure surface must match the decision")
-            if datetime.now(UTC) - datetime.fromisoformat(decision["created_at"]) > timedelta(minutes=15):
-                raise GrowthConflict("personalization decision expired; request a fresh decision")
             key = request_id
             existing = tx.get("personalization_exposures", key)
             if existing is not None:
                 return existing
+            if datetime.now(UTC) - datetime.fromisoformat(decision["created_at"]) > timedelta(minutes=15):
+                raise GrowthConflict("personalization decision expired; request a fresh decision")
             customer = tx.get("customers", decision["customer_id"])
             if customer is None or not customer["consent"]:
                 raise GrowthConflict("customer no longer consents")
