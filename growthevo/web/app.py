@@ -21,6 +21,7 @@ from growthevo.llm.configuration import (
     llm_environment_configured,
 )
 
+from .growth_ops import GrowthOperations
 from .growth_store import GrowthConflict, GrowthMissing, GrowthStore
 from .data import build_dashboard_payload
 from .decisioning import (
@@ -156,7 +157,7 @@ class ApiBodyLimitMiddleware:
 def create_app() -> Any:
     """Create the GrowthEvo product surface and stable API."""
     try:
-        from fastapi import FastAPI, Header, HTTPException, Query
+        from fastapi import FastAPI, Header, HTTPException, Query, Request
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import FileResponse, JSONResponse
         from fastapi.staticfiles import StaticFiles
@@ -609,9 +610,40 @@ def create_app() -> Any:
         payload = runtime_payload()
         return payload["connectors"]  # type: ignore[return-value]
 
+    def growth_scope_for_request(request: Request) -> str:
+        claims = getattr(request.state, "auth_claims", None)
+        return principal_scope(claims) if claims is not None else "local-development"
+
+    def database_growth(request: Request) -> GrowthOperations:
+        if growth_store is None:
+            raise RuntimeError("growth database is not connected")
+        scope = growth_scope_for_request(request)
+        if not settings.production:
+            growth_store.ensure_demo(scope)
+        return GrowthOperations(growth_store, scope)
+
     @app.get("/api/dashboard", tags=["dashboard"])
-    def dashboard() -> dict[str, Any]:
-        return build_dashboard_payload(product_state)
+    def dashboard(request: Request) -> dict[str, Any]:
+        payload = build_dashboard_payload(product_state)
+        if growth_store is None:
+            return payload
+        overview = database_growth(request).overview()
+        counts = overview["counts"]
+        # Reference KPI/trend/channel fixtures must never appear as live results.
+        payload["kpis"], payload["trend"], payload["channels"] = [], [], []
+        payload["agent_activity"], payload["tasks"] = [], []
+        payload["project"]["status"] = "database-backed"
+        payload["data_origin"] = overview["data_origin"]
+        payload["summary"].update({
+            "online_decisions": decision_engine.stats().get("recent_decisions", 0),
+            "running_campaigns": sum(
+                c.get("status") in {"Running", "运行中"} for c in product_state.campaigns()
+            ),
+            "agent_automation": None, "no_treatment_rate": None,
+            "customer_records": counts["customers"], "event_records": counts["events"],
+            "exposure_records": counts["exposures"],
+        })
+        return payload
 
     @app.get("/api/capabilities", tags=["dashboard"])
     def capabilities() -> list[dict[str, Any]]:
@@ -623,7 +655,9 @@ def create_app() -> Any:
 
     @app.get("/api/opportunities", tags=["causal"])
     def opportunity_list() -> list[dict[str, Any]]:
-        return opportunities()
+        # Until real CATE serving is wired, never promote fixed example uplift
+        # numbers into a database-connected/production workspace.
+        return [] if growth_store is not None else opportunities()
 
     @app.get("/api/campaigns", tags=["campaigns"])
     def campaign_list() -> list[dict[str, Any]]:
@@ -640,8 +674,27 @@ def create_app() -> Any:
         )
 
     @app.get("/api/experiments", tags=["experiments"])
-    def experiment_list() -> list[dict[str, Any]]:
-        return experiments()
+    def experiment_list(request: Request) -> list[dict[str, Any]]:
+        if growth_store is None:
+            return experiments()
+        rows = database_growth(request).list("experiments")
+        return [
+            {
+                "id": item["experiment_id"], "name": item["name"],
+                "status": item["state"], "primary_metric": item["metric_event"],
+                "variants": [variant["key"] for variant in item["variants"]],
+                "allocation": " / ".join(
+                    f'{variant["key"]}: {variant["weight"]}%'
+                    for variant in item["variants"]
+                ),
+                "maturity": f'{item["window_days"]}d',
+                "assignment": "sticky customer assignment",
+                "estimate": None, "ci": None, "guardrails": [],
+                "hypothesis": "Observed conversion is measured in the database growth workspace.",
+                "synthetic": item.get("synthetic", False),
+            }
+            for item in rows
+        ]
 
     @app.get("/api/approvals", tags=["governance"])
     def approval_list() -> list[dict[str, Any]]:
