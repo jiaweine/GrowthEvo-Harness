@@ -39,6 +39,9 @@ async function growthOperationsPage(){
     +segments.map(s=>'<div class="evidence-row"><span>'+esc(s.name)+'</span><strong>'+esc(JSON.stringify(s.equals))+'</strong></div>').join('')+'</div>'
     +'<div class="card surface-card span-8"><div class="surface-title"><div><h2>事件驱动旅程</h2><p>用户事件触发持久化待办；处理队列不等于发送到外部渠道。</p></div></div>'
     +growthRows(journeys,[['name','名称'],['trigger_event','触发事件'],['active','启用',x=>x.active?'是':'否'],['steps','步骤',x=>x.steps.length]])+'</div>'
+    +'<div class="card surface-card span-12"><div class="surface-title"><div><h2>旅程运行控制</h2><p>停止后禁止向渠道提交尚未发送的记录；此操作不撤回已由外部渠道接收的消息。</p></div></div>'
+    +journeys.filter(j=>j.active).map(j=>'<button type="button" class="secondary" data-stop-journey="'+esc(j.journey_id)+'">停止 '+esc(j.name)+'</button>').join('')
+    +(!journeys.some(j=>j.active)?'<p>目前没有运行中的旅程。</p>':'')+'</div>'
     +'<div class="card surface-card span-4"><div class="surface-title"><div><h2>安全演示操作</h2></div></div>'
     +'<div class="field"><label for="growth-customer">客户</label><select id="growth-customer">'+customerChoices+'</select></div>'
     +'<div class="field"><label for="growth-event-name">事件名</label><input id="growth-event-name" value="signup" maxlength="80" /></div>'
@@ -78,6 +81,10 @@ async function growthOperationsPage(){
     }catch(error){if(message)message.textContent='操作失败：'+(error?.message||'未知原因')}
     finally{button.disabled=false}
   };
+  $('[data-stop-journey]').forEach(button=>button.onclick=e=>runAction(e.currentTarget,()=>
+    api('/api/growth/journeys/'+encodeURIComponent(e.currentTarget.dataset.stopJourney)+'/stop',{
+      method:'POST',body:JSON.stringify({})
+    })));
   $('#growth-record-event').onclick=e=>runAction(e.currentTarget,()=>{
     const name=$('#growth-event-name').value.trim();
     return api('/api/growth/events',{method:'POST',body:JSON.stringify({
