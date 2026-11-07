@@ -9,6 +9,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+try:
+    from starlette.requests import Request
+except ImportError:  # optional web dependency in core-only installs
+    Request = Any
+
+
 from growthevo.agent_os import GrowthTools
 from growthevo.agent_os.journal import ExecutionConflict, MemoryAgentBackend, RunJournal, principal_scope
 from growthevo.agent_os.recovery import RecoverableOperator
