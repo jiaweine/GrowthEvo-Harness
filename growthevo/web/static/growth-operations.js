@@ -312,11 +312,12 @@ function growthRender(){
     :growthState.tab==='journeys'?growthJourneys(data):growthAssets(data);
   $('#view').innerHTML=head('数据驱动增长运营',
     '客户、决策、实验、旅程与反馈共用当前身份的 PostgreSQL 记录。')
+    +'<div id="growth-workbench">'
     +'<div class="card surface-card" style="margin-bottom:10px"><strong>'+esc(origin)
     +'</strong><p>可用数据与权限以当前环境为准。营销投递须由可信网关独立授权。</p>'
     +'<button type="button" class="secondary" id="growth-refresh">刷新数据库</button></div>'
     +nav+growthFormNotice()
-    +'<div class="page-grid" role="tabpanel">'+content+'</div>';
+    +'<div class="page-grid" role="tabpanel">'+content+'</div></div>';
   growthBind();
 }
 async function growthRun(button,action,success='操作已保存'){
