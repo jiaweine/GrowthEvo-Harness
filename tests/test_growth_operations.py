@@ -280,3 +280,42 @@ def test_contextual_personalization_cold_start_holdout_and_matured_feedback():
     })
     assert denied["action_id"] == "NO_TREATMENT"
     assert denied["propensity"] == 1.0
+
+
+def test_experiment_report_respects_followup_window_and_srm():
+    from datetime import timedelta
+
+    fake = _FakeStore()
+    fake.seed()
+    service = GrowthOperations(fake, "test")
+    report = service.report("demo_first_purchase")
+    assert report["srm"]["status"] == "insufficient_exposures"
+    assert all(row["matured_customers"] == 0 for row in report["results"])
+    assert all(row["matured_conversion_rate"] is None for row in report["results"])
+    assert all(row["observed_difference_pp"] is None for row in report["results"])
+    assert sum(row["converted_customers"] for row in report["results"]) == 6
+
+    older = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    for (kind, key), row in fake.records.items():
+        if kind == "exposures" and row["experiment_id"] == "demo_first_purchase":
+            row["occurred_at"] = older
+        if kind == "events" and row["name"] == "purchase":
+            row["occurred_at"] = (datetime.now(timezone.utc) - timedelta(days=9)).isoformat()
+    matured = service.report("demo_first_purchase")
+    assert all(row["matured_customers"] == 6 for row in matured["results"])
+    assert all(row["pending_customers"] == 0 for row in matured["results"])
+    assert all(row["matured_wilson_95"] is not None for row in matured["results"])
+    assert matured["results"][1]["observed_difference_pp"] == pytest.approx(33.3333, abs=0.0001)
+
+
+def test_srm_monitor_and_wilson_bounds():
+    from growthevo.web.growth_statistics import sample_ratio_diagnostics, wilson_95
+
+    assert sample_ratio_diagnostics({"A": 50, "B": 50}, {"A": 50, "B": 50})["status"] == "pass"
+    mismatch = sample_ratio_diagnostics({"A": 95, "B": 5}, {"A": 50, "B": 50})
+    assert mismatch["status"] == "warning"
+    assert mismatch["p_value"] < 0.01
+    assert sample_ratio_diagnostics({"A": 20, "B": 20, "C": 20},
+                                    {"A": 33, "B": 33, "C": 34})["status"] == "pass"
+    assert wilson_95(0, 0) is None
+    assert 0 <= wilson_95(3, 10)[0] <= .3 <= wilson_95(3, 10)[1] <= 1
