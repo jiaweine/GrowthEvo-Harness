@@ -195,14 +195,17 @@ class GrowthOperations:
         return self._write(activate)
 
     def ingest_event(self, data: dict[str, Any]) -> dict[str, Any]:
-        event = dict(data, ingested_at=_iso(_now()), synthetic=False)
+        event = dict(data, occurred_at=data.get("occurred_at") or _iso(_now()),
+                     ingested_at=_iso(_now()), synthetic=False)
 
         def ingest(tx: Any) -> dict[str, Any]:
             customer = _require(tx, "customers", data["customer_id"])
             prior = tx.get("events", event["event_id"])
             if prior is not None:
-                comparable = {k: prior[k] for k in data}
-                if comparable != data:
+                supplied = {k: v for k, v in data.items()
+                            if k != "occurred_at" or v is not None}
+                comparable = {k: prior[k] for k in supplied}
+                if comparable != supplied:
                     raise GrowthConflict("event identity reused with different content")
                 return {"event": prior, "new_enrollments": 0, "deduplicated": True}
             tx.put("events", event["event_id"], event, new=True)
@@ -276,8 +279,6 @@ class GrowthOperations:
                 raise GrowthConflict("delivery already reserved for submission")
             customer = _require(tx, "customers", delivery["customer_id"])
             if not customer["consent"]:
-                delivery["status"] = "suppressed"
-                tx.put("deliveries", delivery_id, delivery)
                 raise GrowthConflict("customer withdrew consent")
             creative = _require(tx, "creatives", delivery["creative_id"])
             offer = (tx.get("offers", delivery["offer_id"])
