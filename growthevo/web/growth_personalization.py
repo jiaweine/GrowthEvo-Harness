@@ -183,6 +183,108 @@ class ContextualPersonalizer:
             return exposure
         return self.store.run(self.scope, confirm, write=True)
 
+    def offline_evidence(self, target_action_id: str, *, synthetic: bool = False) -> dict[str, Any]:
+        """Read-only IPS diagnostic from confirmed, matured logged decisions.
+
+        Reuses the repository's existing OPE estimator. No policy model is
+        trained, no missing propensities are invented, and no promotion occurs.
+        The earliest confirmed exposure per customer is the analysis unit.
+        """
+        from growthevo.rl.ope import LoggedBanditRecord, evaluate_policy
+
+        if target_action_id not in ACTION_REGISTRY:
+            raise GrowthConflict("target action is not in the registry")
+
+        def evaluate(tx: Any) -> dict[str, Any]:
+            now = datetime.now(UTC)
+            decisions = {d["request_id"]: d for d in tx.all("personalizations")}
+            purchases: dict[str, list[datetime]] = {}
+            for event in tx.all("events"):
+                if event["name"] != "purchase" or bool(event.get("synthetic")) != synthetic:
+                    continue
+                purchases.setdefault(event["customer_id"], []).append(
+                    datetime.fromisoformat(event["occurred_at"])
+                )
+
+            exposures = sorted(
+                (row for row in tx.all("personalization_exposures")
+                 if bool(row.get("synthetic")) == synthetic),
+                key=lambda row: (row["occurred_at"], row["request_id"]),
+            )
+            seen: set[str] = set()
+            records = []
+            unsupported = 0
+            excluded_immature = 0
+            realized_target = 0
+            for exposure in exposures:
+                customer_id = exposure["customer_id"]
+                if customer_id in seen:
+                    continue
+                seen.add(customer_id)
+                decision = decisions.get(exposure["request_id"])
+                if (decision is None or decision["decision_id"] != exposure["decision_id"]
+                        or decision["action_id"] != exposure["action_id"]
+                        or decision["customer_id"] != customer_id):
+                    raise GrowthConflict("exposure and logged policy evidence disagree")
+                start = datetime.fromisoformat(exposure["occurred_at"])
+                end = start + OBSERVATION_WINDOW
+                if end > now:
+                    excluded_immature += 1
+                    continue
+                distribution = decision["action_distribution"]
+                probability = distribution.get(target_action_id, 0.0)
+                if not 0 < probability <= 1:
+                    unsupported += 1
+                    continue
+                propensity = decision["propensity"]
+                if not 0 < propensity <= 1 or propensity != distribution[exposure["action_id"]]:
+                    raise GrowthConflict("logged behavior probability is inconsistent")
+                converted = any(
+                    start <= timestamp <= end
+                    for timestamp in purchases.get(customer_id, ())
+                )
+                if exposure["action_id"] == target_action_id:
+                    realized_target += 1
+                records.append(LoggedBanditRecord(
+                    reward=float(converted),
+                    behavior_propensity=propensity,
+                    target_action_probability=float(
+                        exposure["action_id"] == target_action_id
+                    ),
+                    baseline_q=0.0, target_q=0.0,
+                    record_id=decision["decision_id"],
+                ))
+
+            result: dict[str, Any] = {
+                "target_action_id": target_action_id,
+                "source": "synthetic" if synthetic else "observed",
+                "matured_units": len(records),
+                "observed_target_units": realized_target,
+                "immature_units": excluded_immature,
+                "unsupported_units": unsupported,
+                "causal_claim": False,
+                "promotion_allowed": False,
+                "method": "inverse_propensity_scoring",
+                "note": "Diagnostic IPS only. Requires verified assignment, positivity, outcome contracts and independent review.",
+            }
+            # If ANY mature decision had no target support, using the supported
+            # subset would bias an evaluation of the full customer population.
+            if unsupported:
+                return dict(result, status="unsupported_target_policy", estimate=None)
+            if len(records) < 40 or realized_target < 10:
+                return dict(result, status="insufficient_evidence", estimate=None)
+
+            estimate = evaluate_policy(records)
+            return dict(result, status="diagnostic_only", estimate={
+                "ips_conversion_rate": estimate.ips,
+                "ips_standard_error": estimate.ips_standard_error,
+                "effective_sample_size": estimate.effective_sample_size,
+                "effective_sample_ratio": estimate.effective_sample_ratio,
+                "support_coverage": estimate.support_coverage,
+            })
+
+        return self.store.run(self.scope, evaluate)
+
     def metrics(self) -> dict[str, Any]:
         def collect(tx: Any) -> dict[str, Any]:
             decisions = tx.all("personalizations")
