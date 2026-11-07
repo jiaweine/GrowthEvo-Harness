@@ -62,6 +62,20 @@ class GrowthOperations:
             return document
         return self._write(insert)
 
+    def update_customer(self, customer_id: str, change: dict[str, Any]) -> dict[str, Any]:
+        def update(tx: Any) -> dict[str, Any]:
+            customer = _require(tx, "customers", customer_id)
+            if change.get("attributes") is not None:
+                customer["attributes"].update(change["attributes"])
+                if len(customer["attributes"]) > 32:
+                    raise GrowthConflict("customer attribute limit exceeded")
+            if change.get("consent") is not None:
+                customer["consent"] = change["consent"]
+            customer["updated_at"] = _iso(_now())
+            tx.put("customers", customer_id, customer)
+            return customer
+        return self._write(update)
+
     def profile(self, customer_id: str) -> dict[str, Any]:
         def inspect(tx: Any) -> dict[str, Any]:
             customer = _require(tx, "customers", customer_id)
