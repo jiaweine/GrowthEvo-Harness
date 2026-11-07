@@ -1,5 +1,6 @@
 /* PostgreSQL-backed growth operations workspace; never silently uses UI fixtures. */
 const previousGrowthRouteRender = render;
+let growthLastPersonalizationId = null;
 
 const growthOptions = items => items.map(x=>'<option value="'+esc(x.customer_id)+'">'+esc(x.customer_id)+'</option>').join('');
 const growthMetric = (label,value) => '<div class="stat-box"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong></div>';
@@ -14,11 +15,12 @@ async function growthOperationsPage(){
       +'<div class="card surface-card"><p>用户画像、旅程、素材、优惠、曝光与实验报表的演示数据仅在 API 模式写入 PostgreSQL。</p></div>';
     return;
   }
-  const [overview,customers,segments,journeys,experiments,deliveries,offers,creatives] = await Promise.all([
+  const [overview,customers,segments,journeys,experiments,deliveries,offers,creatives,personalization] = await Promise.all([
     api('/api/growth/overview'),api('/api/growth/customers'),
     api('/api/growth/segments'),api('/api/growth/journeys'),
     api('/api/growth/experiments'),api('/api/growth/deliveries'),
-    api('/api/growth/offers'),api('/api/growth/creatives')
+    api('/api/growth/offers'),api('/api/growth/creatives'),
+    api('/api/growth/personalization/metrics')
   ]);
   const reports=await Promise.all(experiments.slice(0,8).map(x=>api('/api/growth/experiments/'+encodeURIComponent(x.experiment_id)+'/report')));
   const count=overview.counts;
@@ -44,7 +46,12 @@ async function growthOperationsPage(){
     +'<button class="secondary" id="growth-process" type="button">处理到期任务（不发送）</button>'
     +'<div class="field"><label for="growth-experiment">实验</label><select id="growth-experiment">'+exposureChoices+'</select></div>'
     +'<button class="secondary" id="growth-expose" type="button">记录一次显式曝光</button>'
+    +'<button class="secondary" id="growth-personalize" type="button">生成个体化决策（不发送）</button>'
+    +(growthLastPersonalizationId?'<button class="secondary" id="growth-personalize-exposure" type="button">确认最近决策的实际曝光</button>':'')
     +'<p id="growth-action-result" role="status"></p></div>'
+    +'<div class="card surface-card span-12 table-scroll"><div class="surface-title"><div><h2>个体化在线决策与反馈</h2><p>根据用户属性进行受控随机分配；仅使用成熟的观察结果调整选择概率，始终保留不触达。评级 D，尚非经过验证的因果模型。</p></div></div>'
+    +'<div class="stat-strip">'+growthMetric('决策',personalization.decisions)+growthMetric('已确认曝光',personalization.confirmed_exposures)+'</div>'
+    +growthRows(personalization.recent_decisions,[['request_id','决策请求'],['customer_id','客户'],['action_id','动作'],['propensity','实际分配概率',x=>Number(x.propensity).toFixed(4)],['exposure_confirmed','已曝光',x=>x.exposure_confirmed?'是':'否']])+'</div>'
     +'<div class="card surface-card span-8 table-scroll"><div class="surface-title"><div><h2>实验与曝光反馈</h2><p>分组稳定、曝光需显式记录；转化率是观测结果，并非因果提升证明。</p></div></div>'
     +reports.map(report=>'<h3>'+esc(experiments.find(x=>x.experiment_id===report.experiment_id)?.name||report.experiment_id)+'</h3>'
       +growthRows(report.results,[['variant','分组'],['exposed_customers','曝光人数'],['converted_customers','转化人数'],
@@ -76,6 +83,23 @@ async function growthOperationsPage(){
   });
   $('#growth-process').onclick=e=>runAction(e.currentTarget,()=>
     api('/api/growth/journeys/process',{method:'POST',body:JSON.stringify({limit:50})}));
+  $('#growth-personalize').onclick=e=>runAction(e.currentTarget,async()=>{
+    const request_id='ui_personalization_'+Date.now()+'_'+Math.random().toString(16).slice(2,8);
+    const result=await api('/api/growth/personalization/decide',{
+      method:'POST',body:JSON.stringify({
+        customer_id:$('#growth-customer').value,request_id,
+        placement:'growth_workspace',candidate_action_ids:['NO_TREATMENT','free_shipping','coupon_10'],
+        consent_state:true,frequency_remaining:1,budget_remaining:100
+      })
+    });
+    growthLastPersonalizationId=request_id;
+    return result;
+  });
+  const confirmation=$('#growth-personalize-exposure');
+  if(confirmation)confirmation.onclick=e=>runAction(e.currentTarget,()=>
+    api('/api/growth/personalization/'+encodeURIComponent(growthLastPersonalizationId)+'/exposure',{
+      method:'POST',body:JSON.stringify({surface:'growth_workspace'})
+    }));
   $('#growth-expose').onclick=e=>runAction(e.currentTarget,()=>
     api('/api/growth/experiments/'+encodeURIComponent($('#growth-experiment').value)+'/exposures',{
       method:'POST',body:JSON.stringify({
