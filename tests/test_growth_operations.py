@@ -63,6 +63,22 @@ def test_db_demo_fixtures_are_explicit_and_coherent():
     assert [row["converted_customers"] for row in report["results"]] == [2, 4]
 
 
+def test_synthetic_events_keep_customer_provenance_across_feedback():
+    fake = _FakeStore()
+    fake.seed()
+    service = GrowthOperations(fake, "test")
+    synthetic = service.ingest_event(_event("demo_new_purchase", "demo_customer_01", "purchase"))
+    assert synthetic["event"]["synthetic"] is True
+    assert service.ingest_event(_event("demo_new_purchase", "demo_customer_01", "purchase"))["deduplicated"]
+    service.create("customers", "customer_real_provenance", {
+        "customer_id": "customer_real_provenance", "attributes": {}, "consent": True
+    })
+    observed = service.ingest_event(_event("real_purchase", "customer_real_provenance", "purchase"))
+    assert observed["event"]["synthetic"] is False
+    assert all(x["synthetic"] for x in service.profile("demo_customer_01")["events"])
+    assert all(not x["synthetic"] for x in service.profile("customer_real_provenance")["events"])
+
+
 def test_assignment_is_sticky_and_exposure_is_idempotent():
     fake = _FakeStore()
     fake.seed()
