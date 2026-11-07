@@ -222,6 +222,14 @@ def create_app() -> Any:
         decision_engine = ReferenceDecisionEngine()
         product_state = ReferenceProductState()
 
+    # Operational growth data is always backed by PostgreSQL. The legacy
+    # reference dashboard remains separate and does not seed operational facts.
+    from .growth_store import GrowthStore, seed_sample
+    growth_store = GrowthStore(persistence_store) if persistence_store is not None else None
+    if growth_store is not None and not settings.production:
+        if os.getenv("GROWTHEVO_GROWTH_SEED_SAMPLE", "").strip() == "1":
+            seed_sample(growth_store, "local-development")
+
     replay_suite = None
     replay_path = os.getenv("GROWTHEVO_AGENT_BENCHMARK_PATH", "").strip()
     replay_digest = os.getenv("GROWTHEVO_AGENT_BENCHMARK_SHA256", "").strip()
@@ -326,6 +334,12 @@ def create_app() -> Any:
     app.state.agent_traces = agent_traces
     app.state.evolution_authority = evolution_authority
     app.state.runtime_settings = settings
+    app.state.growth_store = growth_store
+    from .growth_api import build_growth_router
+    app.include_router(build_growth_router(
+        growth_store, authenticator=authenticator,
+        production=settings.production, simulation=not settings.production,
+    ))
 
     @app.exception_handler(ExecutionConflict)
     async def execution_conflict(_request: Any, _error: ExecutionConflict):
