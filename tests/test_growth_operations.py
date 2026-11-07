@@ -289,6 +289,45 @@ def test_postgres_demo_survives_store_recreation_when_configured():
         first.close()
 
 
+def test_segment_mutation_suppresses_queued_journey_and_external_dispatch():
+    fake = _FakeStore()
+    service = GrowthOperations(fake, "test")
+    service.create("customers", "segment_customer", {
+        "customer_id": "segment_customer",
+        "attributes": {"lifecycle": "new"}, "consent": True,
+    })
+    service.create("segments", "segment_new", {
+        "segment_id": "segment_new", "name": "New users",
+        "equals": {"lifecycle": "new"},
+    })
+    service.create("creatives", "segment_creative", {
+        "creative_id": "segment_creative", "channel": "email",
+        "title": "Welcome", "body": "Example message",
+    })
+    service.create_journey({
+        "journey_id": "segment_journey", "name": "Lifecycle welcome",
+        "trigger_event": "signup", "segment_id": "segment_new",
+        "steps": [{"channel": "email", "creative_id": "segment_creative",
+                   "offer_id": None, "delay_seconds": 0}],
+    })
+    service.activate_journey("segment_journey")
+    assert service.ingest_event(_event("segment_signup_one", "segment_customer", "signup"))[
+        "new_enrollments"
+    ] == 1
+    service.update_customer("segment_customer", {"attributes": {"lifecycle": "returning"}})
+    assert service.process_due()["processed"][0]["status"] == "suppressed"
+    assert service.list("deliveries") == []
+
+    service.update_customer("segment_customer", {"attributes": {"lifecycle": "new"}})
+    assert service.ingest_event(_event("segment_signup_two", "segment_customer", "signup"))[
+        "new_enrollments"
+    ] == 1
+    delivery_id = service.process_due()["processed"][0]["delivery_id"]
+    service.update_customer("segment_customer", {"attributes": {"lifecycle": "returning"}})
+    with pytest.raises(GrowthConflict, match="no longer matches journey segment"):
+        service.reserve_external_submission(delivery_id)
+
+
 def test_growth_postgres_scopes_isolate_identical_ids_and_replicas():
     database_url = os.getenv("GROWTHEVO_TEST_DATABASE_URL")
     if not database_url:
