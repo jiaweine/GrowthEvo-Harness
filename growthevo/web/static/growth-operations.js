@@ -80,7 +80,7 @@ function growthStatus(status){
 }
 function growthOverview(data){
   const count=data.overview.counts;
-  const summary='<div class="stat-strip">'
+  const summary='<div class="stat-strip" style="grid-column:1/-1">'
     +growthMetric('客户',count.customers)+growthMetric('事件',count.events)
     +growthMetric('实验曝光',count.exposures)+growthMetric('旅程',count.journeys)
     +growthMetric('待办及投递',data.jobs.length+' / '+count.deliveries)+'</div>';
@@ -92,7 +92,7 @@ function growthOverview(data){
     +'<div class="evidence-row"><span>个体化策略</span><strong>观测学习 · 非 CATE 上线模型</strong></div>'
     +'<div class="evidence-row"><span>渠道提交</span><strong>生产权限 + 可信 HTTPS 网关</strong></div>'
     +'<p>Worker 仅生成待投递记录。网关接受不等于送达；离线评估不等于因果证明。</p>',
-    'span-8')
+    'span-12')
     +growthCard('记录客户事件','事件去重写入数据库，新近事件才会触发已激活旅程。',
       growthForm('event',growthField('客户','event_customer',{
         select:growthOptions(data.customers,'customer_id')})
