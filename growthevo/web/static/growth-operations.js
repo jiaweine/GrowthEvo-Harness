@@ -62,6 +62,7 @@ async function growthOperationsPage(){
     try{
       const result=await request();
       if(message)message.textContent='已写入数据库：'+JSON.stringify(result).slice(0,180);
+      toast('操作已写入数据库');
       await growthOperationsPage();
     }catch(error){if(message)message.textContent='操作失败：'+(error?.message||'未知原因')}
     finally{button.disabled=false}
