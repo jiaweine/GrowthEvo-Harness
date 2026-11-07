@@ -253,11 +253,14 @@ class GrowthOperations:
         return self._write(stop)
 
     def ingest_event(self, data: dict[str, Any]) -> dict[str, Any]:
-        event = dict(data, occurred_at=data.get("occurred_at") or _iso(_now()),
-                     ingested_at=_iso(_now()), synthetic=False)
-
         def ingest(tx: Any) -> dict[str, Any]:
             customer = _require(tx, "customers", data["customer_id"])
+            event = dict(
+                data,
+                occurred_at=data.get("occurred_at") or _iso(_now()),
+                ingested_at=_iso(_now()),
+                synthetic=bool(customer.get("synthetic", False)),
+            )
             prior = tx.get("events", event["event_id"])
             if prior is not None:
                 supplied = {k: v for k, v in data.items()
