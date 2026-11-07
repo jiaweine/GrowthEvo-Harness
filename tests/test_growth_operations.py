@@ -198,3 +198,85 @@ def test_postgres_demo_survives_store_recreation_when_configured():
         if second is not None:
             second.close()
         first.close()
+
+
+def test_contextual_personalization_uses_stable_logged_propensities():
+    from growthevo.web.growth_personalization import ContextualPersonalizer, CONTROL_FLOOR
+
+    fake = _FakeStore()
+    fake.seed()
+    personalizer = ContextualPersonalizer(fake, "test")
+    payload = {
+        "customer_id": "demo_customer_01", "request_id": "request_personalized_01",
+        "placement": "checkout", "candidate_action_ids": [
+            "NO_TREATMENT", "free_shipping", "coupon_10",
+        ],
+        "consent_state": True, "frequency_remaining": 3,
+        "budget_remaining": 100.0,
+    }
+    decision = personalizer.decide(payload)
+    assert decision["causal_claim"] is False
+    assert decision["exposure_confirmed"] is False
+    assert decision["action_distribution"]["NO_TREATMENT"] == CONTROL_FLOOR
+    assert abs(sum(decision["action_distribution"].values()) - 1) < 1e-12
+    assert decision["propensity"] == decision["action_distribution"][decision["action_id"]]
+    assert personalizer.decide(payload) == decision
+    with pytest.raises(GrowthConflict, match="idempotency"):
+        personalizer.decide(payload | {"budget_remaining": 0})
+    exposure = personalizer.confirm_exposure(payload["request_id"], "checkout")
+    assert exposure["decision_id"] == decision["decision_id"]
+    assert personalizer.confirm_exposure(payload["request_id"], "checkout") == exposure
+    assert personalizer.metrics()["confirmed_exposures"] == 1
+    with pytest.raises(GrowthConflict, match="surface"):
+        personalizer.confirm_exposure(payload["request_id"], "wrong_surface")
+
+
+def test_contextual_personalization_cold_start_holdout_and_matured_feedback():
+    from datetime import timedelta
+    from growthevo.web.growth_personalization import ContextualPersonalizer
+
+    fake = _FakeStore()
+    fake.seed()
+    service = ContextualPersonalizer(fake, "test")
+    payload = {
+        "customer_id": "demo_customer_01", "request_id": "request_feedback_01",
+        "placement": "checkout", "candidate_action_ids": [
+            "NO_TREATMENT", "free_shipping", "coupon_10",
+        ],
+        "consent_state": True, "frequency_remaining": 3,
+        "budget_remaining": 100.0,
+    }
+    started = datetime.now(timezone.utc) - timedelta(days=10)
+    actions = ["NO_TREATMENT", "free_shipping", "coupon_10"]
+    for action in actions:
+        for index in range(20):
+            customer_id = f"feedback_{action}_{index}"
+            key = f"observed_{action}_{index}"
+            fake.records[("personalization_exposures", key)] = {
+                "request_id": key, "customer_id": customer_id, "cohort": "new",
+                "action_id": action, "occurred_at": started.isoformat(), "synthetic": True,
+            }
+            converted = (
+                (action == "NO_TREATMENT" and index < 4)
+                or (action == "free_shipping" and index < 16)
+                or (action == "coupon_10" and index < 2)
+            )
+            if converted:
+                fake.records[("events", "purchase_" + key)] = {
+                    "event_id": "purchase_" + key, "customer_id": customer_id,
+                    "name": "purchase", "occurred_at": (
+                        started + timedelta(days=1)
+                    ).isoformat(), "synthetic": True,
+                }
+    decision = service.decide(payload)
+    assert decision["learning_status"] == "matured"
+    assert decision["matured_sample_counts"] == {action: 20 for action in actions}
+    assert decision["action_distribution"]["free_shipping"] > (
+        decision["action_distribution"]["coupon_10"]
+    )
+    assert decision["action_distribution"]["NO_TREATMENT"] >= .35
+    denied = service.decide(payload | {
+        "request_id": "request_feedback_denied", "frequency_remaining": 0,
+    })
+    assert denied["action_id"] == "NO_TREATMENT"
+    assert denied["propensity"] == 1.0
