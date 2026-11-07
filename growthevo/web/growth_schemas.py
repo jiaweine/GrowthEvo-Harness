@@ -19,6 +19,19 @@ class CustomerInput(RequestModel):
     consent: StrictBool = False
 
 
+class CustomerUpdate(RequestModel):
+    attributes: dict[str, str | int | float | bool] | None = Field(
+        default=None, max_length=32,
+    )
+    consent: StrictBool | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "CustomerUpdate":
+        if self.attributes is None and self.consent is None:
+            raise ValueError("at least one customer field must change")
+        return self
+
+
 class SegmentInput(RequestModel):
     segment_id: str = Field(pattern=KEY_PATTERN)
     name: str = Field(min_length=2, max_length=120)
