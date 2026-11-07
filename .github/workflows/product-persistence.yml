@@ -191,6 +191,63 @@ jobs:
           start_api growthevo-db-ci-a 8766
           start_api growthevo-db-ci-b 8767
 
+          python scripts/stress_growth_workbench.py \
+            --base-url http://127.0.0.1:8766 \
+            --peer-url http://127.0.0.1:8767 \
+            --customers 32 \
+            --concurrency 16 \
+            --json-out persistence-reports/growth-stress.json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          result=json.loads(Path("persistence-reports/growth-stress.json").read_text())
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a",encoding="utf-8") as summary:
+              summary.write(
+                  "\n### Growth workbench PostgreSQL pressure test\n\n"
+                  f"- Requests: **{result['requests']}** across {result['replicas']} replicas\n"
+                  f"- Concurrency: **{result['concurrency']}**\n"
+                  f"- Throughput: **{result['throughput_rps']} req/s**\n"
+                  f"- Latency p50 / p95 / p99: **{result['latency_ms']['p50']} / "
+                  f"{result['latency_ms']['p95']} / {result['latency_ms']['p99']} ms**\n"
+                  f"- Unique deliveries: **{result['unique_deliveries']}**\n"
+                  f"- Result: **{'PASS' if result['passed'] else 'FAIL'}**\n"
+              )
+          PY
+
+          # Execute the real Nightfall browser against a live PostgreSQL API,
+          # not the static Pages demo. The test helper is injected only into
+          # this disposable CI container; it is never shipped as a product asset.
+          docker cp scripts/browser_growth_workbench_smoke.js \
+            growthevo-db-ci-a:/app/growthevo/web/static/growth-workbench-smoke.js
+          docker exec -i -u root growthevo-db-ci-a python - <<'PY'
+          from pathlib import Path
+          page=Path("/app/growthevo/web/static/index.html")
+          text=page.read_text(encoding="utf-8")
+          assert "growth-workbench-smoke.js" not in text
+          text=text.replace(
+              "</body>",
+              '<script src="./assets/growth-workbench-smoke.js" defer></script>\n</body>',
+          )
+          page.write_text(text,encoding="utf-8")
+          PY
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME_BIN"
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage \
+            --lang=zh-CN --window-size=1536,1024 --virtual-time-budget=90000 \
+            --dump-dom "http://127.0.0.1:8766/?growth-workbench-smoke=1#growthOps" \
+            > persistence-reports/growth-browser.html
+          if ! grep -Fq 'GROWTH_WORKBENCH_SMOKE_PASS' persistence-reports/growth-browser.html; then
+            echo "PostgreSQL growth workbench Chrome smoke failed" >&2
+            grep -F 'GROWTH_WORKBENCH_SMOKE_' persistence-reports/growth-browser.html >&2 || true
+            exit 1
+          fi
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage \
+            --lang=zh-CN --window-size=1536,1024 \
+            --screenshot=persistence-reports/growth-workbench.png \
+            "http://127.0.0.1:8766/#growthOps"
+          test -s persistence-reports/growth-workbench.png
+
           python - <<'PY'
           from concurrent.futures import ThreadPoolExecutor
           import json
