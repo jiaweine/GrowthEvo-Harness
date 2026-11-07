@@ -11,9 +11,11 @@ from growthevo.agent_os.journal import principal_scope
 
 from .growth_channels import ChannelConfigurationError, ChannelWebhook
 from .growth_ops import GrowthOperations
+from .growth_personalization import ContextualPersonalizer
 from .growth_schemas import (
     CreativeInput, CustomerInput, CustomerUpdate, DeliveryReceiptInput, EventInput,
     ExperimentInput, ExposureInput, JourneyInput, OfferInput, ProcessDueInput,
+    PersonalizationInput, PersonalizationExposureInput,
     SegmentInput,
 )
 from .growth_store import GrowthStore
@@ -93,6 +95,26 @@ def growth_router(store: GrowthStore | None, *, production: bool,
     @router.post("/offers", status_code=201)
     def create_offer(value: OfferInput, request: Request) -> dict[str, Any]:
         return context(request).create("offers", value.offer_id, value.model_dump(mode="json"))
+
+    def personalizer(request: Request) -> ContextualPersonalizer:
+        operations = context(request)
+        return ContextualPersonalizer(operations.store, operations.scope)
+
+    @router.post("/personalization/decide", status_code=201)
+    def personalized_decision(value: PersonalizationInput,
+                              request: Request) -> dict[str, Any]:
+        # A logged decision alone is not a customer exposure or a channel send.
+        return personalizer(request).decide(value.model_dump(mode="json"))
+
+    @router.post("/personalization/{request_id}/exposure", status_code=201)
+    def confirm_personalization_exposure(
+        request_id: str, value: PersonalizationExposureInput, request: Request,
+    ) -> dict[str, Any]:
+        return personalizer(request).confirm_exposure(request_id, value.surface)
+
+    @router.get("/personalization/metrics")
+    def personalization_metrics(request: Request) -> dict[str, Any]:
+        return personalizer(request).metrics()
 
     @router.get("/experiments")
     def experiments(request: Request) -> list[dict[str, Any]]:
