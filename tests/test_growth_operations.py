@@ -247,6 +247,43 @@ def test_postgres_demo_survives_store_recreation_when_configured():
         first.close()
 
 
+def test_growth_postgres_scopes_isolate_identical_ids_and_replicas():
+    database_url = os.getenv("GROWTHEVO_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("requires PostgreSQL in persistence CI")
+    from growthevo.web.persistence import PostgresStore
+
+    first = PostgresStore(database_url, seed_reference=False)
+    second = PostgresStore(database_url, seed_reference=False)
+    tenant_a = "growth-scope-a-" + uuid4().hex
+    tenant_b = "growth-scope-b-" + uuid4().hex
+    customer_id = "shared_customer_id"
+    try:
+        a = GrowthOperations(GrowthStore(first), tenant_a)
+        b = GrowthOperations(GrowthStore(second), tenant_b)
+        a.create("customers", customer_id, {
+            "customer_id": customer_id, "attributes": {"region": "A"},
+            "consent": True,
+        })
+        b.create("customers", customer_id, {
+            "customer_id": customer_id, "attributes": {"region": "B"},
+            "consent": False,
+        })
+        assert a.profile(customer_id)["customer"]["attributes"]["region"] == "A"
+        assert b.profile(customer_id)["customer"]["attributes"]["region"] == "B"
+        a.ingest_event(_event("event_visible_only_a", customer_id, "signup"))
+        assert len(a.profile(customer_id)["events"]) == 1
+        assert b.profile(customer_id)["events"] == []
+        assert a.profile(customer_id)["customer"]["consent"] is True
+        assert b.profile(customer_id)["customer"]["consent"] is False
+        # Different replicas still see writes for the SAME scoped principal.
+        replica = GrowthOperations(GrowthStore(second), tenant_a)
+        assert replica.profile(customer_id)["events"][0]["event_id"] == "event_visible_only_a"
+    finally:
+        second.close()
+        first.close()
+
+
 def test_contextual_personalization_uses_stable_logged_propensities():
     from growthevo.web.growth_personalization import ContextualPersonalizer, CONTROL_FLOOR
 
