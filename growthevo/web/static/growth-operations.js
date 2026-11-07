@@ -1,5 +1,4 @@
 /* PostgreSQL-backed growth operations workspace; never silently uses UI fixtures. */
-const previousGrowthRouteRender = render;
 let growthLastPersonalizationId = null;
 
 const growthOptions = items => items.map(x=>'<option value="'+esc(x.customer_id)+'">'+esc(x.customer_id)+'</option>').join('');
