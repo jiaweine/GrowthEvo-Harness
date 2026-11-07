@@ -136,6 +136,14 @@
     click('[data-demo-action="connector-export"]');
     check(document.body.dataset.lastDownload === 'growthevo-connector-registry.json', 'connector registry did not download');
 
+    go('growthOps');
+    await sleep(80);
+    check(location.hash === '#growthOps', 'growth operations route did not navigate');
+    check(document.querySelector('#view').textContent.includes('此静态演示不模拟数据库读写'),
+      'static growth workspace pretended to have PostgreSQL data');
+    check(!document.querySelector('#growth-record-event'),
+      'static growth workspace unexpectedly enabled database mutations');
+
     click('[data-route="settings"]');
     await sleep(60);
     click('[data-demo-action="deployment-check"]');
