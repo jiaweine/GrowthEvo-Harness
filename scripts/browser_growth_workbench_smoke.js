@@ -29,7 +29,7 @@
     if(!form)throw Error('Missing growth form '+name);
     for(const [key,value] of Object.entries(values))field(form,key,value);
     form.requestSubmit();
-    const done=await waitFor(accepted);
+    const done=await waitFor(()=>!form.isConnected&&accepted());
     check(done,'Form did not persist: '+name+' '+growthState.notice);
   };
   window.addEventListener('DOMContentLoaded',()=>{
