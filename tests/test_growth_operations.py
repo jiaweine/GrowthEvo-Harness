@@ -155,6 +155,48 @@ def test_channel_webhook_rejects_untrusted_or_insecure_hosts():
 
 
 
+def test_channel_adapter_honors_idempotency_headers_and_network_fail_closed(monkeypatch):
+    import json
+    from urllib.error import URLError
+    from growthevo.web import growth_channels
+
+    captured = []
+
+    class Response:
+        status = 202
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    class Accepted:
+        def open(self, request, timeout):
+            captured.append((request, timeout))
+            return Response()
+
+    gateway = growth_channels.ChannelWebhook(
+        "https://gateway.example.test/submit", "x" * 30,
+        {"gateway.example.test"},
+    )
+    monkeypatch.setattr(growth_channels, "build_opener", lambda *_args: Accepted())
+    assert gateway.submit({"idempotency_key": "delivery_unique_01", "channel": "email"})
+    request, timeout = captured[0]
+    assert request.get_method() == "POST"
+    assert request.get_header("Idempotency-key") == "delivery_unique_01"
+    assert request.get_header("Authorization") == "Bearer " + "x" * 30
+    assert json.loads(request.data)["channel"] == "email"
+    assert timeout == 5
+
+    class Unavailable:
+        def open(self, _request, _timeout):
+            raise URLError("unreachable")
+
+    monkeypatch.setattr(growth_channels, "build_opener", lambda *_args: Unavailable())
+    assert gateway.submit({"idempotency_key": "delivery_unique_01"}) is False
+
+
 def test_real_gateway_receipt_requires_prior_submission_and_profile_consent():
     fake = _FakeStore()
     service = GrowthOperations(fake, "test")
