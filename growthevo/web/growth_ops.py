@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 from .growth_store import GrowthConflict, GrowthMissing, GrowthStore
+from .growth_statistics import sample_ratio_diagnostics, wilson_95
 
 UTC = timezone.utc
 
@@ -155,33 +156,52 @@ class GrowthOperations:
             for event in tx.all("events"):
                 if event["name"] == exp["metric_event"]:
                     events.setdefault(event["customer_id"], []).append(event)
+            now = _now()
             result = []
-            counts = {}
+            matured_rates: dict[str, float | None] = {}
             for arm in exp["variants"]:
                 exposed = [e for e in unique.values() if e["variant"] == arm["key"]]
                 converted = 0
+                matured = 0
+                matured_converted = 0
                 for e in exposed:
                     start = datetime.fromisoformat(e["occurred_at"])
                     end = start + timedelta(days=exp["window_days"])
-                    if any(start <= datetime.fromisoformat(event["occurred_at"]) <= end
-                           for event in events.get(e["customer_id"], [])):
-                        converted += 1
+                    won = any(start <= datetime.fromisoformat(event["occurred_at"]) <= end
+                              for event in events.get(e["customer_id"], []))
+                    converted += int(won)
+                    if end <= now:
+                        matured += 1
+                        matured_converted += int(won)
                 count = len(exposed)
-                rate = converted / count if count else None
-                counts[arm["key"]] = rate
-                result.append({"variant": arm["key"], "exposed_customers": count,
-                               "converted_customers": converted, "conversion_rate": rate})
-            control_rate = counts[exp["control"]]
+                matured_rate = matured_converted / matured if matured else None
+                matured_rates[arm["key"]] = matured_rate
+                result.append({
+                    "variant": arm["key"], "exposed_customers": count,
+                    "converted_customers": converted,
+                    "conversion_rate": converted / count if count else None,
+                    "matured_customers": matured,
+                    "pending_customers": count - matured,
+                    "matured_converted_customers": matured_converted,
+                    "matured_conversion_rate": matured_rate,
+                    "matured_wilson_95": wilson_95(matured_converted, matured),
+                })
+            control_rate = matured_rates[exp["control"]]
             for row in result:
+                rate = row["matured_conversion_rate"]
                 row["observed_difference_pp"] = (
-                    round(100 * (row["conversion_rate"] - control_rate), 4)
-                    if row["conversion_rate"] is not None and control_rate is not None else None
+                    round(100 * (rate - control_rate), 4)
+                    if rate is not None and control_rate is not None else None
                 )
+            observed = {item["variant"]: item["exposed_customers"] for item in result}
+            weights = {item["key"]: item["weight"] for item in exp["variants"]}
             return {
                 "experiment_id": experiment_id, "control": exp["control"],
                 "metric_event": exp["metric_event"], "window_days": exp["window_days"],
-                "results": result, "causal_claim": False,
-                "note": "Observed differences only; not a significance or causal-lift claim.",
+                "results": result,
+                "srm": sample_ratio_diagnostics(observed, weights),
+                "causal_claim": False,
+                "note": "Matured Wilson intervals are descriptive. Provisional conversions have incomplete follow-up; no causal or significance claim.",
                 "source": "synthetic_and_observed" if any(e["synthetic"] for e in unique.values()) else "observed",
             }
         return self._read(analyze)
