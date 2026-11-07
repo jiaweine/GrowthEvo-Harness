@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, Field, StrictBool, model_validator
+from pydantic import AwareDatetime, Field, StrictBool, field_validator, model_validator
 
 from .schemas import RequestModel
 
@@ -112,3 +112,23 @@ class DeliveryReceiptInput(RequestModel):
 
 class ProcessDueInput(RequestModel):
     limit: int = Field(default=50, ge=1, le=200)
+
+
+class PersonalizationInput(RequestModel):
+    customer_id: str = Field(pattern=KEY_PATTERN)
+    request_id: str = Field(pattern=KEY_PATTERN)
+    placement: str = Field(min_length=2, max_length=100)
+    candidate_action_ids: list[str] = Field(min_length=1, max_length=12)
+    consent_state: StrictBool = True
+    frequency_remaining: int = Field(ge=0, le=100, strict=True)
+    budget_remaining: float = Field(ge=0, le=1000000, allow_inf_nan=False)
+
+    @field_validator("candidate_action_ids")
+    @classmethod
+    def check_actions(cls, value: list[str]) -> list[str]:
+        from growthevo.tools.contracts import validated_action_ids
+        return validated_action_ids(value)
+
+
+class PersonalizationExposureInput(RequestModel):
+    surface: str = Field(min_length=2, max_length=100)
