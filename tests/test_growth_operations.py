@@ -173,6 +173,37 @@ def test_real_gateway_receipt_requires_prior_submission_and_profile_consent():
 
 
 
+def test_stopped_journey_suppresses_pending_dispatch_and_stale_submit():
+    fake = _FakeStore()
+    service = GrowthOperations(fake, "test")
+    service.create("customers", "stop_customer", {
+        "customer_id": "stop_customer", "attributes": {}, "consent": True,
+    })
+    service.create("creatives", "stop_creative", {
+        "creative_id": "stop_creative", "channel": "email",
+        "title": "Example", "body": "Only an example",
+    })
+    service.create_journey({
+        "journey_id": "stop_flow", "name": "Stopping test",
+        "trigger_event": "signup", "segment_id": None,
+        "steps": [{"channel": "email", "creative_id": "stop_creative",
+                   "offer_id": None, "delay_seconds": 0}],
+    })
+    service.activate_journey("stop_flow")
+    service.ingest_event(_event("stop_event", "stop_customer", "signup"))
+    delivery_id = service.process_due()["processed"][0]["delivery_id"]
+    assert service.list("deliveries")[0]["status"] == "queued"
+    service.stop_journey("stop_flow")
+    assert service.list("deliveries")[0]["status"] == "suppressed"
+    with pytest.raises(GrowthConflict, match="only real queued"):
+        service.reserve_external_submission(delivery_id)
+
+    # Second gate blocks an accidentally stale queued record as well.
+    fake.records[("deliveries", delivery_id)]["status"] = "queued"
+    with pytest.raises(GrowthConflict, match="journey is stopped"):
+        service.reserve_external_submission(delivery_id)
+
+
 def test_postgres_demo_survives_store_recreation_when_configured():
     database_url = os.getenv("GROWTHEVO_TEST_DATABASE_URL")
     if not database_url:
