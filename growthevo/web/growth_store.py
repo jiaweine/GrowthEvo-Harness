@@ -84,6 +84,17 @@ DDL = (
     CREATE INDEX IF NOT EXISTS growthevo_growth_jobs_due_idx
     ON growthevo_growth_jobs (status, due_at)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS growthevo_growth_feedback (
+        owner_scope TEXT NOT NULL,
+        decision_id TEXT NOT NULL,
+        fact_id TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (owner_scope, decision_id),
+        UNIQUE (owner_scope, fact_id)
+    )
+    """,
 )
 
 
@@ -232,14 +243,55 @@ class GrowthStore:
                 (scope, experiment_id),
             ).fetchone() is not None
 
+    def append_feedback_once(self, scope: str, decision_id: str,
+                             payload: dict[str, Any]) -> dict[str, Any]:
+        with self.pool.connection() as conn:
+            conn.execute(
+                """INSERT INTO growthevo_growth_feedback
+                (owner_scope,decision_id,fact_id,payload)
+                VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                (scope, decision_id, payload["id"], self.jsonb(payload)),
+            )
+            row = conn.execute(
+                """SELECT payload FROM growthevo_growth_feedback
+                WHERE owner_scope=%s AND decision_id=%s""",
+                (scope, decision_id),
+            ).fetchone()
+            if row["payload"] != payload:
+                raise GrowthConflict("decision already has a different feedback event")
+        return deepcopy(payload)
+
+    def feedback_counts(self, scope: str, cohort: str, origin: str) -> dict[str, tuple[int, int]]:
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                """SELECT payload->>'action_id' AS action_id,
+                    sum(CASE WHEN payload->>'success'='true' THEN 1 ELSE 0 END) AS successes,
+                    count(*) AS total
+                FROM growthevo_growth_feedback
+                WHERE owner_scope=%s AND payload->>'cohort'=%s AND payload->>'origin'=%s
+                GROUP BY payload->>'action_id'""",
+                (scope, cohort, origin),
+            ).fetchall()
+        return {row["action_id"]: (int(row["successes"]), int(row["total"])) for row in rows}
+
+    def has_journey_jobs(self, scope: str, journey_id: str) -> bool:
+        with self.pool.connection() as conn:
+            return conn.execute(
+                """SELECT 1 FROM growthevo_growth_jobs
+                WHERE owner_scope=%s AND journey_id=%s LIMIT 1""",
+                (scope, journey_id),
+            ).fetchone() is not None
+
     def enqueue(self, scope: str, job: dict[str, Any]) -> None:
+        document = dict(job)
+        document["due_at"] = job["due_at"].isoformat()
         with self.pool.connection() as conn:
             conn.execute(
                 """INSERT INTO growthevo_growth_jobs
                 (owner_scope,job_id,journey_id,subject_id,event_id,step_index,due_at,payload)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
                 (scope, job["id"], job["journey_id"], job["subject_id"],
-                 job["event_id"], job["step_index"], job["due_at"], self.jsonb(job)),
+                 job["event_id"], job["step_index"], job["due_at"], self.jsonb(document)),
             )
 
     def claim_due(self, limit: int = 20) -> list[dict[str, Any]]:
