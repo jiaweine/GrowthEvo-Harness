@@ -154,6 +154,23 @@ def test_classic_browser_scripts_do_not_redeclare_top_level_globals() -> None:
     assert collisions == []
 
 
+def test_growth_workspace_uses_single_guarded_route_and_pages_bundle() -> None:
+    index = (STATIC / "index.html").read_text(encoding="utf-8")
+    pages = (STATIC / "pages.js").read_text(encoding="utf-8")
+    growth = (STATIC / "growth-operations.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    builder = (ROOT / "scripts" / "build_pages.py").read_text(encoding="utf-8")
+    worker = (STATIC / "service-worker.js").read_text(encoding="utf-8")
+    assert index.index("pages.js") < index.index("growth-operations.js") < index.index("app.js")
+    assert "if(state.route==='growthOps')return growthOperationsPage()" in pages
+    assert "const baseRouteRender=render" in app
+    assert "render=async function guardedRender()" in app
+    assert "previousGrowthRouteRender" not in growth
+    assert "render=function growthOperationsRoute" not in growth
+    assert '"growth-operations.js"' in builder
+    assert "./assets/growth-operations.js" in worker
+
+
 def test_core_product_workbenches_are_real_routes() -> None:
     pages = (STATIC / "pages.js").read_text(encoding="utf-8")
     product_data = (STATIC / "product-data.js").read_text(encoding="utf-8")
@@ -223,7 +240,7 @@ def test_demo_product_actions_have_real_browser_effects() -> None:
 def test_pages_builder_packages_all_product_assets() -> None:
     build_script = (ROOT / "scripts" / "build_pages.py").read_text(encoding="utf-8")
     service_worker = (STATIC / "service-worker.js").read_text(encoding="utf-8")
-    for asset in ("product-pages.css", "auth.js", "runtime-ui.js", "product-data.js", "product-advanced-data.js", "live-pages.js"):
+    for asset in ("product-pages.css", "auth.js", "runtime-ui.js", "product-data.js", "product-advanced-data.js", "live-pages.js", "growth-operations.js"):
         assert asset in build_script
         assert asset in service_worker
     assert "isApi(url)" in service_worker

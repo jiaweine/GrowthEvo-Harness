@@ -45,7 +45,7 @@ jobs:
       - name: Test PostgreSQL migrations, restart recovery, multi-app atomicity, and TTL cleanup
         env:
           GROWTHEVO_TEST_DATABASE_URL: postgresql://growthevo:growthevo-ci@127.0.0.1:55432/growthevo_ci
-        run: pytest tests/test_product_postgres_persistence.py tests/test_agent_execution_journal.py tests/test_durable_evolution.py tests/test_agent_scoped_api.py
+        run: pytest tests/test_product_postgres_persistence.py tests/test_agent_execution_journal.py tests/test_durable_evolution.py tests/test_agent_scoped_api.py tests/test_growth_operations.py tests/test_growth_api.py
       - name: Build production container
         run: docker build -t growthevo-api:persistence-ci .
       - name: Stress durable API, verify restart recovery, replicas, and production gate

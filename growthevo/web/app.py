@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from functools import partial
@@ -7,6 +8,12 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+
+try:
+    from starlette.requests import Request
+except ImportError:  # optional web dependency in core-only installs
+    Request = Any
+
 
 from growthevo.agent_os import GrowthTools
 from growthevo.agent_os.journal import ExecutionConflict, MemoryAgentBackend, RunJournal, principal_scope
@@ -20,6 +27,8 @@ from growthevo.llm.configuration import (
     llm_environment_configured,
 )
 
+from .growth_ops import GrowthOperations
+from .growth_store import GrowthConflict, GrowthMissing, GrowthStore
 from .data import build_dashboard_payload
 from .decisioning import (
     DecisionInputError,
@@ -154,10 +163,11 @@ class ApiBodyLimitMiddleware:
 def create_app() -> Any:
     """Create the GrowthEvo product surface and stable API."""
     try:
-        from fastapi import FastAPI, Header, HTTPException, Query
+        from fastapi import FastAPI, Header, HTTPException, Query, Request
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import FileResponse, JSONResponse
         from fastapi.staticfiles import StaticFiles
+        from .growth_api import growth_router
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("GrowthEvo web dependencies are not installed. Install: pip install -e '.[web]'") from exc
 
@@ -221,6 +231,8 @@ def create_app() -> Any:
     else:
         decision_engine = ReferenceDecisionEngine()
         product_state = ReferenceProductState()
+
+    growth_store = GrowthStore(persistence_store) if persistence_store is not None else None
 
     replay_suite = None
     replay_path = os.getenv("GROWTHEVO_AGENT_BENCHMARK_PATH", "").strip()
@@ -298,9 +310,21 @@ def create_app() -> Any:
 
     @asynccontextmanager
     async def lifespan(_: Any):
+        worker_task = None
+        if (growth_store is not None and
+                os.getenv("GROWTHEVO_JOURNEY_WORKER_ENABLED", "").strip().lower()
+                in {"1", "true", "yes"}):
+            from .growth_worker import run_growth_worker
+            worker_task = asyncio.create_task(run_growth_worker(growth_store))
         try:
             yield
         finally:
+            if worker_task is not None:
+                worker_task.cancel()
+                try:
+                    await worker_task
+                except asyncio.CancelledError:
+                    pass
             try:
                 await close_provider_pool(llm_pool)
             finally:
@@ -316,6 +340,11 @@ def create_app() -> Any:
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
+    app.include_router(growth_router(
+        growth_store, production=settings.production,
+        seed_demo=not settings.production and not settings.synthetic_data,
+    ))
+    app.state.growth_store = growth_store
     app.state.decision_engine = decision_engine
     app.state.product_state = product_state
     app.state.persistence_store = persistence_store
@@ -326,6 +355,14 @@ def create_app() -> Any:
     app.state.agent_traces = agent_traces
     app.state.evolution_authority = evolution_authority
     app.state.runtime_settings = settings
+
+    @app.exception_handler(GrowthMissing)
+    async def growth_missing(_request: Any, _error: GrowthMissing):
+        return JSONResponse(status_code=404, content={"detail": "growth resource not found"})
+
+    @app.exception_handler(GrowthConflict)
+    async def growth_conflict(_request: Any, error: GrowthConflict):
+        return JSONResponse(status_code=409, content={"detail": str(error)})
 
     @app.exception_handler(ExecutionConflict)
     async def execution_conflict(_request: Any, _error: ExecutionConflict):
@@ -359,6 +396,31 @@ def create_app() -> Any:
 
     def runtime_payload() -> dict[str, object]:
         payload = settings.public_payload()
+        gateway_configured = False
+        if settings.production:
+            from .growth_channels import ChannelConfigurationError, ChannelWebhook
+            try:
+                ChannelWebhook.from_environment()
+                gateway_configured = (
+                    len(os.getenv("GROWTHEVO_CHANNEL_SUBMIT_SECRET", "")) >= 16
+                    and len(os.getenv("GROWTHEVO_CHANNEL_RECEIPT_SECRET", "")) >= 16
+                )
+            except ChannelConfigurationError:
+                pass
+        gateway_enabled = bool(gateway_configured and growth_store is not None and runtime_ready())
+        payload["side_effects_enabled"] = gateway_enabled
+        if gateway_enabled:
+            payload["execution_mode"] = "separately-authorized-webhook"
+        payload["growth_operations"] = {
+            "backend": "postgresql" if growth_store is not None else "unavailable",
+            "journey_worker_configured": (
+                growth_store is not None
+                and os.getenv("GROWTHEVO_JOURNEY_WORKER_ENABLED", "").strip().lower()
+                in {"1", "true", "yes"}
+            ),
+            "channel_gateway_configured": gateway_configured,
+            "external_submission_enabled": gateway_enabled,
+        }
         persistence_ok = persistence_healthy()
         authentication_ok = authentication_healthy()
         payload["ready"] = bool(settings.ready and persistence_ok and authentication_ok)
@@ -437,6 +499,12 @@ def create_app() -> Any:
                 connector["label"] = "LLM Provider Pool"
                 connector["state"] = llm_state
 
+        if settings.channel_configured:
+            for connector in connectors:
+                if connector.get("id") == "channels":
+                    connector["state"] = (
+                        "configured" if gateway_configured else "configured_not_active"
+                    )
         payload["connectors"] = connectors
         return payload
 
@@ -457,7 +525,7 @@ def create_app() -> Any:
             and path not in PRODUCTION_SYSTEM_PATHS
         )
         protected_agent_api = authenticator is not None and method != "OPTIONS" and (
-            path.startswith("/api/agent/") or path.startswith("/api/evolution/") or path == "/api/harness/runs"
+            path.startswith("/api/agent/") or path.startswith("/api/evolution/") or path.startswith("/api/growth/") or path == "/api/harness/runs"
         )
 
         if is_production_business_api and not runtime_ready():
@@ -518,7 +586,7 @@ def create_app() -> Any:
             allow_origins=list(settings.cors_origins),
             allow_credentials=False,
             allow_methods=["GET", "POST", "OPTIONS"],
-            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+            allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Channel-Receipt-Token", "X-Channel-Submit-Token"],
         )
 
 
@@ -548,9 +616,40 @@ def create_app() -> Any:
         payload = runtime_payload()
         return payload["connectors"]  # type: ignore[return-value]
 
+    def growth_scope_for_request(request: Request) -> str:
+        claims = getattr(request.state, "auth_claims", None)
+        return principal_scope(claims) if claims is not None else "local-development"
+
+    def database_growth(request: Request) -> GrowthOperations:
+        if growth_store is None:
+            raise RuntimeError("growth database is not connected")
+        scope = growth_scope_for_request(request)
+        if not settings.production:
+            growth_store.ensure_demo(scope)
+        return GrowthOperations(growth_store, scope)
+
     @app.get("/api/dashboard", tags=["dashboard"])
-    def dashboard() -> dict[str, Any]:
-        return build_dashboard_payload(product_state)
+    def dashboard(request: Request) -> dict[str, Any]:
+        payload = build_dashboard_payload(product_state)
+        if growth_store is None:
+            return payload
+        overview = database_growth(request).overview()
+        counts = overview["counts"]
+        # Reference KPI/trend/channel fixtures must never appear as live results.
+        payload["kpis"], payload["trend"], payload["channels"] = [], [], []
+        payload["agent_activity"], payload["tasks"] = [], []
+        payload["project"]["status"] = "database-backed"
+        payload["data_origin"] = overview["data_origin"]
+        payload["summary"].update({
+            "online_decisions": decision_engine.stats().get("recent_decisions", 0),
+            "running_campaigns": sum(
+                c.get("status") in {"Running", "运行中"} for c in product_state.campaigns()
+            ),
+            "agent_automation": None, "no_treatment_rate": None,
+            "customer_records": counts["customers"], "event_records": counts["events"],
+            "exposure_records": counts["exposures"],
+        })
+        return payload
 
     @app.get("/api/capabilities", tags=["dashboard"])
     def capabilities() -> list[dict[str, Any]]:
@@ -562,7 +661,9 @@ def create_app() -> Any:
 
     @app.get("/api/opportunities", tags=["causal"])
     def opportunity_list() -> list[dict[str, Any]]:
-        return opportunities()
+        # Until real CATE serving is wired, never promote fixed example uplift
+        # numbers into a database-connected/production workspace.
+        return [] if growth_store is not None else opportunities()
 
     @app.get("/api/campaigns", tags=["campaigns"])
     def campaign_list() -> list[dict[str, Any]]:
@@ -579,8 +680,27 @@ def create_app() -> Any:
         )
 
     @app.get("/api/experiments", tags=["experiments"])
-    def experiment_list() -> list[dict[str, Any]]:
-        return experiments()
+    def experiment_list(request: Request) -> list[dict[str, Any]]:
+        if growth_store is None:
+            return experiments()
+        rows = database_growth(request).list("experiments")
+        return [
+            {
+                "id": item["experiment_id"], "name": item["name"],
+                "status": item["state"], "primary_metric": item["metric_event"],
+                "variants": [variant["key"] for variant in item["variants"]],
+                "allocation": " / ".join(
+                    f'{variant["key"]}: {variant["weight"]}%'
+                    for variant in item["variants"]
+                ),
+                "maturity": f'{item["window_days"]}d',
+                "assignment": "sticky customer assignment",
+                "estimate": None, "ci": None, "guardrails": [],
+                "hypothesis": "Observed conversion is measured in the database growth workspace.",
+                "synthetic": item.get("synthetic", False),
+            }
+            for item in rows
+        ]
 
     @app.get("/api/approvals", tags=["governance"])
     def approval_list() -> list[dict[str, Any]]:

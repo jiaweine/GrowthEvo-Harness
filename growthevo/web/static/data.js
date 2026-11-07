@@ -215,7 +215,7 @@ const PRODUCT_LABELS={
 };
 function productLabel(value){const text=String(value??'');return Object.hasOwn(PRODUCT_LABELS,text)?PRODUCT_LABELS[text]:text;}
 
-const NAV=[['agent','agent','智能体操作系统'],['evolution','runtime','自进化中心'],['dashboard','home','增长驾驶舱'],['campaigns','strategy','策略与执行'],['evidence','evidence','智能与证据'],['harness','runtime','执行轨迹'],['data','data','数据中心'],['integrations','integrations','集成与渠道'],['settings','settings','设置']];
+const NAV=[['agent','agent','智能体操作系统'],['evolution','runtime','自进化中心'],['dashboard','home','增长驾驶舱'],['campaigns','strategy','策略与执行'],['evidence','evidence','智能与证据'],['harness','runtime','执行轨迹'],['data','data','数据中心'],['growthOps','data','数据驱动运营'],['integrations','integrations','集成与渠道'],['settings','settings','设置']];
 const MOBILE=[['agent','✦','智能体'],['evolution','↗','自进化'],['dashboard','⌂','首页'],['campaigns','▦','活动'],['settings','⚙','设置']];
 
 const DEMO={
