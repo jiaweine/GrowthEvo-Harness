@@ -26,11 +26,15 @@ class _NoRedirect(HTTPRedirectHandler):
 
 class ChannelWebhook:
     def __init__(self, url: str, token: str, allowed_hosts: set[str]):
-        parsed = urlsplit(url)
-        host = (parsed.hostname or "").lower()
+        try:
+            parsed = urlsplit(url)
+            host = (parsed.hostname or "").lower()
+            port = parsed.port
+        except ValueError as exc:
+            raise ChannelConfigurationError("invalid channel webhook URL") from exc
         if (parsed.scheme != "https" or not host or host not in allowed_hosts
                 or parsed.username or parsed.password or parsed.fragment or
-                parsed.port not in (None, 443)):
+                port not in (None, 443)):
             raise ChannelConfigurationError(
                 "channel webhook requires a trusted HTTPS host on the explicit allowlist"
             )
