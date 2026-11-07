@@ -59,8 +59,10 @@ class GrowthTransaction:
             """SELECT payload FROM growthevo_growth_records
                WHERE owner_scope=%s AND collection=%s
                ORDER BY item_id LIMIT %s""",
-            (self.scope, kind, limit),
+            (self.scope, kind, limit + 1),
         ).fetchall()
+        if len(rows) > limit:
+            raise GrowthConflict("bounded record scan exceeded; pagination required")
         return [deepcopy(row["payload"]) for row in rows]
 
     def put(self, kind: str, key: str, payload: dict[str, Any], *, new: bool = False) -> None:
@@ -120,6 +122,7 @@ class GrowthStore:
         with self.pool.connection() as conn:
             rows = conn.execute(
                 """SELECT DISTINCT owner_scope FROM growthevo_growth_records
-                   WHERE collection='jobs' LIMIT 100"""
+                   WHERE collection='jobs' AND payload->>'status'='pending'
+                   ORDER BY owner_scope LIMIT 100"""
             ).fetchall()
         return [row["owner_scope"] for row in rows]
