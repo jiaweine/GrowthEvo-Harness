@@ -27,9 +27,13 @@ GrowthEvo 的客户画像、行为事件、动态人群、旅程、素材、优�
 | 素材、优惠 | GET、POST /api/growth/creatives、offers | 可引用的内容与优惠目录 |
 | 实验 | GET、POST /api/growth/experiments | 固定权重、显式对照组 |
 | 曝光 | POST /api/growth/experiments/{id}/exposures | 稳定分组、记录曝光、幂等请求 |
-| 报告 | GET /api/growth/experiments/{id}/report | 分组曝光、转化、观测差 |
+| 报告 | GET /api/growth/experiments/{id}/report | 曝光、成熟转化率、Wilson 区间、SRM 检查及观测差 |
+| 个体化决策 | POST /api/growth/personalization/decide | 固定请求幂等、可追踪策略概率、保留不触达 |
+| 个体化曝光 | POST /api/growth/personalization/{request_id}/exposure | 由客户端显式确认实际曝光 |
+| 个体化指标 | GET /api/growth/personalization/metrics | 决策、曝光与概率记录 |
 | 旅程 | GET、POST /api/growth/journeys | 事件触发、动态人群和延迟步骤 |
 | 激活 | POST /api/growth/journeys/{id}/activate | 人工启用旅程 |
+| 停止 | POST /api/growth/journeys/{id}/stop | 阻断待办与尚未提交的渠道命令 |
 | 到期处理 | POST /api/growth/journeys/process | 仅创建待投递记录 |
 | 队列 | GET /api/growth/journeys/jobs | 持久化任务状态 |
 | 投递记录 | GET /api/growth/deliveries | 区分模拟、排队、提交、渠道回执 |
@@ -52,7 +56,9 @@ GrowthEvo 的客户画像、行为事件、动态人群、旅程、素材、优�
 
 哈希使用身份作用域、实验 ID 和客户 ID，确保同一客户分组稳定。曝光由明确请求单独记录，分组不能代替曝光。未取得授权的客户不能进入曝光。转化统计只计入曝光后、成熟窗口内的目标事件。
 
-报告提供观测转化率与相对对照组的百分点差异，不声称通过显著性检验或证明因果增长。现有 CATE、OPE、Safe-PI 研究组件尚未自动接管这批新接口的在线策略。
+实验报告把尚在观察窗口内的用户与已成熟用户分开：未成熟用户不进入成熟转化率分母。成熟样本同时显示 Wilson 95% 描述性区间，曝光分配比例使用卡方 SRM 检查（样本少于 20 人时不作诊断）。只有对照与处理组均有成熟样本时才显示成熟观察差异，**这些都不是显著性检验结论或因果效果证明**。
+
+个体化决策独立使用成熟反馈的观测转化率，在预算与营销授权等输入约束下保留至少 35% 不触达概率；每次决策记录完整分布和实际选择概率。客户端必须在实际展示后单独确认曝光，过期 15 分钟的未确认决策会被拒绝。决策模块标为证据 D 级，未经校准的观测选择不会被称为 CATE 或安全策略上线。现有 CATE、OPE、Safe-PI 研究组件尚未自动接管这批新接口的在线策略。
 
 ## 持续旅程执行
 
@@ -62,7 +68,7 @@ GrowthEvo 的客户画像、行为事件、动态人群、旅程、素材、优�
 GROWTHEVO_JOURNEY_WORKER_ENABLED=1
 ~~~
 
-Worker 每五秒轮询到期任务，多个进程对同一作用域使用 PostgreSQL 事务锁防止重复创建投递。Worker **只生成待发命令**，不主动访问外部营销系统。
+Worker 每五秒轮询到期任务，多个进程对同一作用域使用 PostgreSQL 事务锁防止重复创建投递。Worker **只生成待发命令**，不主动访问外部营销系统。停止旅程会抑制待办和未提交的渠道记录，渠道提交时还会重新校验旅程是否运行及客户是否仍同意营销。
 
 当前实现适合有限规模验证；仍需改进批量扫描、分页、独立 Outbox Worker、调度公平性、死信、租约、补偿和限速，不宣称已具备大型营销平台的运营容量。
 
@@ -96,5 +102,5 @@ python -m pytest tests/test_growth_operations.py tests/test_growth_api.py
 
 1. 让训练好的 CATE 模型与 Safe-PI 策略成为真正的在线推理产物，同时保存精确行为概率、特征版本和策略证据。
 2. 补客户身份解析、组织 RBAC、数据保留与删除、业务审批、渠道频控和预算账本。
-3. 补实验互斥、SRM、置信区间、长期 Holdout、线上随机化和序贯分析。
+3. 在已有 SRM 与描述性 Wilson 区间上增加实验互斥、长期 Holdout、线上随机化审计、序贯分析与多重比较控制。
 4. 将现有 JSONB 记录层逐渐拆分为事件存储、运营数据库、可靠 Outbox 和分析仓库。
