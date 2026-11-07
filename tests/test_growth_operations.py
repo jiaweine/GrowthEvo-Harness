@@ -305,7 +305,7 @@ def test_contextual_personalization_cold_start_holdout_and_matured_feedback():
                 }
     fake.records[("personalization_exposures", "duplicate_old_exposure")] = {
         "request_id": "duplicate_old_exposure",
-        "customer_id": "feedback_free_shipping_00",
+        "customer_id": "feedback_free_shipping_0",
         "cohort": "new", "action_id": "coupon_10",
         "occurred_at": (started + timedelta(seconds=1)).isoformat(), "synthetic": True,
     }
