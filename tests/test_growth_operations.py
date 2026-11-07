@@ -260,6 +260,10 @@ def test_contextual_personalization_uses_stable_logged_propensities():
     assert personalizer.metrics()["confirmed_exposures"] == 1
     with pytest.raises(GrowthConflict, match="surface"):
         personalizer.confirm_exposure(payload["request_id"], "wrong_surface")
+    GrowthOperations(fake, "test").update_customer("demo_customer_01", {"consent": False})
+    with pytest.raises(GrowthConflict, match="consent withdrawn"):
+        personalizer.decide(payload)
+
 
 
 def test_contextual_personalization_cold_start_holdout_and_matured_feedback():
@@ -299,6 +303,12 @@ def test_contextual_personalization_cold_start_holdout_and_matured_feedback():
                         started + timedelta(days=1)
                     ).isoformat(), "synthetic": True,
                 }
+    fake.records[("personalization_exposures", "duplicate_old_exposure")] = {
+        "request_id": "duplicate_old_exposure",
+        "customer_id": "feedback_free_shipping_00",
+        "cohort": "new", "action_id": "coupon_10",
+        "occurred_at": started.isoformat(), "synthetic": True,
+    }
     decision = service.decide(payload)
     assert decision["learning_status"] == "matured"
     assert decision["matured_sample_counts"] == {action: 20 for action in actions}
