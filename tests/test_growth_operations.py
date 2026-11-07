@@ -374,5 +374,9 @@ def test_srm_monitor_and_wilson_bounds():
     assert mismatch["p_value"] < 0.01
     assert sample_ratio_diagnostics({"A": 20, "B": 20, "C": 20},
                                     {"A": 33, "B": 33, "C": 34})["status"] == "pass"
+    sparse = sample_ratio_diagnostics({"A": 49, "B": 1},
+                                     {"A": 99, "B": 1})
+    assert sparse["status"] == "insufficient_exposures"
+    assert sparse["p_value"] is None
     assert wilson_95(0, 0) is None
     assert 0 <= wilson_95(3, 10)[0] <= .3 <= wilson_95(3, 10)[1] <= 1
