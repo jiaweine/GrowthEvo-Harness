@@ -29,7 +29,7 @@ class EventInput(RequestModel):
     event_id: str = Field(pattern=KEY_PATTERN)
     customer_id: str = Field(pattern=KEY_PATTERN)
     name: str = Field(min_length=2, max_length=80, pattern=r"^[a-zA-Z][a-zA-Z0-9_]*$")
-    occurred_at: AwareDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    occurred_at: AwareDatetime | None = None
     properties: dict[str, str | int | float | bool] = Field(default_factory=dict, max_length=32)
 
 
