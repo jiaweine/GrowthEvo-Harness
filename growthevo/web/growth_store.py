@@ -85,6 +85,26 @@ DDL = (
     ON growthevo_growth_jobs (status, due_at)
     """,
     """
+    CREATE INDEX IF NOT EXISTS growthevo_growth_facts_exposure_idx
+    ON growthevo_growth_facts (owner_scope, kind, related_id, subject_id)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS growthevo_growth_experiment_metrics (
+        owner_scope TEXT NOT NULL,
+        experiment_id TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        metric_id TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (owner_scope, experiment_id, subject_id),
+        UNIQUE (owner_scope, metric_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS growthevo_growth_experiment_metrics_lookup_idx
+    ON growthevo_growth_experiment_metrics (owner_scope, experiment_id)
+    """,
+    """
     CREATE TABLE IF NOT EXISTS growthevo_growth_feedback (
         owner_scope TEXT NOT NULL,
         decision_id TEXT NOT NULL,
@@ -208,6 +228,59 @@ class GrowthStore:
             ).fetchall()
         return deepcopy([r["payload"] for r in rows])
 
+    def has_exposure(self, scope: str, experiment_id: str, subject_id: str) -> bool:
+        with self.pool.connection() as conn:
+            return conn.execute(
+                """SELECT 1 FROM growthevo_growth_facts
+                WHERE owner_scope=%s AND kind='exposure' AND related_id=%s
+                AND subject_id=%s LIMIT 1""",
+                (scope, experiment_id, subject_id),
+            ).fetchone() is not None
+
+    def record_metric(self, scope: str, experiment_id: str, subject_id: str,
+                      metric_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.pool.connection() as conn:
+            conn.execute(
+                """INSERT INTO growthevo_growth_experiment_metrics
+                (owner_scope,experiment_id,subject_id,metric_id,payload)
+                VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                (scope, experiment_id, subject_id, metric_id, self.jsonb(payload)),
+            )
+            row = conn.execute(
+                """SELECT metric_id,payload FROM growthevo_growth_experiment_metrics
+                WHERE owner_scope=%s AND experiment_id=%s AND subject_id=%s""",
+                (scope, experiment_id, subject_id),
+            ).fetchone()
+            if row["metric_id"] != metric_id or row["payload"] != payload:
+                raise GrowthConflict("subject already has a different experiment outcome")
+        return deepcopy(payload)
+
+    def experiment_counts(self, scope: str, experiment_id: str) -> dict[str, tuple[int, int, int]]:
+        """Return exact assigned, exposed and converted subject counts per arm."""
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                """SELECT a.variant,
+                    COUNT(DISTINCT a.subject_id) AS assigned,
+                    COUNT(DISTINCT e.subject_id) AS exposed,
+                    COUNT(DISTINCT CASE
+                        WHEN e.subject_id IS NOT NULL AND m.payload->>'value'='1'
+                        THEN a.subject_id END) AS converted
+                FROM growthevo_growth_assignments a
+                LEFT JOIN growthevo_growth_facts e
+                  ON e.owner_scope=a.owner_scope AND e.kind='exposure'
+                 AND e.related_id=a.experiment_id AND e.subject_id=a.subject_id
+                LEFT JOIN growthevo_growth_experiment_metrics m
+                  ON m.owner_scope=a.owner_scope AND m.experiment_id=a.experiment_id
+                 AND m.subject_id=a.subject_id
+                WHERE a.owner_scope=%s AND a.experiment_id=%s
+                GROUP BY a.variant""",
+                (scope, experiment_id),
+            ).fetchall()
+        return {
+            row["variant"]: (int(row["assigned"]), int(row["exposed"]), int(row["converted"]))
+            for row in rows
+        }
+
     def assignment(self, scope: str, experiment_id: str, subject_id: str,
                    proposed_variant: str) -> str:
         with self.pool.connection() as conn:
@@ -297,7 +370,8 @@ class GrowthStore:
         with self.pool.connection() as conn:
             rows = conn.execute(
                 """SELECT owner_scope,job_id,payload FROM growthevo_growth_jobs
-                WHERE status='queued' AND due_at <= now()
+                WHERE (status='queued' AND due_at <= now())
+                   OR (status='processing' AND updated_at < now() - interval '2 minutes')
                 ORDER BY due_at, job_id LIMIT %s FOR UPDATE SKIP LOCKED""",
                 (min(max(limit, 1), 50),),
             ).fetchall()
