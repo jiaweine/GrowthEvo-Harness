@@ -20,6 +20,8 @@ from growthevo.llm.configuration import (
     llm_environment_configured,
 )
 
+from .growth_api import growth_router
+from .growth_store import GrowthConflict, GrowthMissing, GrowthStore
 from .data import build_dashboard_payload
 from .decisioning import (
     DecisionInputError,
@@ -222,6 +224,8 @@ def create_app() -> Any:
         decision_engine = ReferenceDecisionEngine()
         product_state = ReferenceProductState()
 
+    growth_store = GrowthStore(persistence_store) if persistence_store is not None else None
+
     replay_suite = None
     replay_path = os.getenv("GROWTHEVO_AGENT_BENCHMARK_PATH", "").strip()
     replay_digest = os.getenv("GROWTHEVO_AGENT_BENCHMARK_SHA256", "").strip()
@@ -316,6 +320,11 @@ def create_app() -> Any:
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
+    app.include_router(growth_router(
+        growth_store, production=settings.production,
+        seed_demo=not settings.production and not settings.synthetic_data,
+    ))
+    app.state.growth_store = growth_store
     app.state.decision_engine = decision_engine
     app.state.product_state = product_state
     app.state.persistence_store = persistence_store
@@ -326,6 +335,14 @@ def create_app() -> Any:
     app.state.agent_traces = agent_traces
     app.state.evolution_authority = evolution_authority
     app.state.runtime_settings = settings
+
+    @app.exception_handler(GrowthMissing)
+    async def growth_missing(_request: Any, _error: GrowthMissing):
+        return JSONResponse(status_code=404, content={"detail": "growth resource not found"})
+
+    @app.exception_handler(GrowthConflict)
+    async def growth_conflict(_request: Any, error: GrowthConflict):
+        return JSONResponse(status_code=409, content={"detail": str(error)})
 
     @app.exception_handler(ExecutionConflict)
     async def execution_conflict(_request: Any, _error: ExecutionConflict):
@@ -457,7 +474,7 @@ def create_app() -> Any:
             and path not in PRODUCTION_SYSTEM_PATHS
         )
         protected_agent_api = authenticator is not None and method != "OPTIONS" and (
-            path.startswith("/api/agent/") or path.startswith("/api/evolution/") or path == "/api/harness/runs"
+            path.startswith("/api/agent/") or path.startswith("/api/evolution/") or path.startswith("/api/growth/") or path == "/api/harness/runs"
         )
 
         if is_production_business_api and not runtime_ready():
@@ -518,7 +535,7 @@ def create_app() -> Any:
             allow_origins=list(settings.cors_origins),
             allow_credentials=False,
             allow_methods=["GET", "POST", "OPTIONS"],
-            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+            allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Channel-Receipt-Token"],
         )
 
 
