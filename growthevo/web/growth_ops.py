@@ -83,7 +83,10 @@ class GrowthOperations:
 
     def create_experiment(self, data: dict[str, Any]) -> dict[str, Any]:
         document = dict(data, created_at=_iso(_now()), synthetic=False, state="active")
-        return self._write(lambda tx: (tx.put("experiments", data["experiment_id"], document, new=True), document)[1])
+        def insert(tx: Any) -> dict[str, Any]:
+            tx.put("experiments", data["experiment_id"], document, new=True)
+            return document
+        return self._write(insert)
 
     def expose(self, experiment_id: str, data: dict[str, Any]) -> dict[str, Any]:
         def assign(tx: Any) -> dict[str, Any]:
@@ -259,6 +262,50 @@ class GrowthOperations:
             return {"processed": processed, "count": len(processed)}
         return self._write(process)
 
+    def reserve_external_submission(self, delivery_id: str) -> dict[str, Any]:
+        """Atomically reserve a first-party delivery intent for a trusted adapter.
+
+        No automatic retry follows a network-uncertain submission: the receiver
+        must reconcile the idempotency key before an operator tries again.
+        """
+        def reserve(tx: Any) -> dict[str, Any]:
+            delivery = _require(tx, "deliveries", delivery_id)
+            if delivery["synthetic"] or delivery["status"] != "queued":
+                raise GrowthConflict("only real queued deliveries can be submitted")
+            if delivery.get("dispatch_state") is not None:
+                raise GrowthConflict("delivery already reserved for submission")
+            customer = _require(tx, "customers", delivery["customer_id"])
+            if not customer["consent"]:
+                delivery["status"] = "suppressed"
+                tx.put("deliveries", delivery_id, delivery)
+                raise GrowthConflict("customer withdrew consent")
+            creative = _require(tx, "creatives", delivery["creative_id"])
+            offer = (tx.get("offers", delivery["offer_id"])
+                     if delivery["offer_id"] else None)
+            delivery["dispatch_state"] = "sending"
+            delivery["dispatch_reserved_at"] = _iso(_now())
+            tx.put("deliveries", delivery_id, delivery)
+            return {
+                "delivery_id": delivery_id, "channel": delivery["channel"],
+                "customer_id": delivery["customer_id"], "creative": creative,
+                "offer": offer, "idempotency_key": delivery_id,
+            }
+        return self._write(reserve)
+
+    def finish_external_submission(self, delivery_id: str, *, accepted: bool,
+                                   reason: str) -> dict[str, Any]:
+        def finish(tx: Any) -> dict[str, Any]:
+            delivery = _require(tx, "deliveries", delivery_id)
+            if delivery.get("dispatch_state") != "sending":
+                raise GrowthConflict("delivery submission is not reserved")
+            delivery["dispatch_state"] = "accepted" if accepted else "uncertain"
+            delivery["dispatch_note"] = reason[:180]
+            if accepted and delivery["status"] == "queued":
+                delivery["status"] = "submitted"
+            tx.put("deliveries", delivery_id, delivery)
+            return delivery
+        return self._write(finish)
+
     def record_receipt(self, delivery_id: str, data: dict[str, Any], *,
                        permit_simulation: bool) -> dict[str, Any]:
         def apply(tx: Any) -> dict[str, Any]:
@@ -271,7 +318,7 @@ class GrowthOperations:
                 return {"delivery": delivery, "deduplicated": True}
             if delivery["synthetic"] and not permit_simulation:
                 raise GrowthConflict("synthetic delivery receipts are disabled in production")
-            if delivery["status"] not in {"queued", "simulated"}:
+            if delivery["status"] not in {"queued", "submitted", "simulated"}:
                 raise GrowthConflict("delivery already has a final receipt")
             receipt = dict(data, delivery_id=delivery_id,
                            synthetic=bool(delivery["synthetic"]))
