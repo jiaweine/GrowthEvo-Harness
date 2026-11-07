@@ -93,8 +93,11 @@ function growthOverview(data){
     +'<div class="evidence-row"><span>渠道提交</span><strong>生产权限 + 可信 HTTPS 网关</strong></div>'
     +'<p>Worker 仅生成待投递记录。网关接受不等于送达；离线评估不等于因果证明。</p>',
     'span-8')
-    +growthCard('最新行为事件','来源和发生时间均来自数据库。',
-      growthTable('events',data.events,[['occurred_at','发生时间'],['customer_id','客户'],
+    +growthCard('记录客户事件','事件去重写入数据库，新近事件才会触发已激活旅程。',
+      growthForm('event',growthField('客户','event_customer',{
+        select:growthOptions(data.customers,'customer_id')})
+        +growthField('事件名称','event_name',{value:'signup'}),'记录事件')
+      +growthTable('events',data.events,[['occurred_at','发生时间'],['customer_id','客户'],
         ['name','事件'],['synthetic','来源',growthSourceLabel]]),'span-12')
     +growthCard('当前任务','查看待执行、已处理和受抑制状态。',
       growthTable('jobs',data.jobs,[['job_id','任务'],['customer_id','客户'],
@@ -108,9 +111,6 @@ function growthCustomers(data){
     +growthField('属性值','new_customer_value',{placeholder:'new',maxlength:150})
     +'<div class="field"><label><input type="checkbox" name="new_customer_consent"> 已取得营销授权</label></div>',
     '创建客户');
-  const customerSelect=growthField('查看客户画像','profile_customer_id',{
-    select:growthOptions(c,'customer_id')
-  });
   const profile=growthState.profile;
   const profileDetail=profile
     ?growthCard('客户 · '+profile.customer.customer_id,
@@ -350,9 +350,11 @@ function growthBind(){
     const value=name=>growthFormValue(form,name);
     const checkbox=name=>form.elements.namedItem(name)?.checked===true;
     const named=form.dataset.growthForm;
-    const customer=dataId=>dataId||null;
     let operation;
-    if(named==='customer')operation=()=>growthPost('/api/growth/customers',{
+    if(named==='event')operation=()=>growthPost('/api/growth/events',{
+      event_id:growthId('ui_event'),customer_id:value('event_customer'),name:value('event_name')
+    });
+    else if(named==='customer')operation=()=>growthPost('/api/growth/customers',{
       customer_id:value('new_customer_id'),
       attributes:{[value('new_customer_key')]:value('new_customer_value')},
       consent:checkbox('new_customer_consent')
