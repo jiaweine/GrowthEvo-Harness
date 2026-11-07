@@ -17,6 +17,7 @@ function dashboardTrendSeries(data,metric,granularity){
 }
 
 function dashboardTrendMarkup(data,metric,granularity){
+  if(!Array.isArray(data.trend)||data.trend.length===0)return '<div class="card surface-card"><p>尚无可验证的真实增量效果趋势；接入已验证的在线实验与结果数据后才会展示。</p></div>';
   const spec=dashboardTrendSeries(data,metric,granularity);
   const latest=spec.values[spec.values.length-1]||0;
   const formatted=spec.digits?latest.toFixed(spec.digits):Math.round(latest).toLocaleString('zh-CN');
@@ -38,7 +39,7 @@ async function dashboard(){
     ['⌘','cyan','接入新的数据源','连接数据仓库或业务系统','integrations'],
   ];
 
-  $('#view').innerHTML=`${head('增长驾驶舱',useDemo?'当前展示演示数据，可从智能体操作系统探索业务工作流。':'当前展示服务端返回的业务数据；增长结果以实际证据为准。','<button class="primary" id="new-c" type="button">＋ 新建活动</button><button class="secondary" id="talk" type="button">◉ 与 Agent 对话</button><button class="more-btn" id="dashboard-more" type="button" aria-label="更多驾驶舱操作">•••</button>')}
+  $('#view').innerHTML=`${head('增长驾驶舱',useDemo?'当前展示演示数据，可从智能体操作系统探索业务工作流。':'当前展示数据库演示样例时不代表真实客户收益；没有经过验证的增长证据将明确留空。','<button class="primary" id="new-c" type="button">＋ 新建活动</button><button class="secondary" id="talk" type="button">◉ 与 Agent 对话</button><button class="more-btn" id="dashboard-more" type="button" aria-label="更多驾驶舱操作">•••</button>')}
   <div class="kpi-grid">${kpis.map((k,index)=>`<div class="card kpi"><div class="kpi-label">${esc(k.label)}</div><div class="kpi-value">${esc(k.formatted)}</div><div class="kpi-delta">↑ ${esc(k.delta)}<span>${esc(k.suffix||'')}</span></div>${spark(k.spark||DEMO.kpis[index]?.spark||[1,2,3],safeColor(k.color,DEMO.kpis[index]?.color||'#5361f0'))}</div>`).join('')}</div>
   <div class="dashboard-grid">
     <div class="card panel">
