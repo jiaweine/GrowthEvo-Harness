@@ -110,6 +110,8 @@ class GrowthOperations:
             customer = _require(tx, "customers", data["customer_id"])
             if not customer["consent"]:
                 raise GrowthConflict("customer has no consent for experimental exposure")
+            if bool(exp.get("synthetic")) != bool(customer.get("synthetic")):
+                raise GrowthConflict("cannot mix synthetic and business experiment populations")
             key = experiment_id + ":" + data["request_id"]
             prior = tx.get("exposures", key)
             if prior is not None:
@@ -194,8 +196,12 @@ class GrowthOperations:
                 creative = _require(tx, "creatives", step["creative_id"])
                 if creative["channel"] != step["channel"]:
                     raise GrowthConflict("creative channel does not match journey step")
+                if creative.get("synthetic"):
+                    raise GrowthConflict("synthetic creative cannot enter business journey")
                 if step["offer_id"] is not None:
-                    _require(tx, "offers", step["offer_id"])
+                    offer = _require(tx, "offers", step["offer_id"])
+                    if offer.get("synthetic"):
+                        raise GrowthConflict("synthetic offer cannot enter business journey")
             tx.put("journeys", data["journey_id"], document, new=True)
             return document
         return self._write(create)
@@ -231,6 +237,8 @@ class GrowthOperations:
                 return {"event": event, "new_enrollments": 0, "deduplicated": False}
             for journey in tx.all("journeys"):
                 if not journey["active"] or journey["trigger_event"] != event["name"]:
+                    continue
+                if bool(journey.get("synthetic")) != bool(customer.get("synthetic")):
                     continue
                 if journey["segment_id"]:
                     segment = _require(tx, "segments", journey["segment_id"])
