@@ -145,6 +145,10 @@ def growth_router(store: GrowthStore | None, *, production: bool,
     def activate(journey_id: str, request: Request) -> dict[str, Any]:
         return context(request).activate_journey(journey_id)
 
+    @router.post("/journeys/{journey_id}/stop")
+    def stop_journey(journey_id: str, request: Request) -> dict[str, Any]:
+        return context(request).stop_journey(journey_id)
+
     @router.get("/journeys/jobs")
     def jobs(request: Request) -> list[dict[str, Any]]:
         return context(request).list("jobs")
