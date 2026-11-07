@@ -36,6 +36,21 @@ def _matches(customer: dict[str, Any], segment: dict[str, Any]) -> bool:
     return all(customer["attributes"].get(k) == v for k, v in segment["equals"].items())
 
 
+def _journey_block_reason(tx: Any, customer: dict[str, Any],
+                          journey: dict[str, Any]) -> str | None:
+    """One eligibility contract for enrollment, scheduling and dispatch."""
+    if not journey["active"]:
+        return "journey is stopped"
+    if not customer["consent"]:
+        return "customer withdrew consent"
+    if bool(customer.get("synthetic")) != bool(journey.get("synthetic")):
+        return "customer and journey have different data origins"
+    segment_id = journey["segment_id"]
+    if segment_id and not _matches(customer, _require(tx, "segments", segment_id)):
+        return "customer no longer matches journey segment"
+    return None
+
+
 class GrowthOperations:
     def __init__(self, store: GrowthStore, scope: str):
         self.store = store
@@ -277,14 +292,9 @@ class GrowthOperations:
             if not fresh or not customer["consent"]:
                 return {"event": event, "new_enrollments": 0, "deduplicated": False}
             for journey in tx.all("journeys"):
-                if not journey["active"] or journey["trigger_event"] != event["name"]:
+                if (journey["trigger_event"] != event["name"]
+                        or _journey_block_reason(tx, customer, journey) is not None):
                     continue
-                if bool(journey.get("synthetic")) != bool(customer.get("synthetic")):
-                    continue
-                if journey["segment_id"]:
-                    segment = _require(tx, "segments", journey["segment_id"])
-                    if not _matches(customer, segment):
-                        continue
                 job_id = "job_" + journey["journey_id"] + "_" + event["event_id"] + "_0"
                 job = {"job_id": job_id, "journey_id": journey["journey_id"],
                        "customer_id": customer["customer_id"], "step_index": 0,
@@ -306,7 +316,7 @@ class GrowthOperations:
             for job in due[:limit]:
                 customer = _require(tx, "customers", job["customer_id"])
                 journey = _require(tx, "journeys", job["journey_id"])
-                if not customer["consent"] or not journey["active"]:
+                if _journey_block_reason(tx, customer, journey) is not None:
                     job["status"] = "suppressed"
                     tx.put("jobs", job["job_id"], job)
                     processed.append({"job_id": job["job_id"], "status": "suppressed"})
@@ -339,13 +349,12 @@ class GrowthOperations:
             if delivery["synthetic"] or delivery["status"] != "queued":
                 raise GrowthConflict("only real queued deliveries can be submitted")
             journey = _require(tx, "journeys", delivery["journey_id"])
-            if not journey["active"]:
-                raise GrowthConflict("journey is stopped")
+            customer = _require(tx, "customers", delivery["customer_id"])
+            reason = _journey_block_reason(tx, customer, journey)
+            if reason is not None:
+                raise GrowthConflict(reason)
             if delivery.get("dispatch_state") is not None:
                 raise GrowthConflict("delivery already reserved for submission")
-            customer = _require(tx, "customers", delivery["customer_id"])
-            if not customer["consent"]:
-                raise GrowthConflict("customer withdrew consent")
             creative = _require(tx, "creatives", delivery["creative_id"])
             offer = (tx.get("offers", delivery["offer_id"])
                      if delivery["offer_id"] else None)
