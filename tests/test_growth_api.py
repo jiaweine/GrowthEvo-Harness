@@ -130,3 +130,40 @@ def test_growth_api_writes_real_postgres_and_separates_external_sends(monkeypatc
         assert impression.status_code == 201, impression.text
         assert client.get("/api/growth/personalization/metrics").json()["confirmed_exposures"] >= 1
 
+        audit = client.get("/api/growth/personalization/offline-evidence")
+        assert audit.status_code == 200
+        assert audit.json()["status"] == "insufficient_evidence"
+        assert audit.json()["promotion_allowed"] is False
+        assert audit.json()["causal_claim"] is False
+        assert client.get(
+            "/api/growth/personalization/offline-evidence",
+            params={"target_action_id": "unknown_action"},
+        ).status_code == 409
+
+        synthetic_purchase = client.post("/api/growth/events", json={
+            "event_id": prefix + "_demo_purchase",
+            "customer_id": "demo_customer_01", "name": "purchase",
+        })
+        assert synthetic_purchase.status_code == 201
+        assert synthetic_purchase.json()["event"]["synthetic"] is True
+        real_purchase = [row for row in client.get("/api/growth/events").json()
+                         if row["event_id"] == prefix + "_purchase"][0]
+        assert real_purchase["synthetic"] is False
+
+
+
+
+
+def test_synthetic_offline_evidence_is_forbidden_in_production():
+    from fastapi import FastAPI
+    from growthevo.web.growth_api import growth_router
+
+    standalone = FastAPI()
+    standalone.include_router(growth_router(None, production=True, seed_demo=False))
+    client = TestClient(standalone)
+    response = client.get(
+        "/api/growth/personalization/offline-evidence",
+        params={"synthetic": "true"},
+    )
+    assert response.status_code == 403
+    assert client.get("/api/growth/overview").status_code == 503
