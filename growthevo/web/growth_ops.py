@@ -343,6 +343,8 @@ class GrowthOperations:
                 raise GrowthConflict("synthetic delivery receipts are disabled in production")
             if delivery["status"] not in {"queued", "submitted", "simulated"}:
                 raise GrowthConflict("delivery already has a final receipt")
+            if not permit_simulation and delivery.get("dispatch_state") not in {"sending", "accepted", "uncertain"}:
+                raise GrowthConflict("external delivery must be submitted before receipt")
             receipt = dict(data, delivery_id=delivery_id,
                            synthetic=bool(delivery["synthetic"]))
             tx.put("receipts", receipt_id, receipt, new=True)
