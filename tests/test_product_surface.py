@@ -223,7 +223,7 @@ def test_demo_product_actions_have_real_browser_effects() -> None:
 def test_pages_builder_packages_all_product_assets() -> None:
     build_script = (ROOT / "scripts" / "build_pages.py").read_text(encoding="utf-8")
     service_worker = (STATIC / "service-worker.js").read_text(encoding="utf-8")
-    for asset in ("product-pages.css", "auth.js", "runtime-ui.js", "product-data.js", "product-advanced-data.js", "live-pages.js"):
+    for asset in ("product-pages.css", "auth.js", "runtime-ui.js", "product-data.js", "product-advanced-data.js", "live-pages.js", "growth-operations.js"):
         assert asset in build_script
         assert asset in service_worker
     assert "isApi(url)" in service_worker
