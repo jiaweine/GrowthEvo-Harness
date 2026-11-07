@@ -116,6 +116,17 @@ def growth_router(store: GrowthStore | None, *, production: bool,
     def personalization_metrics(request: Request) -> dict[str, Any]:
         return personalizer(request).metrics()
 
+    @router.get("/personalization/offline-evidence")
+    def offline_policy_evidence(
+        request: Request, target_action_id: str = "NO_TREATMENT",
+        synthetic: bool = False,
+    ) -> dict[str, Any]:
+        if production and synthetic:
+            raise HTTPException(status_code=403, detail="synthetic evidence unavailable in production")
+        return personalizer(request).offline_evidence(
+            target_action_id, synthetic=synthetic,
+        )
+
     @router.get("/experiments")
     def experiments(request: Request) -> list[dict[str, Any]]:
         return context(request).list("experiments")
