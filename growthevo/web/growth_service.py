@@ -173,7 +173,10 @@ class GrowthService:
         cohort = profile["segment"] if profile else "unknown"
         probabilities: dict[str, float] = {"NO_TREATMENT": 1.0}
         if eligible and offers:
-            counts = self.store.feedback_counts(self.scope, cohort)
+            counts = self.store.feedback_counts(
+                self.scope, cohort,
+                "simulated" if profile.get("origin") == "simulated" else "observed",
+            )
             scores: dict[str, float] = {}
             for offer in offers:
                 successes, total = counts.get(offer["id"], (0, 0))
