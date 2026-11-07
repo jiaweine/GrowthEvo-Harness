@@ -234,6 +234,24 @@ class GrowthOperations:
             return row
         return self._write(activate)
 
+    def stop_journey(self, journey_id: str) -> dict[str, Any]:
+        """Stop future scheduling and block pending outbound gateway submissions."""
+        def stop(tx: Any) -> dict[str, Any]:
+            journey = _require(tx, "journeys", journey_id)
+            journey["active"] = False
+            journey["stopped_at"] = _iso(_now())
+            tx.put("journeys", journey_id, journey)
+            for job in tx.all("jobs"):
+                if job["journey_id"] == journey_id and job["status"] == "pending":
+                    job["status"] = "suppressed"
+                    tx.put("jobs", job["job_id"], job)
+            for delivery in tx.all("deliveries"):
+                if delivery["journey_id"] == journey_id and delivery["status"] == "queued":
+                    delivery["status"] = "suppressed"
+                    tx.put("deliveries", delivery["delivery_id"], delivery)
+            return journey
+        return self._write(stop)
+
     def ingest_event(self, data: dict[str, Any]) -> dict[str, Any]:
         event = dict(data, occurred_at=data.get("occurred_at") or _iso(_now()),
                      ingested_at=_iso(_now()), synthetic=False)
@@ -317,6 +335,9 @@ class GrowthOperations:
             delivery = _require(tx, "deliveries", delivery_id)
             if delivery["synthetic"] or delivery["status"] != "queued":
                 raise GrowthConflict("only real queued deliveries can be submitted")
+            journey = _require(tx, "journeys", delivery["journey_id"])
+            if not journey["active"]:
+                raise GrowthConflict("journey is stopped")
             if delivery.get("dispatch_state") is not None:
                 raise GrowthConflict("delivery already reserved for submission")
             customer = _require(tx, "customers", delivery["customer_id"])
