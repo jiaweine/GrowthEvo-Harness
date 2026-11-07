@@ -9,6 +9,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from growthevo.agent_os.journal import principal_scope
 
+from .growth_channels import ChannelConfigurationError, ChannelWebhook
 from .growth_ops import GrowthOperations
 from .growth_schemas import (
     CreativeInput, CustomerInput, DeliveryReceiptInput, EventInput,
@@ -128,6 +129,29 @@ def growth_router(store: GrowthStore | None, *, production: bool,
     @router.get("/deliveries")
     def deliveries(request: Request) -> list[dict[str, Any]]:
         return context(request).list("deliveries")
+
+    @router.post("/deliveries/{delivery_id}/submit")
+    def submit(delivery_id: str, request: Request,
+               channel_submit_token: str | None = Header(
+                   default=None, alias="X-Channel-Submit-Token",
+               )) -> dict[str, Any]:
+        if not production:
+            raise HTTPException(status_code=409, detail="real channel submission requires production mode")
+        expected = os.getenv("GROWTHEVO_CHANNEL_SUBMIT_SECRET", "")
+        if not expected or not channel_submit_token or not compare_digest(expected, channel_submit_token):
+            raise HTTPException(status_code=403, detail="separate channel submission authority required")
+        try:
+            webhook = ChannelWebhook.from_environment()
+        except ChannelConfigurationError:
+            raise HTTPException(status_code=503, detail="trusted channel adapter is unavailable")
+        operations = context(request)
+        command = operations.reserve_external_submission(delivery_id)
+        accepted = webhook.submit(command)
+        return operations.finish_external_submission(
+            delivery_id, accepted=accepted,
+            reason="gateway accepted; awaiting independent receipt" if accepted
+                   else "gateway response uncertain; reconcile before retry",
+        )
 
     @router.post("/deliveries/{delivery_id}/receipt")
     def receipt(delivery_id: str, value: DeliveryReceiptInput, request: Request,
