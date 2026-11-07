@@ -93,39 +93,33 @@ class GrowthService:
         experiment = self.store.get(self.scope, "experiment", experiment_id)
         if experiment is None:
             raise ValueError("experiment not found")
-        if not any(e["subject_id"] == subject_id for e in
-                   self.store.facts(self.scope, "exposure", related_id=experiment_id, limit=1000)):
+        if not self.store.has_exposure(self.scope, experiment_id, subject_id):
             raise ValueError("metric requires a recorded exposure")
         if value not in (0.0, 1.0):
             raise ValueError("experiment conversion metric must be binary")
-        payload = {"id": metric_id, "experiment_id": experiment_id,
-                   "subject_id": subject_id, "value": int(value),
-                   "metric": experiment["metric"]}
-        return self.store.append_fact(self.scope, "metric", metric_id, subject_id, experiment_id, payload)
+        payload = {
+            "id": metric_id, "experiment_id": experiment_id,
+            "subject_id": subject_id, "value": int(value),
+            "metric": experiment["metric"],
+        }
+        return self.store.record_metric(
+            self.scope, experiment_id, subject_id, metric_id, payload,
+        )
 
     def report(self, experiment_id: str) -> dict[str, Any]:
         experiment = self.store.get(self.scope, "experiment", experiment_id)
         if experiment is None:
             raise ValueError("experiment not found")
-        assignments = self.store.assignments(self.scope, experiment_id)
-        exposures = self.store.facts(self.scope, "exposure", related_id=experiment_id, limit=1000)
-        metrics = self.store.facts(self.scope, "metric", related_id=experiment_id, limit=1000)
-        # Count unique exposed units, not render events. A metric is a binary
-        # observation, and multiple observation IDs must not double-count a unit.
-        exposed = {e["subject_id"] for e in exposures}
-        converted = {m["subject_id"] for m in metrics if m["value"] == 1}
+        counted = self.store.experiment_counts(self.scope, experiment_id)
         by_variant: dict[str, dict[str, Any]] = {}
         for variant in experiment["variants"]:
-            units = {a["subject_id"] for a in assignments if a["variant"] == variant["id"]}
-            eligible = units & exposed
-            wins = len(eligible & converted)
-            n = len(eligible)
-            rate = wins / n if n else None
+            assigned, exposed, converted = counted.get(variant["id"], (0, 0, 0))
             by_variant[variant["id"]] = {
-                "assigned": len(units), "exposed": n, "converted": wins,
-                "conversion_rate": rate, "sufficient_data": n >= 30,
+                "assigned": assigned, "exposed": exposed, "converted": converted,
+                "conversion_rate": converted / exposed if exposed else None,
+                "sufficient_data": exposed >= 30,
             }
-        total_assigned = len(assignments)
+        total_assigned = sum(v["assigned"] for v in by_variant.values())
         srm = 0.0
         for variant in experiment["variants"]:
             expected = total_assigned * variant["weight"] / 10000
@@ -144,7 +138,7 @@ class GrowthService:
             "causal_claim": "insufficient_data" if any(
                 not v["sufficient_data"] for v in by_variant.values()
             ) else "requires_randomization_and_statistical_review",
-            "truncated": len(exposures) >= 1000 or len(metrics) >= 1000,
+            "truncated": False,
         }
 
     def decide(self, request: dict[str, Any]) -> dict[str, Any]:
