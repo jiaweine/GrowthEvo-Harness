@@ -24,6 +24,17 @@ jobs:
           npm ci --no-audit --no-fund
           ./node_modules/.bin/expo install --check
           npm run typecheck
+      - name: Emit verified lockfile for exact branch update
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.dumps(Path('apps/mobile/package-lock.json').read_text(), ensure_ascii=True)
+          print('LOCKFILE_START')
+          for offset in range(0, len(payload), 10000):
+              print('LOCK_CHUNK:' + payload[offset:offset+10000])
+          print('LOCKFILE_END')
+          PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: refreshed-mobile-npm-lock
