@@ -52,7 +52,13 @@ class ContextualPersonalizer:
             action: {"matured": 0, "converted": 0, "posterior_mean": None}
             for action in actions
         }
-        for row in records:
+        # A customer may see multiple messages. Do not count one eventual
+        # purchase repeatedly as independent evidence across several arms.
+        seen_customers: set[str] = set()
+        for row in sorted(records, key=lambda item: item["occurred_at"]):
+            if row["customer_id"] in seen_customers:
+                continue
+            seen_customers.add(row["customer_id"])
             record = stats[row["action_id"]]
             record["matured"] += 1
             started = datetime.fromisoformat(row["occurred_at"])
@@ -75,6 +81,8 @@ class ContextualPersonalizer:
             fingerprint = sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
             previous = tx.get("personalizations", key)
             if previous is not None:
+                if not customer["consent"]:
+                    raise GrowthConflict("customer consent withdrawn since decision")
                 if previous["request_fingerprint"] != fingerprint:
                     raise GrowthConflict("personalization idempotency key reused")
                 return previous
@@ -153,6 +161,8 @@ class ContextualPersonalizer:
                 raise GrowthMissing("personalization not found")
             if surface != decision["placement"]:
                 raise GrowthConflict("exposure surface must match the decision")
+            if datetime.now(UTC) - datetime.fromisoformat(decision["created_at"]) > timedelta(minutes=15):
+                raise GrowthConflict("personalization decision expired; request a fresh decision")
             key = request_id
             existing = tx.get("personalization_exposures", key)
             if existing is not None:
