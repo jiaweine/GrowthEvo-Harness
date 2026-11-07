@@ -119,7 +119,3 @@ async function growthOperationsPage(){
       })
     }));
 }
-render=function growthOperationsRoute(){
-  if(state.route==='growthOps')return growthOperationsPage();
-  return previousGrowthRouteRender();
-};
