@@ -53,7 +53,6 @@ def test_db_demo_fixtures_are_explicit_and_coherent():
     fake = _FakeStore()
     fake.seed()
     service = GrowthOperations(fake, "test")
-    overview = service.overview if False else None  # fake has no actual PostgreSQL
     profile = service.profile("demo_customer_01")
     assert profile["customer"]["synthetic"] is True
     assert "demo_new_customers" in profile["segments"]
@@ -113,6 +112,30 @@ def test_consent_suppresses_journey_and_duplicate_event_conflicts():
     assert service.ingest_event(event)["new_enrollments"] == 0
     with pytest.raises(GrowthConflict, match="event identity"):
         service.ingest_event(event | {"name": "purchase"})
+
+
+
+def test_external_dispatch_is_scoped_consent_gated_and_cannot_replay():
+    fake = _FakeStore()
+    fake.seed()
+    service = GrowthOperations(fake, "test")
+    # Synthetic delivery cannot be promoted into a real channel submission.
+    delivery = service.process_due()["processed"][0]["delivery_id"]
+    with pytest.raises(GrowthConflict, match="only real queued"):
+        service.reserve_external_submission(delivery)
+
+
+def test_channel_webhook_rejects_untrusted_or_insecure_hosts():
+    from growthevo.web.growth_channels import ChannelWebhook, ChannelConfigurationError
+    with pytest.raises(ChannelConfigurationError):
+        ChannelWebhook("http://api.example.com/callback", "x" * 20, {"api.example.com"})
+    with pytest.raises(ChannelConfigurationError):
+        ChannelWebhook("https://attacker.example.com/callback", "x" * 20, {"api.example.com"})
+    with pytest.raises(ChannelConfigurationError):
+        ChannelWebhook("https://api.example.com/callback", "short", {"api.example.com"})
+    client = ChannelWebhook("https://api.example.com/callback", "x" * 20, {"api.example.com"})
+    assert client.url.startswith("https://")
+
 
 
 def test_postgres_demo_survives_store_recreation_when_configured():
