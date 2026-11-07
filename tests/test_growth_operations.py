@@ -190,7 +190,7 @@ def test_channel_adapter_honors_idempotency_headers_and_network_fail_closed(monk
     assert timeout == 5
 
     class Unavailable:
-        def open(self, _request, _timeout):
+        def open(self, _request, timeout):
             raise URLError("unreachable")
 
     monkeypatch.setattr(growth_channels, "build_opener", lambda *_args: Unavailable())
