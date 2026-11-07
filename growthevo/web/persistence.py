@@ -92,8 +92,11 @@ _AGENT_EXECUTION_STATEMENTS = (
     """,
 )
 
+from .growth_store import GROWTH_MIGRATION
+
 _MIGRATIONS = (("durable_core", _DURABLE_CORE_STATEMENTS),
-               ("agent_execution", _AGENT_EXECUTION_STATEMENTS))
+               ("agent_execution", _AGENT_EXECUTION_STATEMENTS),
+               ("growth_operations", GROWTH_MIGRATION))
 
 
 

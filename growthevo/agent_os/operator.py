@@ -25,7 +25,7 @@ from uuid import uuid4
 ROUTES = frozenset({
     "dashboard", "opportunities", "campaigns", "campaignStudio",
     "experiments", "approvals", "evolution", "harness", "realtime",
-    "evidence", "execution", "data", "integrations", "settings",
+    "evidence", "execution", "data", "growthOps", "integrations", "settings",
 })
 SECTIONS = frozenset({
     "dashboard", "opportunities", "campaigns", "experiments", "approvals",

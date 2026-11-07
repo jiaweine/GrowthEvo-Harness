@@ -81,7 +81,18 @@ def validate_dict_status(expected: str) -> Validator:
 
 
 def validate_dashboard(value: JsonValue | str) -> str | None:
-    return None if isinstance(value, dict) and isinstance(value.get("kpis"), list) and len(value["kpis"]) >= 4 else "dashboard KPI contract changed"
+    if not isinstance(value, dict) or not isinstance(value.get("kpis"), list):
+        return "dashboard KPI contract changed"
+    if value.get("data_origin") in {"observed", "synthetic_and_observed"}:
+        # Connected workspaces must not manufacture incremental revenue metrics
+        # until the actual CATE/experiment serving path supplies evidence.
+        return None if value["kpis"] == [] else "unverified database KPI published"
+    return None if len(value["kpis"]) >= 4 else "reference dashboard KPI contract changed"
+
+
+def validate_opportunities(value: JsonValue | str) -> str | None:
+    # No validated opportunity estimate is a legitimate database runtime state.
+    return None if isinstance(value, list) else "opportunities is not a list"
 
 
 def validate_list(value: JsonValue | str) -> str | None:
@@ -188,7 +199,7 @@ READ_CASES = [
     RequestCase("health", "GET", "/api/health", validate_dict_status("ok"), empty_payload),
     RequestCase("ready", "GET", "/api/ready", validate_dict_status("ready"), empty_payload),
     RequestCase("dashboard", "GET", "/api/dashboard", validate_dashboard, empty_payload),
-    RequestCase("opportunities", "GET", "/api/opportunities", validate_list, empty_payload),
+    RequestCase("opportunities", "GET", "/api/opportunities", validate_opportunities, empty_payload),
     RequestCase("campaigns", "GET", "/api/campaigns", validate_list, empty_payload),
     RequestCase("experiments", "GET", "/api/experiments", validate_list, empty_payload),
     RequestCase("approvals", "GET", "/api/approvals", validate_list, empty_payload),

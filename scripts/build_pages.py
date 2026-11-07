@@ -139,6 +139,7 @@ def build(output: Path, source: Path) -> None:
         "dashboard-page.js",
         "pages.js",
         "live-pages.js",
+        "growth-operations.js",
         "app.js",
         "agent-workspace.js",
         "icon.svg",
