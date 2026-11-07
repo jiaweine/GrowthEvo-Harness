@@ -380,3 +380,80 @@ def test_srm_monitor_and_wilson_bounds():
     assert sparse["p_value"] is None
     assert wilson_95(0, 0) is None
     assert 0 <= wilson_95(3, 10)[0] <= .3 <= wilson_95(3, 10)[1] <= 1
+
+
+
+def test_offline_ope_reuses_logged_probabilities_without_promoting_policy():
+    from datetime import timedelta
+    from growthevo.web.growth_personalization import ContextualPersonalizer
+
+    fake = _FakeStore()
+    observed_at = datetime.now(timezone.utc) - timedelta(days=12)
+    for index in range(80):
+        control = index < 40
+        customer_id = f"ope_customer_{index:02d}"
+        request_id = f"ope_request_{index:02d}"
+        decision_id = f"ope_decision_{index:02d}"
+        action = "NO_TREATMENT" if control else "free_shipping"
+        fake.records[("personalizations", request_id)] = {
+            "request_id": request_id, "decision_id": decision_id,
+            "customer_id": customer_id, "action_id": action,
+            "action_distribution": {"NO_TREATMENT": 0.5, "free_shipping": 0.5},
+            "propensity": 0.5, "synthetic": True,
+        }
+        fake.records[("personalization_exposures", request_id)] = {
+            "request_id": request_id, "decision_id": decision_id,
+            "customer_id": customer_id, "action_id": action,
+            "occurred_at": observed_at.isoformat(), "synthetic": True,
+        }
+        converts = (index < 12) or (40 <= index < 56)
+        if converts:
+            fake.records[("events", "ope_purchase_" + request_id)] = {
+                "event_id": "ope_purchase_" + request_id,
+                "name": "purchase", "customer_id": customer_id,
+                "occurred_at": (observed_at + timedelta(days=1)).isoformat(),
+                "synthetic": True,
+            }
+
+    personalizer = ContextualPersonalizer(fake, "test")
+    assert personalizer.offline_evidence("NO_TREATMENT")["status"] == "insufficient_evidence"
+    control = personalizer.offline_evidence("NO_TREATMENT", synthetic=True)
+    assert control["status"] == "diagnostic_only"
+    assert control["matured_units"] == 80
+    assert control["observed_target_units"] == 40
+    assert control["estimate"]["ips_conversion_rate"] == pytest.approx(0.3)
+    assert control["estimate"]["effective_sample_size"] > 0
+    assert control["promotion_allowed"] is False
+    assert control["causal_claim"] is False
+    treatment = personalizer.offline_evidence("free_shipping", synthetic=True)
+    assert treatment["estimate"]["ips_conversion_rate"] == pytest.approx(0.4)
+
+    # One unsupported target decision invalidates evaluation of the entire
+    # population rather than quietly selecting favorable supported records.
+    changed = fake.records[("personalizations", "ope_request_60")]
+    changed["action_distribution"] = {"NO_TREATMENT": 0.0, "free_shipping": 1.0}
+    changed["propensity"] = 1.0
+    unsupported = personalizer.offline_evidence("NO_TREATMENT", synthetic=True)
+    assert unsupported["status"] == "unsupported_target_policy"
+    assert unsupported["estimate"] is None
+
+
+def test_offline_ope_fails_on_tampered_exposure_binding():
+    from datetime import timedelta
+    from growthevo.web.growth_personalization import ContextualPersonalizer
+
+    fake = _FakeStore()
+    fake.records[("personalizations", "audit_req")] = {
+        "request_id": "audit_req", "decision_id": "decision_one",
+        "customer_id": "customer_one", "action_id": "NO_TREATMENT",
+        "action_distribution": {"NO_TREATMENT": 1.0},
+        "propensity": 1.0, "synthetic": False,
+    }
+    fake.records[("personalization_exposures", "audit_req")] = {
+        "request_id": "audit_req", "decision_id": "different_decision",
+        "customer_id": "customer_one", "action_id": "NO_TREATMENT",
+        "occurred_at": (datetime.now(timezone.utc) - timedelta(days=10)).isoformat(),
+        "synthetic": False,
+    }
+    with pytest.raises(GrowthConflict, match="evidence disagree"):
+        ContextualPersonalizer(fake, "test").offline_evidence("NO_TREATMENT")
