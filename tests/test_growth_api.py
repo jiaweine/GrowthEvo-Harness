@@ -111,3 +111,22 @@ def test_growth_api_writes_real_postgres_and_separates_external_sends(monkeypatc
         assert report.status_code == 200
         assert report.json()["causal_claim"] is False
         assert sum(arm["converted_customers"] for arm in report.json()["results"]) == 1
+        personalized = client.post("/api/growth/personalization/decide", json={
+            "customer_id": customer, "request_id": prefix + "_decision",
+            "placement": "checkout", "candidate_action_ids": [
+                "NO_TREATMENT", "free_shipping", "coupon_10",
+            ], "consent_state": True, "frequency_remaining": 1,
+            "budget_remaining": 50.0,
+        })
+        assert personalized.status_code == 201, personalized.text
+        decision = personalized.json()
+        assert decision["causal_claim"] is False
+        assert decision["propensity"] == decision["action_distribution"][decision["action_id"]]
+        assert sum(decision["action_distribution"].values()) == pytest.approx(1)
+        impression = client.post(
+            f"/api/growth/personalization/{prefix}_decision/exposure",
+            json={"surface": "checkout"},
+        )
+        assert impression.status_code == 201, impression.text
+        assert client.get("/api/growth/personalization/metrics").json()["confirmed_exposures"] >= 1
+
