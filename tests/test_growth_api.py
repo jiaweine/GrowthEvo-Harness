@@ -78,7 +78,7 @@ def test_growth_api_writes_real_postgres_and_separates_external_sends(monkeypatc
         ingested = client.post("/api/growth/events", json=event)
         assert ingested.status_code == 201, ingested.text
         assert ingested.json()["new_enrollments"] == 1
-        assert client.post("/api/growth/events", json=event).status_code == 409  # missing original occurred_at
+        assert client.post("/api/growth/events", json=event).json()["deduplicated"] is True
 
         processed = client.post("/api/growth/journeys/process", json={"limit": 50})
         assert processed.status_code == 200, processed.text
