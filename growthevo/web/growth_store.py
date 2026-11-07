@@ -112,9 +112,7 @@ class GrowthStore:
     def __init__(self, parent: Any) -> None:
         self.pool = parent._pool
         self.jsonb = parent._jsonb
-        with self.pool.connection() as conn:
-            for statement in DDL:
-                conn.execute(statement)
+        # The parent PostgresStore applies DDL under a schema advisory lock.
 
     def get(self, scope: str, kind: str, object_id: str) -> dict[str, Any] | None:
         if kind not in KINDS:
