@@ -78,6 +78,7 @@ const COMMAND_ITEMS=[
   ['harness','查看执行轨迹','步骤 · 工具 · 安全边界'],
   ['evolution','打开自进化中心','回放 → 验证 → 审批'],
   ['integrations','查看集成与渠道','数据 · 执行 · 内容接入'],
+  ['growthOps','数据驱动增长运营','画像 · 旅程 · 实验反馈'],
   ['settings','打开工作区设置','工作区 · 策略 · 部署'],
 ];
 const DATE_PRESETS=['最近 7 天','最近 30 天','最近 90 天'];
@@ -251,7 +252,7 @@ async function confirmFirstPartyUiControls(result){
     open_channel_filter:'打开渠道筛选',focus_campaign_name:'定位活动名称'};
   const routes=new Set(['dashboard','opportunities','campaigns','campaignStudio',
     'experiments','approvals','evolution','harness','realtime','evidence','execution',
-    'data','integrations','settings']);
+    'data','growthOps','integrations','settings']);
   const receipts=[];
   const messages=[];
   for(const action of actions){
