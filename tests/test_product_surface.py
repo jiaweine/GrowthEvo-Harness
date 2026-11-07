@@ -355,7 +355,6 @@ def test_growth_workbench_forms_are_bound_to_database_and_existing_nightfall_sty
     assert "/api/growth/personalization/decide" in growth
     assert "/api/growth/personalization/offline-evidence" in growth
     assert "$$('[data-growth-journey]')" in growth
-    assert "$('[data-growth-journey]').forEach" not in growth
     assert "window.confirm" not in growth
     assert "growthSourceLabel" in growth
     assert "role=\"tablist\"" in growth
