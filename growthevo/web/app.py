@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from functools import partial
@@ -302,9 +303,21 @@ def create_app() -> Any:
 
     @asynccontextmanager
     async def lifespan(_: Any):
+        worker_task = None
+        if (growth_store is not None and
+                os.getenv("GROWTHEVO_JOURNEY_WORKER_ENABLED", "").strip().lower()
+                in {"1", "true", "yes"}):
+            from .growth_worker import run_growth_worker
+            worker_task = asyncio.create_task(run_growth_worker(growth_store))
         try:
             yield
         finally:
+            if worker_task is not None:
+                worker_task.cancel()
+                try:
+                    await worker_task
+                except asyncio.CancelledError:
+                    pass
             try:
                 await close_provider_pool(llm_pool)
             finally:
@@ -535,7 +548,7 @@ def create_app() -> Any:
             allow_origins=list(settings.cors_origins),
             allow_credentials=False,
             allow_methods=["GET", "POST", "OPTIONS"],
-            allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Channel-Receipt-Token"],
+            allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Channel-Receipt-Token", "X-Channel-Submit-Token"],
         )
 
 
