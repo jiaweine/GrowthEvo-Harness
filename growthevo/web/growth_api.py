@@ -12,7 +12,7 @@ from growthevo.agent_os.journal import principal_scope
 from .growth_channels import ChannelConfigurationError, ChannelWebhook
 from .growth_ops import GrowthOperations
 from .growth_schemas import (
-    CreativeInput, CustomerInput, DeliveryReceiptInput, EventInput,
+    CreativeInput, CustomerInput, CustomerUpdate, DeliveryReceiptInput, EventInput,
     ExperimentInput, ExposureInput, JourneyInput, OfferInput, ProcessDueInput,
     SegmentInput,
 )
@@ -48,6 +48,11 @@ def growth_router(store: GrowthStore | None, *, production: bool,
     @router.post("/customers", status_code=201)
     def create_customer(value: CustomerInput, request: Request) -> dict[str, Any]:
         return context(request).create("customers", value.customer_id, value.model_dump(mode="json"))
+
+    @router.post("/customers/{customer_id}/update")
+    def update_customer(customer_id: str, value: CustomerUpdate,
+                        request: Request) -> dict[str, Any]:
+        return context(request).update_customer(customer_id, value.model_dump(mode="json"))
 
     @router.get("/customers/{customer_id}")
     def profile(customer_id: str, request: Request) -> dict[str, Any]:
