@@ -41,8 +41,11 @@ experiments=async function liveExperiments(){
  if(useDemo)return fixtureExperimentsPage();
  const rows=await api('/api/experiments');
  const items=Array.isArray(rows)?rows:[];
- const reports=await Promise.all(items.slice(0,8).map(item=>
-   api('/api/growth/experiments/'+encodeURIComponent(item.id)+'/report')));
+ const hasGrowthDatabase=['observed','synthetic_and_observed'].includes(state.dashboard?.data_origin);
+ const reports=hasGrowthDatabase
+   ?await Promise.all(items.slice(0,8).map(item=>
+       api('/api/growth/experiments/'+encodeURIComponent(item.id)+'/report')))
+   :[];
  $('#view').innerHTML=`${head('实验中心',items.some(x=>x.synthetic)?'数据库中的模拟实验，仅用于验证分组与运营流程。':'查看已登记实验；观测差异不等于因果效果。','<button type="button" class="secondary" data-go="growthOps">查看数据库曝光与结果</button>')}${sectionNav(STRATEGY_NAV,'experiments')}${items.length?`<div class="experiment-grid"><div class="card surface-card"><div class="surface-title"><div><h2>实验列表</h2><p>当前 API 返回的实验状态。</p></div><span class="soft-badge green">实时数据</span></div><div class="experiment-list">${items.map(x=>`<div class="experiment-card"><div class="experiment-head"><div><strong>${esc(liveText(x.name))}</strong><div class="evo-source">${esc(liveText(x.id))} · ${esc(liveText(x.assignment))}</div></div>${liveBadge(x.status)}</div><div class="experiment-meta"><div><span>主要指标</span><strong>${esc(liveText(x.primary_metric))}</strong></div><div><span>分配比例</span><strong>${esc(liveText(x.allocation))}</strong></div><div><span>成熟度</span><strong>${esc(liveText(x.maturity))}</strong></div><div><span>实验分组</span><strong>${esc(Array.isArray(x.variants)?x.variants.map(value=>liveText(value)).join(' / '):liveText(x.variants))}</strong></div></div><div class="result-box"><div><span>估计结果</span><strong class="value-positive">${esc(liveText(x.estimate))}</strong></div><div><span>不确定性</span><strong>${esc(liveText(x.ci))}</strong></div><div><span>保护指标</span><strong>${esc(Array.isArray(x.guardrails)?x.guardrails.map(value=>liveText(value)).join('、'):liveText(x.guardrails))}</strong></div></div><p style="font-size:8px;color:#7d8899;line-height:1.5">${esc(liveText(x.hypothesis))}</p></div>`).join('')}</div></div></div>`:emptyState('暂无实验','当前工作区没有实验记录。')}`;
  if(reports.length){
    const summary=reports.map((report,index)=>{
