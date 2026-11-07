@@ -346,14 +346,14 @@ def test_growth_workbench_forms_are_bound_to_database_and_existing_nightfall_sty
         "journey", "creative", "offer",
     ):
         assert f"named==='{operation}'" in growth
-    for endpoint in (
-        "/api/growth/overview", "/api/growth/customers",
-        "/api/growth/segments", "/api/growth/events", "/api/growth/journeys",
-        "/api/growth/experiments", "/api/growth/deliveries",
-        "/api/growth/personalization/decide",
-        "/api/growth/personalization/offline-evidence",
+    for collection in (
+        "overview", "customers", "segments", "events", "journeys",
+        "experiments", "deliveries", "personalization/metrics",
     ):
-        assert endpoint in growth
+        assert f"'{collection}'" in growth
+    assert "api('/api/growth/'+path)" in growth
+    assert "/api/growth/personalization/decide" in growth
+    assert "/api/growth/personalization/offline-evidence" in growth
     assert "$$('[data-growth-journey]')" in growth
     assert "$('[data-growth-journey]').forEach" not in growth
     assert "window.confirm" not in growth
