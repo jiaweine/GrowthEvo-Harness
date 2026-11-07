@@ -54,8 +54,12 @@ async function growthOperationsPage(){
     +growthRows(personalization.recent_decisions,[['request_id','决策请求'],['customer_id','客户'],['action_id','动作'],['propensity','实际分配概率',x=>Number(x.propensity).toFixed(4)],['exposure_confirmed','已曝光',x=>x.exposure_confirmed?'是':'否']])+'</div>'
     +'<div class="card surface-card span-8 table-scroll"><div class="surface-title"><div><h2>实验与曝光反馈</h2><p>分组稳定、曝光需显式记录；转化率是观测结果，并非因果提升证明。</p></div></div>'
     +reports.map(report=>'<h3>'+esc(experiments.find(x=>x.experiment_id===report.experiment_id)?.name||report.experiment_id)+'</h3>'
-      +growthRows(report.results,[['variant','分组'],['exposed_customers','曝光人数'],['converted_customers','转化人数'],
-        ['conversion_rate','转化率',x=>x.conversion_rate===null?'—':(100*x.conversion_rate).toFixed(1)+'%'],
+      +'<p>SRM 样本比例检查：'+esc(report.srm?.status==='warning'?'异常，暂停解释结论':report.srm?.status==='pass'?'未检测到异常':'曝光样本不足')
+      +' · 已确认曝光 '+esc(report.srm?.exposed_total??0)+'。仅在观察窗口成熟后显示比较。</p>'
+      +growthRows(report.results,[['variant','分组'],['exposed_customers','曝光人数'],
+        ['pending_customers','观察中'],['matured_customers','已成熟'],
+        ['matured_conversion_rate','成熟转化率',x=>x.matured_conversion_rate===null?'—':(100*x.matured_conversion_rate).toFixed(1)+'%'],
+        ['matured_wilson_95','成熟转化率95%区间',x=>x.matured_wilson_95?x.matured_wilson_95.map(v=>(v*100).toFixed(1)+'%').join(' ~ '):'—'],
         ['observed_difference_pp','相对对照观测差（百分点）']])).join('')+'</div>'
     +'<div class="card surface-card span-4"><div class="surface-title"><div><h2>素材与优惠</h2></div></div>'
     +creatives.map(c=>'<div class="evidence-row"><span>'+esc(c.title)+'</span><strong>'+esc(c.channel)+'</strong></div>').join('')
