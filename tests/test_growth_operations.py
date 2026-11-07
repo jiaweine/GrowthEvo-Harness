@@ -326,6 +326,36 @@ def test_growth_postgres_scopes_isolate_identical_ids_and_replicas():
         first.close()
 
 
+def test_growth_postgres_concurrent_replicas_dispatch_at_most_once():
+    database_url = os.getenv("GROWTHEVO_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("requires PostgreSQL in persistence CI")
+    from concurrent.futures import ThreadPoolExecutor
+    from growthevo.web.persistence import PostgresStore
+
+    scope = "growth-concurrent-" + uuid4().hex
+    first = PostgresStore(database_url, seed_reference=False)
+    second = PostgresStore(database_url, seed_reference=False)
+    try:
+        store_first = GrowthStore(first)
+        store_first.ensure_demo(scope)
+        ops_a = GrowthOperations(store_first, scope)
+        ops_b = GrowthOperations(GrowthStore(second), scope)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = list(executor.map(
+                lambda service: service.process_due(limit=20),
+                (ops_a, ops_b),
+            ))
+        delivery_id = "del_job_demo_welcome_flow_demo_signup_01_0"
+        assert len([row for row in ops_a.list("deliveries")
+                    if row["delivery_id"] == delivery_id]) == 1
+        assert sum(result["count"] for result in outcomes) == 1
+        assert ops_a.list("deliveries") == ops_b.list("deliveries")
+    finally:
+        second.close()
+        first.close()
+
+
 def test_contextual_personalization_uses_stable_logged_propensities():
     from growthevo.web.growth_personalization import ContextualPersonalizer, CONTROL_FLOOR
 
