@@ -8,6 +8,7 @@ const growthState = {
   report:null,evidence:null,decision:null,selectedExperiment:null
 };
 let growthSnapshot=null;
+let growthFetchEpoch=0;
 
 function growthId(prefix){
   return prefix+'_'+Date.now()+'_'+Math.random().toString(16).slice(2,10);
@@ -458,9 +459,11 @@ async function growthOperationsPage(){
       +'<p>本页面不模拟数据库写入，也不展示虚构转化或投递成果。</p></div>';
     return;
   }
+  const epoch=++growthFetchEpoch;
   const endpoints=['overview','customers','segments','events','experiments','journeys',
     'journeys/jobs','deliveries','offers','creatives','personalization/metrics'];
   const payloads=await Promise.all(endpoints.map(path=>api('/api/growth/'+path)));
+  if(epoch!==growthFetchEpoch||state.route!=='growthOps')return;
   growthSnapshot=Object.fromEntries(endpoints.map((key,index)=>[
     key==='journeys/jobs'?'jobs':key==='personalization/metrics'?'personalization':key,payloads[index]
   ]));
