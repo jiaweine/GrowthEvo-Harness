@@ -346,3 +346,27 @@ body.sidebar-collapsed .brand-name:after{color:#e3fcfa}
 .evo-source,.eval-cell span,.studio-step span,.field label,.metric-chip span{font-size:11px;line-height:1.6}
 .eval-cell strong{font-size:14px;line-height:1.5}
 .evo-head strong,.studio-step strong{font-size:13px}
+
+
+/* Growth operations reuses Nightfall surfaces, not a separate component theme. */
+#growth-workbench .surface-card{min-width:0;overflow-wrap:anywhere}
+#growth-workbench .stat-strip{grid-template-columns:repeat(auto-fit,minmax(135px,1fr))}
+#growth-workbench .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+#growth-workbench .field{min-width:0;margin-top:8px}
+#growth-workbench .field label{display:block;margin-bottom:6px;color:#a4b6cc;font-size:11px}
+#growth-workbench .field input:not([type="checkbox"]),
+#growth-workbench .field select{
+  display:block;width:100%;box-sizing:border-box;min-height:36px;
+  border:1px solid #344a61;border-radius:7px;background:#142236;color:#eaf3ff;
+  padding:8px 10px;font:inherit;font-size:12px;outline:none
+}
+#growth-workbench .field input:focus-visible,
+#growth-workbench .field select:focus-visible{border-color:#5ad6d3;box-shadow:0 0 0 2px rgba(90,214,211,.13)}
+#growth-workbench .field input[type="checkbox"]{accent-color:#5ad6d3}
+#growth-workbench [role="tablist"] button[aria-selected="true"]{font-weight:700}
+#growth-workbench [role="tabpanel"]{min-width:0}
+#growth-workbench .table-scroll{max-width:100%;overflow-x:auto}
+@media(max-width:760px){
+  #growth-workbench .form-grid{grid-template-columns:minmax(0,1fr)}
+  #growth-workbench .stat-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+}

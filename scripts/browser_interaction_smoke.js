@@ -139,7 +139,7 @@
     go('growthOps');
     await sleep(80);
     check(location.hash === '#growthOps', 'growth operations route did not navigate');
-    check(document.querySelector('#view').textContent.includes('此静态演示不模拟数据库读写'),
+    check(document.querySelector('#view').textContent.includes('本页面不模拟数据库写入'),
       'static growth workspace pretended to have PostgreSQL data');
     check(!document.querySelector('#growth-record-event'),
       'static growth workspace unexpectedly enabled database mutations');
