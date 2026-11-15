@@ -332,3 +332,52 @@ def test_optional_decision_engine_contract() -> None:
     first["action_id"] = "tampered"
     replay = engine.decide(request, idempotency_key="idem-1")
     assert replay["action_id"] != "tampered"
+
+
+
+def test_growth_workbench_forms_are_bound_to_database_and_existing_nightfall_style() -> None:
+    growth = (STATIC / "growth-operations.js").read_text(encoding="utf-8")
+    live = (STATIC / "live-pages.js").read_text(encoding="utf-8")
+    for panel in ("overview", "customers", "experiments", "journeys", "assets"):
+        assert f"['{panel}'" in growth
+    for operation in (
+        "customer", "consent", "segment", "event", "experiment",
+        "experiment-exposure", "personalization", "offline-evidence",
+        "journey", "creative", "offer",
+    ):
+        assert f"named==='{operation}'" in growth
+    for collection in (
+        "overview", "customers", "segments", "events", "journeys",
+        "experiments", "deliveries", "personalization/metrics",
+    ):
+        assert f"'{collection}'" in growth
+    assert "api('/api/growth/'+path)" in growth
+    assert "/api/growth/personalization/decide" in growth
+    assert "/api/growth/personalization/offline-evidence" in growth
+    assert "$$('[data-growth-journey]')" in growth
+    assert "window.confirm" not in growth
+    assert "growthSourceLabel" in growth
+    assert "role=\"tablist\"" in growth
+    assert "card surface-card" in growth
+    assert "growthFormNotice()" in growth
+    assert "return api(path,{method:'POST'" in growth
+    assert "/deliveries/'+encodeURIComponent(" not in growth
+    assert "数据库实验反馈" in live
+    assert "/api/growth/experiments/" in live
+
+
+def test_postgres_growth_workbench_has_real_chrome_smoke_and_pressure_gate() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "product-persistence.yml").read_text(encoding="utf-8")
+    smoke = (ROOT / "scripts" / "browser_growth_workbench_smoke.js").read_text(encoding="utf-8")
+    stress = (ROOT / "scripts" / "stress_growth_workbench.py").read_text(encoding="utf-8")
+    assert "browser_growth_workbench_smoke.js" in workflow
+    assert "GROWTH_WORKBENCH_SMOKE_PASS" in workflow
+    assert "stress_growth_workbench.py" in workflow
+    assert "growth-stress.json" in workflow
+    for operation in ("customer", "segment", "creative", "journey",
+                      "experiment", "experiment-exposure", "personalization",
+                      "offline-evidence", "event"):
+        assert f"submit('{operation}'" in smoke
+    assert "cross-replica" in stress or "replica-idempotent" in stress
+    assert "promotion_allowed" in stress
+    assert "status\"]!=\"queued\"" in stress
